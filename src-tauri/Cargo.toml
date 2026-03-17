@@ -100,8 +100,6 @@ home = "=0.5.9"
 base64ct = "=1.6.0"
 # crc 3.4.0 requires Rust 1.83; 3.2.1 is the last version supporting Rust 1.77.2.
 crc = "=3.2.1"
-# mac-notification-sys 0.6.12 uses edition 2024; 0.6.1 is the last edition-2021 release.
-mac-notification-sys = "=0.6.1"
 # byte-unit 5.2.0 requires Rust 1.82; 5.1.4 supports Rust 1.77.2.
 byte-unit = "=5.1.4"
 tauri-plugin-upload = "=2.2.2"
@@ -125,9 +123,13 @@ tauri-plugin-window-state = "=2.2.3"
 # pulling objc-foundation (which has an unconditional #[link(kind="framework")] that
 # fails to compile on Linux).
 plist = "=1.7.4"
+# mac-notification-sys 0.6.12 uses edition 2024; 0.6.1 is the last edition-2021 release.
+# Must be Apple-only: it depends on objc-foundation which has unconditional
+# #[link(kind="framework")] directives that fail to compile on Linux.
+mac-notification-sys = "=0.6.1"
 
 [target.'cfg(windows)'.dependencies]
-# windows-registry 0.6.x moved to windows-link 0.2.x / windows-result 0.4.x which
-# requires Rust 1.82. 0.5.0 stays on windows-link 0.1.x / windows-result 0.3.x (safe).
-# hyper-util pulls this in on Windows via its network-interface detection code.
-windows-registry = "=0.5.0"
+# windows-registry 0.5.x/0.6.x use windows-strings ^0.5 / windows-result ^0.4 which
+# require Rust 1.82. 0.4.0 uses windows-result ^0.3 + windows-strings ^0.3 (both safe).
+# hyper-util (>=0.3,<0.7) pulls this in on Windows; pin to last Rust-1.77.2-safe version.
+windows-registry = "=0.4.0"
