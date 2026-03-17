@@ -14,7 +14,6 @@
     "store:default",
     "shell:default",
     "process:default",
-    "notification:default",
     "os:default",
     "log:default",
     "http:default",
