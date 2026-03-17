@@ -27,10 +27,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@1.77.2
@@ -66,7 +64,7 @@ jobs:
           Expand .\Microsoft.WebView2.FixedVersionRuntime.88.0.705.81.x64.cab -F:* ./src-tauri
 
       - name: Install Frontend Dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - uses: tauri-apps/tauri-action@action-v0.6.2
         env:
