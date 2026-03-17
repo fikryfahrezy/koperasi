@@ -17,13 +17,11 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Install Frontend Dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Verify Rust Version
         shell: pwsh
@@ -53,7 +51,7 @@ jobs:
           Expand .\Microsoft.WebView2.FixedVersionRuntime.88.0.705.81.x64.cab -F:* ./src-tauri
 
       - name: Build Tauri App
-        run: pnpm tauri build
+        run: bun run tauri build
 
       - name: Upload Bundles
         uses: actions/upload-artifact@v6
