@@ -73,6 +73,12 @@ windows-core = "=0.61.2"
 windows-result = "=0.3.4"
 windows-strings = "=0.4.2"
 uds_windows = "=1.1.0"
+# hyper-util 0.1.14+ bumped windows-registry to ^0.5 (Rust 1.82); 0.1.17+ uses
+# >=0.3,<0.7 which resolves to 0.6.1 (also Rust 1.82). 0.1.13 uses ^0.4 which
+# sits in the same semver compat group as our windows-registry =0.4.0 pin,
+# so Cargo unifies both to 0.4.0 and windows-strings 0.5.x is never needed.
+# reqwest 0.12.28 requires hyper-util ^0.1.12, so 0.1.13 satisfies it.
+hyper-util = "=0.1.13"
 
 # --- Wasm: wit-bindgen is only needed for wasm32-wasip2 target via getrandom 0.3.x -> wasip2 -> wit-bindgen.
 # Pinning it as a direct dep would make cargo compile it for all targets including native, so do NOT pin it.
@@ -103,6 +109,10 @@ crc = "=3.2.1"
 # zip 4.3.0+ requires Rust 1.82.0; 4.2.0 (MSRV 1.75.0) is the last safe version.
 # tauri-plugin-updater requires zip ^4, so 4.2.0 satisfies it.
 zip = "=4.2.0"
+# deflate64 0.1.11 uses unbounded_shr (stable in Rust 1.87) and split_at_checked
+# (stable in Rust 1.80), both unavailable in Rust 1.77.2. 0.1.10 is clean.
+# zip 4.2.0 requires deflate64 ^0.1.9, so 0.1.10 satisfies it.
+deflate64 = "=0.1.10"
 # byte-unit 5.2.0 requires Rust 1.82; 5.1.4 supports Rust 1.77.2.
 byte-unit = "=5.1.4"
 tauri-plugin-upload = "=2.2.2"
