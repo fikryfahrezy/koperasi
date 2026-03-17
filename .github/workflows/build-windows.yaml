@@ -1,0 +1,63 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Rust 1.77.2
+        uses: dtolnay/rust-toolchain@1.77.2
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install Frontend Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify Rust Version
+        shell: pwsh
+        run: |
+          $version = rustc --version
+          if ($version -notmatch '^rustc 1\.77\.2(\s|$)') {
+            Write-Error "Expected Rust 1.77.2 but got: $version"
+            exit 1
+          }
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --locked
+
+
+      - name: Download WebView2 Fixed Runtime
+        run: gh release download webview2-runtimes --pattern "Microsoft.WebView2.FixedVersionRuntime.88.0.705.81.x64.cab"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract WebView2 Fixed Runtime
+        run: |
+          Expand .\Microsoft.WebView2.FixedVersionRuntime.88.0.705.81.x64.cab -F:* ./src-tauri
+
+      - name: Build Tauri App
+        run: pnpm tauri build
+
+      - name: Upload Bundles
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-bundles
+          path: |
+            src-tauri/target/release/bundle/**/*
