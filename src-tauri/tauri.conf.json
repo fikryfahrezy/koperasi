@@ -1,18 +1,18 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "tauri-app",
+  "productName": "koperasi",
   "version": "0.1.0",
-  "identifier": "org.xalei.tauriapp",
+  "identifier": "com.fikryfahrezy.koperasi",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "bun run build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
-        "title": "tauri-app",
+        "title": "Koperasi",
         "width": 800,
         "height": 600
       }

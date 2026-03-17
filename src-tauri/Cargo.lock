@@ -1859,6 +1859,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "koperasi"
+version = "0.1.0"
+dependencies = [
+ "async-lock",
+ "cargo-platform",
+ "cargo_metadata",
+ "derive_more 2.0.1",
+ "dlopen2_derive",
+ "embed-resource",
+ "iana-time-zone",
+ "idna_adapter",
+ "indexmap 2.11.4",
+ "litemap",
+ "plist",
+ "proc-macro-crate 3.4.0",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tauri-runtime-wry",
+ "tempfile",
+ "time",
+ "uds_windows",
+ "uuid",
+ "windows-core 0.61.2",
+ "windows-result",
+ "windows-strings",
+ "zbus",
+ "zbus_names",
+ "zerofrom",
+ "zvariant",
+ "zvariant_utils",
+]
+
+[[package]]
 name = "kuchikiki"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3559,43 +3596,6 @@ dependencies = [
  "webview2-com",
  "window-vibrancy",
  "windows",
-]
-
-[[package]]
-name = "tauri-app"
-version = "0.1.0"
-dependencies = [
- "async-lock",
- "cargo-platform",
- "cargo_metadata",
- "derive_more 2.0.1",
- "dlopen2_derive",
- "embed-resource",
- "iana-time-zone",
- "idna_adapter",
- "indexmap 2.11.4",
- "litemap",
- "plist",
- "proc-macro-crate 3.4.0",
- "serde",
- "serde_json",
- "serde_with",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tauri-runtime-wry",
- "tempfile",
- "time",
- "uds_windows",
- "uuid",
- "windows-core 0.61.2",
- "windows-result",
- "windows-strings",
- "zbus",
- "zbus_names",
- "zerofrom",
- "zvariant",
- "zvariant_utils",
 ]
 
 [[package]]
