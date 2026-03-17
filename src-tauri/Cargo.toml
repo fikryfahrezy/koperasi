@@ -1,0 +1,95 @@
+[package]
+name = "tauri-app"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "tauri_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+# tauri 2.7.0+ uses tao ^0.34 -> dlopen2 ^0.8 which uses edition 2024 (cargo 1.77.2 cannot parse it).
+# tauri 2.5.1 is the last version using tao ^0.33 -> dlopen2 ^0.7 (edition 2021, compatible).
+# (tauri 2.5.1 → tauri-runtime-wry ^2.6.0 → tao ^0.33)
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# tauri 2.7.0+ uses tao ^0.34 -> dlopen2 ^0.8 (edition 2024 = cargo 1.77.2 parse failure).
+# tauri 2.5.1 is the last safe version: tauri 2.5.1 -> tauri-runtime-wry ^2.6.0 -> tao ^0.33 -> dlopen2 ^0.7 (edition 2021).
+# tauri 2.5.1 declares tauri-runtime-wry = "2.6.0" (^2.6.0 = >=2.6.0, <3), so we must pin explicitly.
+tauri = { version = "=2.5.1", features = [] }
+# Force tauri-runtime-wry to stay at 2.6.0, which uses tao ^0.33 (safe); 2.7.0+ uses tao ^0.34 (unsafe).
+tauri-runtime-wry = "=2.6.0"
+# tauri-plugin-opener 2.5.x requires tauri >= 2.8.2; 2.3.1 requires tauri "2" broadly (any 2.x).
+# 2.3.1 uses zbus ^5 on Linux (compatible with our zbus = "=5.12.0" pin).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri-plugin-opener = "=2.3.1"
+
+# Pin transitive deps to versions compatible with Rust 1.77.2 (no edition 2024).
+# uuid >=1.21 and tempfile >=3.25 allow getrandom >=0.4 which uses edition 2024 (needs Rust 1.82+).
+uuid = "=1.20.0"
+tempfile = "=3.24.0"
+# time >=0.3.42 / time-macros >=0.2.23 require Rust 1.81+ (edition 2024).
+# time 0.3.41 pins time-macros=0.2.22 and time-core=0.1.4, all safe on Rust 1.77.2.
+time = "=0.3.41"
+
+# idna_adapter 1.2.1 switches from ICU4x 1.5.x to ICU4x 2.x (requires Rust 1.83).
+# 1.2.0 keeps using icu_normalizer ^1.4.3 + icu_properties ^1.4.2 (ICU4x 1.5.x, safe).
+# This eliminates ~15 ICU4x 2.x packages from the build (zerotrie, zerovec, icu_locale_core, etc.)
+idna_adapter = "=1.2.0"
+
+# --- Additional transitive pins required for Rust 1.77.2 ---
+# plist 1.8.0 requires Rust 1.81 (macOS-specific)
+plist = "=1.7.4"
+# serde_with 3.17.0 requires Rust 1.82
+serde_with = "=3.16.1"
+# derive_more 2.1.1 requires Rust 1.81; 2.x requires at least one feature when compiled as a direct dep
+derive_more = { version = "=2.0.1", features = ["full"] }
+# proc-macro-crate 3.5.0 requires Rust 1.82
+proc-macro-crate = "=3.4.0"
+# indexmap 2.13.0 requires Rust 1.82
+indexmap = "=2.11.4"
+# async-lock 3.4.2 requires Rust 1.85
+async-lock = "=3.4.1"
+# cargo_metadata 0.19.2 requires Rust 1.78 (used in build scripts)
+cargo_metadata = "=0.19.0"
+# cargo-platform 0.1.9 requires Rust 1.78 (used in build scripts)
+cargo-platform = "=0.1.8"
+
+# --- Linux (D-Bus): zbus 5.13+ requires Rust 1.85+; 5.12.0 supports tauri-plugin-opener ^5.9 ---
+zbus = "=5.12.0"
+zvariant = "=5.8.0"
+zbus_names = "=4.2.0"
+zvariant_utils = "=3.2.1"
+
+# --- Windows: windows-core 0.62+ / windows-result 0.4+ require Rust 1.82 ---
+windows-core = "=0.61.2"
+windows-result = "=0.3.4"
+windows-strings = "=0.4.2"
+uds_windows = "=1.1.0"
+
+# --- Wasm: wit-bindgen is only needed for wasm32-wasip2 target via getrandom 0.3.x -> wasip2 -> wit-bindgen.
+# Pinning it as a direct dep would make cargo compile it for all targets including native, so do NOT pin it.
+# The 0.51.x version (rust 1.87) will only be compiled if building for wasm32-wasip2, which we don't.
+
+# dlopen2 0.7.0 (used by tao 0.33) requires dlopen2_derive = "^0.4"; 0.4.2+ uses edition 2024.
+# 0.4.0 uses edition 2021 and is safe.
+dlopen2_derive = "=0.4.0"
+
+# ICU4x 1.5.x chain: litemap 0.7.5 / zerofrom 0.1.6 bumped rust-version to 1.81 in patch releases
+litemap = "=0.7.4"
+zerofrom = "=0.1.5"
+# iana-time-zone 0.1.62+ uses windows-core ">=0.56,<=0.62" which resolves to 0.62.2 (Rust 1.82).
+# 0.1.61 uses windows-core ">=0.50,<=0.52" (pre-1.82 era). chrono ^0.4 requires iana-time-zone ^0.1.45.
+iana-time-zone = "=0.1.61"
+# embed-resource 3.0.7 calls str::display() which is private in Rust < 1.79 (OsStr::display stabilized
+# as pub in Rust 1.79). 3.0.6 uses Path::display() on a &Path (stable since Rust 1.0).
+embed-resource = "=3.0.6"
