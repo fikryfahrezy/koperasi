@@ -100,6 +100,9 @@ home = "=0.5.9"
 base64ct = "=1.6.0"
 # crc 3.4.0 requires Rust 1.83; 3.2.1 is the last version supporting Rust 1.77.2.
 crc = "=3.2.1"
+# zip 4.3.0+ requires Rust 1.82.0; 4.2.0 (MSRV 1.75.0) is the last safe version.
+# tauri-plugin-updater requires zip ^4, so 4.2.0 satisfies it.
+zip = "=4.2.0"
 # byte-unit 5.2.0 requires Rust 1.82; 5.1.4 supports Rust 1.77.2.
 byte-unit = "=5.1.4"
 tauri-plugin-upload = "=2.2.2"
