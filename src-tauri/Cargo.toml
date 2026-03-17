@@ -18,7 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # tauri 2.7.0+ uses tao ^0.34 -> dlopen2 ^0.8 which uses edition 2024 (cargo 1.77.2 cannot parse it).
 # tauri 2.5.1 is the last version using tao ^0.33 -> dlopen2 ^0.7 (edition 2021, compatible).
 # (tauri 2.5.1 → tauri-runtime-wry ^2.6.0 → tao ^0.33)
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "=2.2.0", features = [] }
 
 [dependencies]
 # tauri 2.7.0+ uses tao ^0.34 -> dlopen2 ^0.8 (edition 2024 = cargo 1.77.2 parse failure).
@@ -29,8 +29,8 @@ tauri = { version = "=2.5.1", features = [] }
 tauri-runtime-wry = "=2.6.0"
 # tauri-plugin-opener 2.5.x requires tauri >= 2.8.2; 2.3.1 requires tauri "2" broadly (any 2.x).
 # 2.3.1 uses zbus ^5 on Linux (compatible with our zbus = "=5.12.0" pin).
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.149"
 tauri-plugin-opener = "=2.3.1"
 
 # Pin transitive deps to versions compatible with Rust 1.77.2 (no edition 2024).
@@ -93,3 +93,31 @@ iana-time-zone = "=0.1.61"
 # embed-resource 3.0.7 calls str::display() which is private in Rust < 1.79 (OsStr::display stabilized
 # as pub in Rust 1.79). 3.0.6 uses Path::display() on a &Path (stable since Rust 1.0).
 embed-resource = "=3.0.6"
+tauri-plugin-sql = { version = "=2.2.1", features = ["sqlite"] }
+tauri-plugin-fs = "=2.3.0"
+
+# home 0.5.12 switched to edition = "2024" (requires Cargo 1.85+); pin to last edition-2021 release.
+home = "=0.5.9"
+# base64ct 1.7+ requires Rust 1.81 (MSRV bump); 1.6.0 is the last version supporting Rust 1.77.2.
+base64ct = "=1.6.0"
+# crc 3.4.0 requires Rust 1.83; 3.2.1 is the last version supporting Rust 1.77.2.
+crc = "=3.2.1"
+# mac-notification-sys 0.6.12 uses edition 2024; 0.6.1 is the last edition-2021 release.
+mac-notification-sys = "=0.6.1"
+# byte-unit 5.2.0 requires Rust 1.82; 5.1.4 supports Rust 1.77.2.
+byte-unit = "=5.1.4"
+tauri-plugin-upload = "=2.2.2"
+tauri-plugin-store = "=2.2.1"
+tauri-plugin-shell = "=2.2.2"
+tauri-plugin-process = "=2.2.2"
+tauri-plugin-notification = "=2.2.3"
+tauri-plugin-os = "=2.2.2"
+tauri-plugin-log = "=2.5.1"
+tauri-plugin-http = "=2.4.4"
+tauri-plugin-dialog = "=2.2.2"
+tauri-plugin-persisted-scope = "=2.2.2"
+
+[target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
+tauri-plugin-single-instance = "=2.2.4"
+tauri-plugin-updater = "=2.8.1"
+tauri-plugin-window-state = "=2.2.3"
