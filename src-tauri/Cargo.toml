@@ -47,8 +47,6 @@ time = "=0.3.41"
 idna_adapter = "=1.2.0"
 
 # --- Additional transitive pins required for Rust 1.77.2 ---
-# plist 1.8.0 requires Rust 1.81 (macOS-specific)
-plist = "=1.7.4"
 # serde_with 3.17.0 requires Rust 1.82
 serde_with = "=3.16.1"
 # derive_more 2.1.1 requires Rust 1.81; 2.x requires at least one feature when compiled as a direct dep
@@ -121,3 +119,15 @@ tauri-plugin-persisted-scope = "=2.2.2"
 tauri-plugin-single-instance = "=2.2.4"
 tauri-plugin-updater = "=2.8.1"
 tauri-plugin-window-state = "=2.2.3"
+
+[target."cfg(any(target_os = \"macos\", target_os = \"ios\"))".dependencies]
+# plist 1.8.0 requires Rust 1.81 (macOS-specific); keep on Apple targets only to avoid
+# pulling objc-foundation (which has an unconditional #[link(kind="framework")] that
+# fails to compile on Linux).
+plist = "=1.7.4"
+
+[target.'cfg(windows)'.dependencies]
+# windows-registry 0.6.x moved to windows-link 0.2.x / windows-result 0.4.x which
+# requires Rust 1.82. 0.5.0 stays on windows-link 0.1.x / windows-result 0.3.x (safe).
+# hyper-util pulls this in on Windows via its network-interface detection code.
+windows-registry = "=0.5.0"
