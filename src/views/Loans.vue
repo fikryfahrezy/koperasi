@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, onMounted } from "vue";
 import { PlusCircle, CreditCard, CheckCircle } from "lucide-vue-next";
+import Database from "@tauri-apps/plugin-sql";
 
 interface Loan {
   id: string;
@@ -10,33 +11,39 @@ interface Loan {
   status: "Berjalan" | "Lunas";
 }
 
-const mockLoans = ref<Loan[]>([
-  {
-    id: "PINJ-260301",
-    memberName: "Bapak Sugeng Riadi",
-    amount: 5000000,
-    date: "01 Mar 2026",
-    status: "Berjalan",
-  },
-  {
-    id: "PINJ-260215",
-    memberName: "Ibu Ratna",
-    amount: 12000000,
-    date: "15 Feb 2026",
-    status: "Berjalan",
-  },
-  {
-    id: "PINJ-251210",
-    memberName: "Sukirman",
-    amount: 3000000,
-    date: "10 Des 2025",
-    status: "Lunas",
-  },
-]);
+const DB_PATH = "sqlite:koperasi.db";
 
+const loans = ref<Loan[]>([]);
 const isModalOpen = ref(false);
 const newLoanForm = ref({ memberName: "", amount: "" });
 const newLoanAmountDisplay = ref("");
+
+async function getDb() {
+  return await Database.load(DB_PATH);
+}
+
+async function loadLoans() {
+  const db = await getDb();
+  const rows = await db.select<
+    {
+      id: string;
+      memberName: string;
+      amount: number;
+      date: string;
+      status: string;
+    }[]
+  >(
+    "SELECT id, member_name AS memberName, amount, date, status FROM loans ORDER BY rowid DESC",
+  );
+  loans.value = rows.map((r) => ({
+    ...r,
+    status: r.status as "Berjalan" | "Lunas",
+  }));
+}
+
+onMounted(() => {
+  loadLoans();
+});
 
 function onAmountInput(e: Event) {
   const target = e.target as HTMLInputElement;
@@ -60,24 +67,39 @@ function formatRupiah(amount: number) {
   }).format(amount);
 }
 
-function submitNewLoan() {
+async function submitNewLoan() {
   if (newLoanForm.value.memberName && newLoanForm.value.amount) {
-    const newId = `PINJ-2603${Math.floor(10 + Math.random() * 90)}`;
-    mockLoans.value.unshift({
-      id: newId,
-      memberName: newLoanForm.value.memberName,
-      amount: parseInt(newLoanForm.value.amount),
-      date: "28 Mar 2026",
-      status: "Berjalan",
-    });
+    const newId = `PINJ-${Math.floor(100000 + Math.random() * 900000)}`;
+    const now = new Date();
+    const date = now
+      .toLocaleDateString("id-ID", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+      .replace(/\./g, "");
+    const db = await getDb();
+    await db.execute(
+      "INSERT INTO loans (id, member_name, amount, date, status) VALUES ($1, $2, $3, $4, $5)",
+      [
+        newId,
+        newLoanForm.value.memberName,
+        parseInt(newLoanForm.value.amount),
+        date,
+        "Berjalan",
+      ],
+    );
+    await loadLoans();
     isModalOpen.value = false;
     newLoanForm.value = { memberName: "", amount: "" };
     newLoanAmountDisplay.value = "";
   }
 }
 
-function markAsPaid(id: string) {
-  const loan = mockLoans.value.find((l) => l.id === id);
+async function markAsPaid(id: string) {
+  const db = await getDb();
+  await db.execute("UPDATE loans SET status = $1 WHERE id = $2", ["Lunas", id]);
+  const loan = loans.value.find((l) => l.id === id);
   if (loan) loan.status = "Lunas";
 }
 </script>
@@ -148,7 +170,7 @@ function markAsPaid(id: string) {
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
               <tr
-                v-for="loan in mockLoans"
+                v-for="loan in loans"
                 :key="loan.id"
                 class="hover:bg-orange-50 transition"
               >
@@ -195,7 +217,7 @@ function markAsPaid(id: string) {
                 </td>
               </tr>
               <!-- Empty state jika tidak ada -->
-              <tr v-if="mockLoans.length === 0">
+              <tr v-if="loans.length === 0">
                 <td
                   colspan="5"
                   class="px-8 py-12 text-center text-2xl text-gray-500 font-medium"
