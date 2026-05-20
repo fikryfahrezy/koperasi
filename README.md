@@ -1,0 +1,1 @@
+# Tauri Template W7
