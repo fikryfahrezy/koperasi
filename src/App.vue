@@ -2,6 +2,7 @@
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { ref } from "vue";
+import { clearRuntimeError, reportRuntimeError, runtimeError } from "./runtime-error";
 
 type AvailableUpdate = NonNullable<Awaited<ReturnType<typeof check>>>;
 
@@ -65,6 +66,7 @@ const checkForUpdates = async () => {
     }
 
     statusMessage.value = "Failed to check for updates.";
+    reportRuntimeError(error, "Update check failed");
     console.error("Update check failed", error);
   } finally {
     isCheckingForUpdates.value = false;
@@ -93,6 +95,7 @@ const installUpdate = async () => {
       statusMessage.value = "Connection was interrupted. Reconnect and try again.";
     } else {
       statusMessage.value = "Failed to install the update.";
+      reportRuntimeError(error, "Update install failed");
       console.error("Update install failed", error);
     }
   } finally {
@@ -102,22 +105,40 @@ const installUpdate = async () => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-stone-950 px-6 py-16 text-stone-50">
-    <div class="mx-auto flex max-w-xl items-center justify-center">
-      <section class="w-full rounded-3xl border border-white/10 bg-white/5 p-8 shadow-2xl shadow-black/30 backdrop-blur">
-        <p class="text-sm uppercase tracking-[0.3em] text-emerald-300/80">TemplateW7 #2</p>
-        <h1 class="mt-4 text-3xl font-semibold text-white">App updates</h1>
-        <p class="mt-3 text-sm leading-6 text-stone-300">
+  <div class="app-shell">
+    <div class="app-shell__inner">
+      <section class="update-card">
+        <div v-if="runtimeError" class="error-panel">
+          <div class="error-panel__header">
+            <div>
+              <p class="error-panel__eyebrow">Runtime error</p>
+              <p class="error-panel__description">Bundled app errors are mirrored here when the webview console is not visible.</p>
+            </div>
+            <button
+              class="error-panel__dismiss"
+              type="button"
+              @click="clearRuntimeError"
+            >
+              Dismiss
+            </button>
+          </div>
+
+          <pre class="error-panel__body">{{ runtimeError }}</pre>
+        </div>
+
+        <p class="update-card__eyebrow">TemplateW7 #2</p>
+        <h1 class="update-card__title">App updates</h1>
+        <p class="update-card__description">
           Check for a newer signed release and choose when to install it.
         </p>
 
-        <div class="mt-8 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-stone-200">
+        <div class="status-panel">
           {{ statusMessage }}
         </div>
 
-        <div class="mt-6 flex flex-wrap gap-3">
+        <div class="actions-row">
           <button
-            class="rounded-full bg-emerald-400 px-5 py-3 text-sm font-medium text-stone-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-emerald-900 disabled:text-stone-400"
+            class="button button--primary"
             type="button"
             :disabled="isDev || isCheckingForUpdates || isInstallingUpdate"
             @click="checkForUpdates"
@@ -127,7 +148,7 @@ const installUpdate = async () => {
 
           <button
             v-if="availableUpdate"
-            class="rounded-full border border-white/15 px-5 py-3 text-sm font-medium text-white transition hover:border-white/30 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-stone-500"
+            class="button button--secondary"
             type="button"
             :disabled="isInstallingUpdate || isCheckingForUpdates"
             @click="installUpdate"
@@ -136,7 +157,7 @@ const installUpdate = async () => {
           </button>
         </div>
 
-        <p v-if="availableUpdate" class="mt-4 text-sm text-stone-400">
+        <p v-if="availableUpdate" class="update-card__hint">
           Update {{ availableUpdate.version }} is ready to install.
         </p>
       </section>
