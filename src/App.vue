@@ -126,7 +126,7 @@ const installUpdate = async () => {
           <pre class="error-panel__body">{{ runtimeError }}</pre>
         </div>
 
-        <p class="update-card__eyebrow">TemplateW7 #2</p>
+        <p class="update-card__eyebrow">TemplateW7 #0.4.9</p>
         <h1 class="update-card__title">App updates</h1>
         <p class="update-card__description">
           Check for a newer signed release and choose when to install it.
