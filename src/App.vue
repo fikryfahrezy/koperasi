@@ -1,61 +1,90 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { RouterView, useRoute } from "vue-router";
-import Sidebar from "./components/Sidebar.vue";
 import { Menu } from "lucide-vue-next";
+import Sidebar from "./components/Sidebar.vue";
+import { clearRuntimeError, runtimeError } from "./runtime-error";
 
 const route = useRoute();
 const isLogin = computed(() => route.path === "/login");
 const isSidebarOpen = ref(false);
+
+const closeSidebar = () => {
+  isSidebarOpen.value = false;
+};
+
+const toggleSidebar = () => {
+  isSidebarOpen.value = !isSidebarOpen.value;
+};
 </script>
 
 <template>
-  <div v-if="isLogin">
-    <RouterView />
-  </div>
-  <div v-else class="flex h-screen bg-gray-50 text-gray-900 font-sans relative">
-    <!-- Overlay untuk layar kecil saat sidebar terbuka -->
-    <div
-      v-if="isSidebarOpen"
-      class="fixed inset-0 bg-gray-900/50 z-20 xl:hidden"
-      @click="isSidebarOpen = false"
-    ></div>
-
-    <!-- Sidebar -->
-    <div
-      :class="[
-        'absolute xl:relative z-30 transform transition-transform duration-300 h-full',
-        isSidebarOpen ? 'translate-x-0' : '-translate-x-full xl:translate-x-0',
-      ]"
-    >
-      <Sidebar @close="isSidebarOpen = false" />
-    </div>
-
-    <!-- Konten Utama -->
-    <div class="flex-1 flex flex-col overflow-hidden w-full">
-      <header
-        class="bg-white shadow px-4 sm:px-6 py-4 sm:py-6 border-b border-gray-200 flex items-center justify-between"
-      >
-        <div class="flex items-center gap-4">
-          <button
-            @click="isSidebarOpen = !isSidebarOpen"
-            class="xl:hidden p-2 -ml-2 rounded-xl text-gray-600 hover:bg-gray-100 transition focus:outline-none focus:ring-4 focus:ring-blue-100"
-          >
-            <Menu class="w-8 h-8" />
-          </button>
-          <h2
-            class="text-2xl sm:text-3xl font-extrabold text-[#1f2937] truncate"
-          >
-            Koperasi Sejahtera
-          </h2>
+  <div class="app-frame">
+    <section v-if="runtimeError" class="runtime-banner" role="alert">
+      <div class="runtime-banner__content">
+        <div>
+          <p class="runtime-banner__eyebrow">Runtime error</p>
+          <p class="runtime-banner__description">
+            Unhandled app errors are mirrored here when the webview console is
+            not visible.
+          </p>
         </div>
-        <div class="text-lg sm:text-xl font-medium text-gray-600">Admin</div>
-      </header>
-      <main
-        class="flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-4 sm:p-8"
+        <button
+          class="runtime-banner__dismiss"
+          type="button"
+          @click="clearRuntimeError"
+        >
+          Dismiss
+        </button>
+      </div>
+      <pre class="runtime-banner__body">{{ runtimeError }}</pre>
+    </section>
+
+    <RouterView v-if="isLogin" />
+
+    <div v-else class="dashboard-shell">
+      <button
+        v-if="isSidebarOpen"
+        class="dashboard-shell__overlay"
+        type="button"
+        aria-label="Close sidebar"
+        @click="closeSidebar"
+      ></button>
+
+      <div
+        :class="[
+          'dashboard-shell__sidebar',
+          { 'dashboard-shell__sidebar--open': isSidebarOpen },
+        ]"
       >
-        <RouterView />
-      </main>
+        <Sidebar @close="closeSidebar" />
+      </div>
+
+      <div class="dashboard-shell__main">
+        <header class="dashboard-header">
+          <div class="dashboard-header__group">
+            <button
+              class="dashboard-header__menu"
+              type="button"
+              aria-label="Toggle sidebar"
+              @click="toggleSidebar"
+            >
+              <Menu class="dashboard-header__menu-icon" />
+            </button>
+
+            <div>
+              <p class="dashboard-header__eyebrow">Koperasi</p>
+              <h1 class="dashboard-header__title">Koperasi Sejahtera</h1>
+            </div>
+          </div>
+
+          <div class="dashboard-header__user">Admin</div>
+        </header>
+
+        <main class="dashboard-content">
+          <RouterView />
+        </main>
+      </div>
     </div>
   </div>
 </template>
