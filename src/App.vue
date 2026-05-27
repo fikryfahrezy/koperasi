@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { ref } from "vue";
+import { ref, shallowRef } from "vue";
 import { clearRuntimeError, reportRuntimeError, runtimeError } from "./runtime-error";
 
 type AvailableUpdate = NonNullable<Awaited<ReturnType<typeof check>>>;
@@ -14,7 +14,7 @@ const statusMessage = ref(
     ? "Updater is disabled while running in dev mode."
     : "Check for updates when you are ready.",
 );
-const availableUpdate = ref<AvailableUpdate | null>(null);
+const availableUpdate = shallowRef<AvailableUpdate | null>(null);
 
 const isOfflineError = (error: unknown) => {
   if (!error || typeof error !== "object") {
