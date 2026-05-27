@@ -42,7 +42,7 @@ pub fn run() {
         .plugin(tauri_plugin_persisted_scope::init())
         .plugin(
             tauri_plugin_sql::Builder::new()
-                .add_migrations("sqlite:koperasi.db", migrations)
+                .add_migrations("sqlite:templatew7.db", migrations)
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())

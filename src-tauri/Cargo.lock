@@ -2475,7 +2475,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "koperasi"
+name = "templatex"
 version = "0.1.0"
 dependencies = [
  "async-lock",

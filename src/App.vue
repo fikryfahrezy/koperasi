@@ -105,7 +105,7 @@ const installUpdate = async () => {
   <div class="min-h-screen bg-stone-950 px-6 py-16 text-stone-50">
     <div class="mx-auto flex max-w-xl items-center justify-center">
       <section class="w-full rounded-3xl border border-white/10 bg-white/5 p-8 shadow-2xl shadow-black/30 backdrop-blur">
-        <p class="text-sm uppercase tracking-[0.3em] text-emerald-300/80">Koperasi</p>
+        <p class="text-sm uppercase tracking-[0.3em] text-emerald-300/80">TemplateW7</p>
         <h1 class="mt-4 text-3xl font-semibold text-white">App updates</h1>
         <p class="mt-3 text-sm leading-6 text-stone-300">
           Check for a newer signed release and choose when to install it.
