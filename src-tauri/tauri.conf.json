@@ -23,12 +23,15 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "CONTENT FROM PUBLICKEY.PEM",
-      "endpoints": ["https://placeholder.example.com/update/{{target}}/{{arch}}/{{current_version}}"]
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlCQ0Q5NjNCNDg2RkE4NkIKUldScnFHOUlPNWJObTh0QlNwa1VONVpTalhuY1pWT2hIekFWci85SWNCcWY3K2V1REhGTDQzQzQK",
+      "endpoints": [
+        "https://github.com/fikryfahrezy/koperasi/releases/latest/download/latest.json"
+      ]
     }
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",

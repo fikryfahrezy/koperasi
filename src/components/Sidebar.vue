@@ -6,34 +6,171 @@ const emit = defineEmits(["close"]);
 </script>
 
 <template>
-  <div
-    class="h-screen w-80 bg-white border-r border-gray-200 flex flex-col justify-between shadow-xl xl:shadow-sm flex-shrink-0 relative"
-  >
-    <!-- Close button for mobile -->
+  <aside class="sidebar">
     <button
+      type="button"
       @click="emit('close')"
-      class="xl:hidden absolute top-6 right-6 p-2 rounded-xl text-gray-500 hover:bg-gray-100 hover:text-gray-800 transition focus:outline-none focus:ring-4 focus:ring-blue-100"
+      class="sidebar__close"
+      aria-label="Close navigation"
     >
-      <X class="w-8 h-8" />
+      <X class="sidebar__close-icon" />
     </button>
 
-    <div>
-      <div
-        class="h-24 flex items-center justify-center border-b border-gray-100 xl:mt-0 pt-2 xl:pt-0"
-      >
-        <h1 class="text-3xl font-bold text-blue-600 tracking-tight">KOPKAR</h1>
+    <div class="sidebar__content">
+      <div class="sidebar__brand">
+        <p class="sidebar__brand-kicker">Koperasi</p>
+        <h1 class="sidebar__brand-title">KOPKAR</h1>
       </div>
-      <nav class="flex-1 mt-6 px-4 space-y-3">
+
+      <nav class="sidebar__nav">
         <RouterLink
           to="/loans"
           @click="emit('close')"
-          class="flex items-center space-x-4 px-6 py-5 bg-gray-50 rounded-xl hover:bg-blue-50 text-gray-700 hover:text-blue-700 transition"
-          active-class="bg-blue-100 text-blue-800 font-semibold shadow-inner"
+          class="sidebar__link"
+          active-class="sidebar__link--active"
         >
-          <Landmark class="w-8 h-8" />
-          <span class="text-xl">Pinjaman</span>
+          <Landmark class="sidebar__link-icon" />
+          <span>Pinjaman</span>
         </RouterLink>
       </nav>
     </div>
-  </div>
+  </aside>
 </template>
+
+<style scoped>
+.sidebar {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 28px 20px 24px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 32px;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.96),
+      rgba(243, 247, 252, 0.92)
+    ),
+    linear-gradient(160deg, rgba(37, 99, 235, 0.08), transparent 38%);
+  box-shadow: var(--shadow-card);
+}
+
+.sidebar__close {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--color-text-soft);
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.sidebar__close:hover,
+.sidebar__close:focus-visible {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.sidebar__close-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.sidebar__content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.sidebar__brand {
+  padding: 8px 4px 24px;
+  border-bottom: 1px solid rgba(185, 200, 214, 0.5);
+}
+
+.sidebar__brand-kicker {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+}
+
+.sidebar__brand-title {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: var(--color-primary-strong);
+}
+
+.sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.sidebar__link {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid transparent;
+  border-radius: 20px;
+  background: rgba(241, 245, 249, 0.88);
+  color: var(--color-text-muted);
+  font-size: 1.05rem;
+  font-weight: 700;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.sidebar__link:hover,
+.sidebar__link:focus-visible {
+  border-color: rgba(29, 78, 216, 0.16);
+  background: rgba(219, 234, 254, 0.72);
+  color: var(--color-primary-strong);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.sidebar__link--active {
+  border-color: rgba(29, 78, 216, 0.18);
+  background: linear-gradient(
+    135deg,
+    rgba(219, 234, 254, 0.96),
+    rgba(239, 246, 255, 0.92)
+  );
+  color: var(--color-primary-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.76);
+}
+
+.sidebar__link-icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+@media (min-width: 1200px) {
+  .sidebar__close {
+    display: none;
+  }
+}
+</style>
