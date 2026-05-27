@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "ts:check": "vue-tsc --noEmit",
-    "prepare": "if [ \"$NODE_ENV\" != 'production' -a \"$CI\" != 'true' ]; then husky .husky; fi"
+    "prepare": "node -e \"const { execSync } = require('node:child_process'); if (process.env.NODE_ENV !== 'production' && process.env.CI !== 'true') execSync('husky .husky', { stdio: 'inherit', shell: true });\""
   },
   "dependencies": {
     "@tauri-apps/api": "2.5.0",
