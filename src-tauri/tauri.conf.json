@@ -23,12 +23,15 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "CONTENT FROM PUBLICKEY.PEM",
-      "endpoints": ["https://placeholder.example.com/update/{{target}}/{{arch}}/{{current_version}}"]
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDcwMEY4N0RGQ0NCQ0M0RTUKUldUbHhMek0zNGNQY0xtaFI2UGZQeU5PL1VpTXNxZWd4ZUJkRGtGZmU0LzZRaE9DVHBrRVFMUGUK",
+      "endpoints": [
+        "https://github.com/fikryfahrezy/tauri-template-w7/releases/latest/download/latest.json"
+      ]
     }
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
