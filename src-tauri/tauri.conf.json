@@ -32,7 +32,7 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
-    "targets": "all",
+    "targets": ["nsis", "app", "dmg"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -40,6 +40,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "nsis": {
+      "installMode": "currentUser",
+      "guid": "2B0AF825-F105-4CA7-9DC0-2EE19E493CBF"
+    },
     "windows": {
       "webviewInstallMode": {
         "type": "fixedRuntime",
