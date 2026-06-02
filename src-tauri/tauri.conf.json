@@ -40,11 +40,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "nsis": {
-      "installMode": "currentUser",
-      "guid": "2B0AF825-F105-4CA7-9DC0-2EE19E493CBF"
-    },
     "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      },
       "webviewInstallMode": {
         "type": "fixedRuntime",
         "path": "./Microsoft.WebView2.FixedVersionRuntime.88.0.705.81.x64/"
