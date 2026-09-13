@@ -32,6 +32,7 @@ tauri-runtime-wry = "=2.6.0"
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
 tauri-plugin-opener = "=2.3.1"
+sqlx = { version = "=0.8.6", features = ["runtime-tokio", "sqlite"] }
 
 # Pin transitive deps to versions compatible with Rust 1.77.2 (no edition 2024).
 # uuid >=1.21 and tempfile >=3.25 allow getrandom >=0.4 which uses edition 2024 (needs Rust 1.82+).
@@ -97,7 +98,6 @@ iana-time-zone = "=0.1.61"
 # embed-resource 3.0.7 calls str::display() which is private in Rust < 1.79 (OsStr::display stabilized
 # as pub in Rust 1.79). 3.0.6 uses Path::display() on a &Path (stable since Rust 1.0).
 embed-resource = "=3.0.6"
-tauri-plugin-sql = { version = "=2.2.1", features = ["sqlite"] }
 tauri-plugin-fs = "=2.3.0"
 
 # home 0.5.12 switched to edition = "2024" (requires Cargo 1.85+); pin to last edition-2021 release.
