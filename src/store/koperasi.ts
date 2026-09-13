@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { computed, reactive, ref } from "vue";
 
 export type TransactionStatus = "Terposting" | "Draf" | "Dibalik";
@@ -165,6 +166,26 @@ async function initialize() {
     }
   })();
   return initializePromise;
+}
+
+async function importWorkbook() {
+  const path = await open({
+    title: "Pilih workbook Excel (.xlsm)",
+    multiple: false,
+    filters: [{ name: "Excel Macro Workbook", extensions: ["xlsm", "xlsx"] }],
+  });
+  if (!path || Array.isArray(path)) return false;
+  try {
+    applySnapshot(await invoke<AppSnapshot>("import_workbook", { path }));
+    notify(
+      "Workbook berhasil diimpor",
+      "Anggota, pinjaman, simpanan, dan buku kas telah dimuat ke database lokal.",
+    );
+    return true;
+  } catch (error) {
+    notify("Impor workbook gagal", errorMessage(error), "warning");
+    return false;
+  }
 }
 
 async function addMember(input: {
@@ -363,6 +384,7 @@ export const useKoperasiStore = () => ({
   toasts,
   initialize,
   notify,
+  importWorkbook,
   addMember,
   previewLoan,
   createLoan,

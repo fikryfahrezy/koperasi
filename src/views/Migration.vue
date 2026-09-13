@@ -3,48 +3,23 @@ import { ref } from "vue";
 import {
   CheckCircle2,
   FileSpreadsheet,
-  Link2,
-  TriangleAlert,
+  Loader2,
   UploadCloud,
 } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
 import StatusPill from "../components/StatusPill.vue";
-import { useKoperasiStore } from "../store/koperasi";
+import { formatCurrency, useKoperasiStore } from "../store/koperasi";
 
-const { notify } = useKoperasiStore();
-const progress = ref(100);
-const issues = ref([
-  {
-    source: "MASTER_PINJAMAN · baris 9",
-    record: "Aah Rohayati Nursalim",
-    issue: "Plafond sumber tidak valid",
-    status: "Review finansial",
-  },
-  {
-    source: "MASTER_PINJAMAN · baris 77",
-    record: "Nama anggota ambigu",
-    issue: "Tidak ada member match unik",
-    status: "Padankan anggota",
-  },
-  {
-    source: "PINJAMAN_2026 · L002",
-    record: "Aam Faozah Hajah",
-    issue: "Provisi aktual berbeda Rp11.000",
-    status: "Review finansial",
-  },
-  {
-    source: "KAS_2026 · 484 baris",
-    record: "Transaksi operasional",
-    issue: "Belum memiliki component mapping",
-    status: "Review finansial",
-  },
-]);
-function resolve(index: number) {
-  issues.value.splice(index, 1);
-  notify(
-    "Issue ditandai selesai",
-    "Keputusan review tersimpan di audit trail.",
-  );
+const { totals, loans, importWorkbook } = useKoperasiStore();
+const importing = ref(false);
+
+async function handleImport() {
+  importing.value = true;
+  try {
+    await importWorkbook();
+  } finally {
+    importing.value = false;
+  }
 }
 </script>
 <template>
@@ -52,128 +27,76 @@ function resolve(index: number) {
     <PageHeader
       eyebrow="Data staging"
       title="Migrasi Excel"
-      description="Validasi, padankan, dan rekonsiliasi data sumber sebelum masuk ke ledger produksi."
+      description="Impor anggota, pinjaman, simpanan, dan buku kas langsung dari workbook Excel (.xlsm) ke database lokal."
       ><template #actions
         ><button
           class="button button--primary"
-          @click="
-            notify(
-              'Snapshot sudah terbaru',
-              'Workbook 2026 telah dimuat ke staging.',
-              'info',
-            )
-          "
+          :disabled="importing"
+          @click="handleImport"
         >
-          <UploadCloud :size="18" /> Impor workbook
+          <Loader2 v-if="importing" :size="18" class="spin" />
+          <UploadCloud v-else :size="18" />
+          {{ importing ? "Mengimpor..." : "Impor workbook" }}
         </button></template
       ></PageHeader
     >
     <section class="migration-source panel">
       <span class="migration-source__icon"><FileSpreadsheet :size="28" /></span>
       <div>
-        <p class="eyebrow">Sumber aktif</p>
-        <h2>KOPERASI_BINA_SEJAHTERA_2026_DIBERSIHKAN.xlsm</h2>
-        <span>8 sheet · snapshot 13 September 2026 · 3.560 baris data</span>
+        <p class="eyebrow">Sumber data</p>
+        <h2>Workbook Excel (.xlsm)</h2>
+        <span
+          >Sheet yang dibaca: MASTER_SIMPANAN, SIMPANAN_2026, MASTER_PINJAMAN,
+          PINJAMAN_2026, KAS_2026</span
+        >
       </div>
-      <StatusPill label="Staging selesai" tone="success" />
+      <StatusPill
+        :label="totals.members.value > 0 ? 'Data tersedia' : 'Belum ada data'"
+        :tone="totals.members.value > 0 ? 'success' : 'warning'"
+      />
     </section>
-    <section class="migration-steps">
-      <article class="done">
-        <span><CheckCircle2 :size="21" /></span>
-        <div>
-          <strong>1. Unggah sumber</strong
-          ><small>Workbook dan metadata tersimpan</small>
-        </div>
-      </article>
-      <i></i>
-      <article class="done">
-        <span><CheckCircle2 :size="21" /></span>
-        <div>
-          <strong>2. Validasi struktur</strong><small>8 sheet dikenali</small>
-        </div>
-      </article>
-      <i></i>
-      <article class="active">
-        <span><TriangleAlert :size="21" /></span>
-        <div>
-          <strong>3. Review exception</strong
-          ><small>{{ issues.length }} keputusan tersisa</small>
-        </div>
-      </article>
-      <i></i>
-      <article>
-        <span>4</span>
-        <div>
-          <strong>Commit snapshot</strong><small>Menunggu review</small>
-        </div>
-      </article>
+    <section v-if="totals.members.value === 0" class="panel empty-import">
+      <CheckCircle2 :size="22" style="opacity: 0.35" />
+      <p>
+        Database masih kosong. Pilih file workbook (.xlsm) melalui tombol
+        <strong>Impor workbook</strong> di atas untuk memuat data anggota,
+        pinjaman, simpanan, dan buku kas.
+      </p>
     </section>
-    <section class="migration-metrics">
+    <section v-else class="migration-metrics">
       <article>
-        <strong>2.593</strong><span>Auto import</span
-        ><small>Record valid & konsisten</small>
+        <strong>{{ totals.members.value }}</strong
+        ><span>Anggota aktif</span><small>Tersimpan di database lokal</small>
       </article>
       <article>
-        <strong>{{ issues.length }}</strong
-        ><span>Perlu keputusan</span><small>Ditahan dari produksi</small>
+        <strong>{{ loans.length }}</strong
+        ><span>Pinjaman</span><small>Seluruh status</small>
       </article>
       <article>
-        <strong>144</strong><span>Anggota dipadankan</span
-        ><small>98,6% confidence tinggi</small>
+        <strong>{{ formatCurrency(totals.savings.value, true) }}</strong
+        ><span>Total simpanan</span><small>Pokok, wajib, dan manasuka</small>
       </article>
       <article>
-        <strong>{{ progress }}%</strong><span>Struktur tervalidasi</span
-        ><small>8 dari 8 sheet</small>
+        <strong>{{ formatCurrency(totals.cash.value, true) }}</strong
+        ><span>Saldo kas</span><small>Hasil rekonstruksi buku kas</small>
       </article>
-    </section>
-    <section class="panel table-panel">
-      <div class="panel__header panel__header--padded">
-        <div>
-          <p class="eyebrow">Review queue</p>
-          <h2>Exception migrasi</h2>
-        </div>
-        <span class="count-badge count-badge--warning">{{
-          issues.length
-        }}</span>
-      </div>
-      <div class="data-table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Lokasi sumber</th>
-              <th>Record</th>
-              <th>Masalah</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(issue, index) in issues" :key="issue.source">
-              <td>
-                <code>{{ issue.source }}</code>
-              </td>
-              <td>
-                <strong>{{ issue.record }}</strong>
-              </td>
-              <td>{{ issue.issue }}</td>
-              <td><StatusPill :label="issue.status" tone="warning" /></td>
-              <td>
-                <button class="row-action" @click="resolve(index)">
-                  <Link2 :size="15" /> Review
-                </button>
-              </td>
-            </tr>
-            <tr v-if="issues.length === 0">
-              <td colspan="5">
-                <div class="empty-inline">
-                  <CheckCircle2 :size="22" /> Semua exception sudah
-                  diselesaikan.
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
     </section>
   </div>
 </template>
+<style scoped>
+.empty-import {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  color: var(--muted, #6b7280);
+}
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+</style>
