@@ -2550,3 +2550,67 @@ strong {
     margin: 0;
   }
 }
+
+.update-checker-button {
+  position: relative;
+}
+.update-checker-button i {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+  background: var(--green);
+}
+.update-checker-button svg.is-spinning {
+  animation: backend-spin 0.8s linear infinite;
+}
+.update-checker {
+  display: grid;
+  gap: 16px;
+}
+.update-checker__state {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 8px 4px 4px;
+  text-align: center;
+}
+.update-checker__state h3 {
+  margin: 0;
+}
+.update-checker__state p {
+  margin: 0;
+  color: var(--muted);
+}
+.update-checker__notes {
+  max-width: 420px;
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-soft);
+  white-space: pre-wrap;
+  text-align: left;
+  font-size: 12px;
+}
+.update-checker__progress {
+  width: 100%;
+  max-width: 320px;
+  height: 8px;
+  border-radius: 5px;
+  background: var(--surface-soft);
+  overflow: hidden;
+}
+.update-checker__progress-bar {
+  height: 100%;
+  border-radius: 5px;
+  background: var(--green);
+  transition: width 0.2s ease;
+}
+.update-checker__error {
+  color: #e06b55;
+}
