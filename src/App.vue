@@ -4,6 +4,7 @@ import { RouterView, useRouter } from "vue-router";
 import { Bell, CalendarDays, ChevronDown, Menu, Search } from "lucide-vue-next";
 import Sidebar from "./components/Sidebar.vue";
 import ToastHost from "./components/ToastHost.vue";
+import UpdateChecker from "./components/UpdateChecker.vue";
 import { clearRuntimeError, runtimeError } from "./runtime-error";
 import { useKoperasiStore } from "./store/koperasi";
 
@@ -66,8 +67,8 @@ function runSearch() {
               class="icon-button notification-button"
               aria-label="Notifikasi"
             >
-              <Bell :size="19" /><i></i>
-            </button>
+              <Bell :size="19" /><i></i></button
+            ><UpdateChecker />
           </div>
         </header>
         <main class="app-content">
