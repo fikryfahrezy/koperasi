@@ -6,10 +6,6 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "sql:default",
-    "sql:allow-execute",
-    "sql:allow-select",
-    "sql:allow-load",
     "fs:default",
     "upload:default",
     "store:default",
