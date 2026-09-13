@@ -1,3 +1,4 @@
+use calamine::{open_workbook_auto, Data, DataType, Reader};
 use serde::{Deserialize, Serialize};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
@@ -5,21 +6,38 @@ use sqlx::{
 };
 use std::{
     collections::HashMap,
+    path::Path,
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{Manager, State};
 
-const MASTER_SAVINGS: &str =
-    include_str!("../../docs/KOPERASI_BINA_SEJAHTERA_2026_DIBERSIHKAN.xlsm - MASTER_SIMPANAN.csv");
-const SAVINGS_2026: &str =
-    include_str!("../../docs/KOPERASI_BINA_SEJAHTERA_2026_DIBERSIHKAN.xlsm - SIMPANAN_2026.csv");
-const MASTER_LOANS: &str =
-    include_str!("../../docs/KOPERASI_BINA_SEJAHTERA_2026_DIBERSIHKAN.xlsm - MASTER_PINJAMAN.csv");
-const LOANS_2026: &str =
-    include_str!("../../docs/KOPERASI_BINA_SEJAHTERA_2026_DIBERSIHKAN.xlsm - PINJAMAN_2026.csv");
-const CASH_2026: &str =
-    include_str!("../../docs/KOPERASI_BINA_SEJAHTERA_2026_DIBERSIHKAN.xlsm - KAS_2026.csv");
+struct WorkbookSheets {
+    master_savings: Vec<Vec<Data>>,
+    savings_2026: Vec<Vec<Data>>,
+    master_loans: Vec<Vec<Data>>,
+    loans_2026: Vec<Vec<Data>>,
+    cash_2026: Vec<Vec<Data>>,
+}
+
+fn load_workbook_sheets(path: &Path) -> Result<WorkbookSheets, String> {
+    let mut workbook = open_workbook_auto(path).map_err(|error| error.to_string())?;
+
+    let mut sheet_rows = |name: &str| -> Result<Vec<Vec<Data>>, String> {
+        let range = workbook
+            .worksheet_range(name)
+            .map_err(|_| format!("Sheet '{name}' tidak ditemukan dalam workbook"))?;
+        Ok(range.rows().skip(1).map(|row| row.to_vec()).collect())
+    };
+
+    Ok(WorkbookSheets {
+        master_savings: sheet_rows("MASTER_SIMPANAN")?,
+        savings_2026: sheet_rows("SIMPANAN_2026")?,
+        master_loans: sheet_rows("MASTER_PINJAMAN")?,
+        loans_2026: sheet_rows("PINJAMAN_2026")?,
+        cash_2026: sheet_rows("KAS_2026")?,
+    })
+}
 
 struct AppState {
     db: SqlitePool,
@@ -217,44 +235,6 @@ fn timestamp_id(prefix: &str) -> String {
     format!("{prefix}-{millis}-{sequence}")
 }
 
-fn parse_csv(source: &str) -> Vec<Vec<String>> {
-    let mut rows = Vec::new();
-    let mut row = Vec::new();
-    let mut value = String::new();
-    let mut quoted = false;
-    let mut chars = source.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        match ch {
-            '"' if quoted && chars.peek() == Some(&'"') => {
-                value.push('"');
-                chars.next();
-            }
-            '"' => quoted = !quoted,
-            ',' if !quoted => row.push(std::mem::take(&mut value)),
-            '\n' if !quoted => {
-                row.push(
-                    std::mem::take(&mut value)
-                        .trim_end_matches('\r')
-                        .to_string(),
-                );
-                if row.iter().any(|cell| !cell.is_empty()) {
-                    rows.push(std::mem::take(&mut row));
-                } else {
-                    row.clear();
-                }
-            }
-            _ => value.push(ch),
-        }
-    }
-
-    if !value.is_empty() || !row.is_empty() {
-        row.push(value.trim_end_matches('\r').to_string());
-        rows.push(row);
-    }
-    rows
-}
-
 fn money(value: &str) -> i64 {
     if value.trim().is_empty() || value.trim() == "-" || value.trim() == "`" {
         return 0;
@@ -285,27 +265,59 @@ fn normalize_name(value: &str) -> String {
         .collect()
 }
 
-fn iso_date(value: &str) -> String {
-    let parts: Vec<&str> = value.split('-').collect();
-    if parts.len() != 3 {
-        return "2026-01-01".to_string();
+// A workbook cell is either already text (member names, statuses, loan ids, ...)
+// or a raw calamine-typed number/date; these helpers read either shape so the
+// import logic doesn't care how a given cell happens to be stored in the .xlsm.
+fn cell_text(cell: &Data) -> String {
+    match cell {
+        Data::String(value) => value.trim().to_string(),
+        Data::Float(value) if value.fract() == 0.0 => format!("{}", *value as i64),
+        Data::Float(value) => value.to_string(),
+        Data::Int(value) => value.to_string(),
+        Data::Bool(value) => value.to_string(),
+        _ => String::new(),
     }
-    let month = match parts[1] {
-        "Jan" => "01",
-        "Feb" => "02",
-        "Mar" => "03",
-        "Apr" => "04",
-        "May" => "05",
-        "Jun" => "06",
-        "Jul" => "07",
-        "Aug" => "08",
-        "Sep" => "09",
-        "Oct" => "10",
-        "Nov" => "11",
-        "Dec" => "12",
-        _ => "01",
-    };
-    format!("{}-{month}-{:0>2}", parts[2], parts[0])
+}
+
+fn cell_money(cell: &Data) -> i64 {
+    match cell {
+        Data::Float(value) => value.round() as i64,
+        Data::Int(value) => *value,
+        Data::String(value) => money(value),
+        _ => 0,
+    }
+}
+
+// Excel stores a percentage such as 24% as the fraction 0.24; the rest of the
+// app (loans.rate_annual, LoanPreview) works with the whole percentage number.
+fn cell_percentage(cell: &Data) -> f64 {
+    match cell {
+        Data::Float(value) => value * 100.0,
+        Data::Int(value) => *value as f64 * 100.0,
+        Data::String(value) => percentage(value),
+        _ => 0.0,
+    }
+}
+
+fn cell_int(cell: &Data) -> i64 {
+    match cell {
+        Data::Float(value) => value.round() as i64,
+        Data::Int(value) => *value,
+        Data::String(value) => value.trim().parse::<i64>().unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn cell_date_iso(cell: &Data) -> String {
+    cell.as_datetime()
+        .map(|value| value.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| "2026-01-01".to_string())
+}
+
+fn cell_date_display(cell: &Data) -> String {
+    cell.as_datetime()
+        .map(|value| value.format("%d-%b-%Y").to_string())
+        .unwrap_or_default()
 }
 
 fn add_months(value: &str, months: i64) -> Result<String, String> {
@@ -380,73 +392,33 @@ async fn initialize_database(app: &tauri::App) -> Result<SqlitePool, String> {
         .await
         .map_err(|error| error.to_string())?;
 
-    let seeded: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM app_meta WHERE key = 'seed_version'")
-            .fetch_one(&pool)
-            .await
-            .map_err(|error| error.to_string())?;
-    if seeded == 0 {
-        seed_database(&pool).await?;
-    }
-    apply_data_repairs(&pool).await?;
     Ok(pool)
 }
 
-async fn apply_data_repairs(pool: &SqlitePool) -> Result<(), String> {
-    let repaired: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM app_meta WHERE key = 'cash_signed_values_v1'")
-            .fetch_one(pool)
-            .await
-            .map_err(|error| error.to_string())?;
-    if repaired > 0 {
-        return Ok(());
-    }
-
-    let mut transaction = pool.begin().await.map_err(|error| error.to_string())?;
-    // Baris 652 menyimpan koreksi sebagai kas masuk negatif `(12.950.000)`.
-    // Versi seed pertama mengabaikannya setelah nilai negatif di-clamp ke nol.
-    sqlx::query("INSERT OR IGNORE INTO transactions (id, business_date, display_date, display_time, member_name, transaction_type, description, reference, direction, amount, status, actor) VALUES ('MIG-KAS-652', '2026-09-10', '10-Sep-2026', '00:00', 'Koperasi', 'MIGRATED_CASH', 'Koreksi kas sumber · baris 652', 'MIG/KAS/2026/652', 'Keluar', 12950000, 'Terposting', 'Import Excel 2026')")
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| error.to_string())?;
-    sqlx::query("INSERT INTO transaction_components (transaction_id, component_type, label, amount) SELECT 'MIG-KAS-652', 'MIGRATION_UNCLASSIFIED', 'Koreksi kas sumber', 12950000 WHERE NOT EXISTS (SELECT 1 FROM transaction_components WHERE transaction_id = 'MIG-KAS-652')")
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| error.to_string())?;
-    sqlx::query("INSERT INTO cash_postings (transaction_id, direction, amount) SELECT 'MIG-KAS-652', 'Keluar', 12950000 WHERE NOT EXISTS (SELECT 1 FROM cash_postings WHERE transaction_id = 'MIG-KAS-652')")
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| error.to_string())?;
-    sqlx::query("INSERT INTO app_meta (key, value) VALUES ('cash_signed_values_v1', 'applied')")
-        .execute(&mut *transaction)
-        .await
-        .map_err(|error| error.to_string())?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| error.to_string())
-}
-
-async fn seed_database(pool: &SqlitePool) -> Result<(), String> {
+async fn seed_database(pool: &SqlitePool, sheets: &WorkbookSheets) -> Result<(), String> {
     let mut transaction = pool.begin().await.map_err(|error| error.to_string())?;
 
     let mut latest_savings: HashMap<String, (i64, i64, i64)> = HashMap::new();
-    for row in parse_csv(SAVINGS_2026).into_iter().skip(1) {
+    for row in &sheets.savings_2026 {
         if row.len() >= 17 {
             latest_savings.insert(
-                row[0].clone(),
-                (money(&row[14]), money(&row[15]), money(&row[16])),
+                cell_text(&row[0]),
+                (
+                    cell_money(&row[14]),
+                    cell_money(&row[15]),
+                    cell_money(&row[16]),
+                ),
             );
         }
     }
 
     let mut member_by_name = HashMap::new();
-    for row in parse_csv(MASTER_SAVINGS).into_iter().skip(1) {
-        if row.len() < 8 || row[0].is_empty() {
+    for row in &sheets.master_savings {
+        if row.len() < 8 || cell_text(&row[0]).is_empty() {
             continue;
         }
-        let member_id = row[0].clone();
-        let name = row[3].trim().to_string();
+        let member_id = cell_text(&row[0]);
+        let name = cell_text(&row[3]);
         member_by_name.insert(normalize_name(&name), member_id.clone());
         sqlx::query("INSERT INTO members (id, member_number, name, joined_at, status) VALUES (?, ?, ?, ?, 'Aktif')")
             .bind(&member_id)
@@ -461,9 +433,9 @@ async fn seed_database(pool: &SqlitePool) -> Result<(), String> {
             .map_err(|error| error.to_string())?;
 
         let balances = latest_savings.get(&member_id).copied().unwrap_or((
-            money(&row[4]),
-            money(&row[5]),
-            money(&row[6]),
+            cell_money(&row[4]),
+            cell_money(&row[5]),
+            cell_money(&row[6]),
         ));
         for (kind, balance) in [
             ("POKOK", balances.0),
@@ -482,20 +454,22 @@ async fn seed_database(pool: &SqlitePool) -> Result<(), String> {
     }
 
     let mut latest_loan_balance: HashMap<String, i64> = HashMap::new();
-    for row in parse_csv(LOANS_2026).into_iter().skip(1) {
+    for row in &sheets.loans_2026 {
         if row.len() >= 23 {
-            latest_loan_balance.insert(row[0].clone(), money(&row[22]).max(0));
+            latest_loan_balance.insert(cell_text(&row[0]), cell_money(&row[22]).max(0));
         }
     }
 
-    for row in parse_csv(MASTER_LOANS).into_iter().skip(1) {
-        if row.len() < 16 || row[0].is_empty() {
+    for row in &sheets.master_loans {
+        if row.len() < 16 || cell_text(&row[0]).is_empty() {
             continue;
         }
-        let plafond = money(&row[4]).max(0);
-        let balance = latest_loan_balance.get(&row[0]).copied().unwrap_or(plafond);
-        let member_id = member_by_name.get(&normalize_name(&row[3])).cloned();
-        let status = if row[15].trim() == "PERLU CEK" {
+        let loan_id = cell_text(&row[0]);
+        let name = cell_text(&row[3]);
+        let plafond = cell_money(&row[4]).max(0);
+        let balance = latest_loan_balance.get(&loan_id).copied().unwrap_or(plafond);
+        let member_id = member_by_name.get(&normalize_name(&name)).cloned();
+        let status = if cell_text(&row[15]) == "PERLU CEK" {
             "Perlu review"
         } else if balance == 0 {
             "Lunas"
@@ -503,16 +477,16 @@ async fn seed_database(pool: &SqlitePool) -> Result<(), String> {
             "Berjalan"
         };
         sqlx::query("INSERT INTO loans (id, member_id, member_name, plafond, balance, rate_annual, tenor, interest_type, realization_date, due_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            .bind(&row[0])
+            .bind(&loan_id)
             .bind(member_id)
-            .bind(row[3].trim())
+            .bind(&name)
             .bind(plafond)
             .bind(balance)
-            .bind(percentage(&row[6]))
-            .bind(row[11].parse::<i64>().unwrap_or(1).max(1))
-            .bind(if row[7].trim() == "Flat" { "Flat" } else { "Menurun" })
-            .bind(row[9].trim())
-            .bind(row[10].trim())
+            .bind(cell_percentage(&row[6]))
+            .bind(cell_int(&row[11]).max(1))
+            .bind(if cell_text(&row[7]) == "Flat" { "Flat" } else { "Menurun" })
+            .bind(cell_date_display(&row[9]))
+            .bind(cell_date_display(&row[10]))
             .bind(status)
             .execute(&mut *transaction)
             .await
@@ -535,28 +509,30 @@ async fn seed_database(pool: &SqlitePool) -> Result<(), String> {
         .await
         .map_err(|error| error.to_string())?;
 
-    for row in parse_csv(CASH_2026).into_iter().skip(1) {
+    for row in &sheets.cash_2026 {
         if row.len() < 11 {
             continue;
         }
-        let cash_out = money(&row[4]);
-        let cash_in = money(&row[5]);
+        let cash_out = cell_money(&row[4]);
+        let cash_in = cell_money(&row[5]);
         let net_amount = cash_in - cash_out;
         if net_amount == 0 {
             continue;
         }
         let amount = net_amount.abs();
-        let source_row = row[9].trim();
+        let source_row = cell_text(&row[9]);
         let id = format!("MIG-KAS-{source_row}");
         let direction = if net_amount > 0 { "Masuk" } else { "Keluar" };
-        let business_date = iso_date(&row[0]);
+        let business_date = cell_date_iso(&row[0]);
+        let display_date = cell_date_display(&row[0]);
+        let description = cell_text(&row[1]);
         let reference = format!("MIG/KAS/2026/{source_row}");
         sqlx::query("INSERT INTO transactions (id, business_date, display_date, display_time, member_name, transaction_type, description, reference, direction, amount, status, actor) VALUES (?, ?, ?, '00:00', ?, 'MIGRATED_CASH', ?, ?, ?, ?, 'Terposting', 'Import Excel 2026')")
             .bind(&id)
             .bind(&business_date)
-            .bind(row[0].trim())
-            .bind(row[1].trim())
-            .bind(row[1].trim())
+            .bind(&display_date)
+            .bind(&description)
+            .bind(&description)
             .bind(&reference)
             .bind(direction)
             .bind(amount)
@@ -708,6 +684,28 @@ async fn snapshot(pool: &SqlitePool) -> Result<AppSnapshot, String> {
 
 #[tauri::command]
 async fn get_app_snapshot(state: State<'_, AppState>) -> Result<AppSnapshot, String> {
+    snapshot(&state.db).await
+}
+
+#[tauri::command]
+async fn import_workbook(path: String, state: State<'_, AppState>) -> Result<AppSnapshot, String> {
+    let already_seeded: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM app_meta WHERE key = 'seed_version'")
+            .fetch_one(&state.db)
+            .await
+            .map_err(|error| error.to_string())?;
+    if already_seeded > 0 {
+        return Err(
+            "Data sudah pernah diimpor. Hapus data aplikasi terlebih dahulu untuk mengimpor ulang."
+                .into(),
+        );
+    }
+    let sheets = tauri::async_runtime::spawn_blocking(move || {
+        load_workbook_sheets(std::path::Path::new(&path))
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    seed_database(&state.db, &sheets).await?;
     snapshot(&state.db).await
 }
 
@@ -1405,14 +1403,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_quoted_csv_cells() {
-        let rows = parse_csv("id,name,amount\n1,\"Nama, Anggota\",\"50,000\"\n");
-        assert_eq!(rows[1], vec!["1", "Nama, Anggota", "50,000"]);
-    }
-
-    #[test]
     fn converts_and_advances_business_dates() {
-        assert_eq!(iso_date("13-Sep-2026"), "2026-09-13");
         assert_eq!(add_months("2026-01-31", 1).unwrap(), "2026-02-28");
         assert_eq!(add_months("2024-01-31", 1).unwrap(), "2024-02-29");
     }
@@ -1427,9 +1418,27 @@ mod tests {
         assert_eq!(preview.annual_rate, 24.0);
     }
 
+    // This test seeds an in-memory database from the real cooperative workbook.
+    // The workbook contains real members' financial data and is intentionally
+    // excluded from git (see .gitignore), so it only runs on machines that have
+    // a copy of it under docs/.
     #[test]
     fn seeds_the_cleaned_workbook_into_a_balanced_database() {
+        let workbook_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/KOPERASI_BINA_SEJAHTERA_2026_DIBERSIHKAN.xlsm"
+        ))
+        .to_path_buf();
+        if !workbook_path.exists() {
+            eprintln!(
+                "skipping seeds_the_cleaned_workbook_into_a_balanced_database: {} not found locally",
+                workbook_path.display()
+            );
+            return;
+        }
+
         tauri::async_runtime::block_on(async {
+            let sheets = load_workbook_sheets(&workbook_path).unwrap();
             let pool = SqlitePoolOptions::new()
                 .max_connections(1)
                 .connect("sqlite::memory:")
@@ -1439,8 +1448,7 @@ mod tests {
                 .execute(&pool)
                 .await
                 .unwrap();
-            seed_database(&pool).await.unwrap();
-            apply_data_repairs(&pool).await.unwrap();
+            seed_database(&pool, &sheets).await.unwrap();
 
             let member_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM members")
                 .fetch_one(&pool)
@@ -1498,6 +1506,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             get_app_snapshot,
+            import_workbook,
             add_member,
             preview_loan,
             create_loan,
