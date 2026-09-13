@@ -1,6 +1,6 @@
 [package]
 name = "koperasi"
-version = "0.2.9"
+version = "0.3.9"
 description = "Koperasi App"
 authors = ["you"]
 edition = "2021"
@@ -124,6 +124,12 @@ tauri-plugin-log = "=2.5.1"
 tauri-plugin-http = "=2.4.4"
 tauri-plugin-dialog = "=2.2.2"
 tauri-plugin-persisted-scope = "=2.2.2"
+# calamine 0.35+ requires zip ^7/^8 -> rust-version 1.83+ (edition2024 for cargo 1.77.2).
+# 0.30.0 requires zip "4.2.0", matching our zip pin above, and rust-version 1.75.
+calamine = { version = "=0.30.0", features = ["dates"] }
+# calamine's own chrono dependency is default-features = false (no "alloc"), which
+# leaves NaiveDateTime::format() unavailable; pull it in directly for date formatting.
+chrono = { version = "0.4", default-features = false, features = ["alloc"] }
 
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-single-instance = "=2.2.4"
