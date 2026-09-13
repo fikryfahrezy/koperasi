@@ -1,90 +1,92 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { RouterView, useRoute } from "vue-router";
-import { Menu } from "lucide-vue-next";
+import { onMounted, ref } from "vue";
+import { RouterView, useRouter } from "vue-router";
+import { Bell, CalendarDays, ChevronDown, Menu, Search } from "lucide-vue-next";
 import Sidebar from "./components/Sidebar.vue";
+import ToastHost from "./components/ToastHost.vue";
 import { clearRuntimeError, runtimeError } from "./runtime-error";
+import { useKoperasiStore } from "./store/koperasi";
 
-const route = useRoute();
-const isLogin = computed(() => route.path === "/login");
-const isSidebarOpen = ref(false);
+const router = useRouter();
+const mobileOpen = ref(false);
+const collapsed = ref(false);
+const search = ref("");
+const { initialize, loading, backendError } = useKoperasiStore();
 
-const closeSidebar = () => {
-  isSidebarOpen.value = false;
-};
-
-const toggleSidebar = () => {
-  isSidebarOpen.value = !isSidebarOpen.value;
-};
+onMounted(initialize);
+function runSearch() {
+  if (search.value.trim())
+    router.push({ path: "/members", query: { q: search.value.trim() } });
+}
 </script>
 
 <template>
   <div class="app-frame">
     <section v-if="runtimeError" class="runtime-banner" role="alert">
-      <div class="runtime-banner__content">
-        <div>
-          <p class="runtime-banner__eyebrow">Runtime error</p>
-          <p class="runtime-banner__description">
-            Unhandled app errors are mirrored here when the webview console is
-            not visible.
-          </p>
-        </div>
-        <button
-          class="runtime-banner__dismiss"
-          type="button"
-          @click="clearRuntimeError"
-        >
-          Dismiss
-        </button>
+      <div>
+        <strong>Terjadi kesalahan aplikasi</strong>
+        <p>{{ runtimeError }}</p>
       </div>
-      <pre class="runtime-banner__body">{{ runtimeError }}</pre>
+      <button @click="clearRuntimeError">Tutup</button>
     </section>
-
-    <RouterView v-if="isLogin" />
-
-    <div v-else class="dashboard-shell">
+    <div :class="['app-shell', { 'app-shell--collapsed': collapsed }]">
       <button
-        v-if="isSidebarOpen"
-        class="dashboard-shell__overlay"
-        type="button"
-        aria-label="Close sidebar"
-        @click="closeSidebar"
+        v-if="mobileOpen"
+        class="sidebar-overlay"
+        aria-label="Tutup menu"
+        @click="mobileOpen = false"
       ></button>
-
-      <div
-        :class="[
-          'dashboard-shell__sidebar',
-          { 'dashboard-shell__sidebar--open': isSidebarOpen },
-        ]"
-      >
-        <Sidebar @close="closeSidebar" />
+      <div :class="['app-shell__sidebar', { 'is-open': mobileOpen }]">
+        <Sidebar
+          :collapsed="collapsed"
+          @close="mobileOpen = false"
+          @toggle="collapsed = !collapsed"
+        />
       </div>
-
-      <div class="dashboard-shell__main">
-        <header class="dashboard-header">
-          <div class="dashboard-header__group">
-            <button
-              class="dashboard-header__menu"
-              type="button"
-              aria-label="Toggle sidebar"
-              @click="toggleSidebar"
+      <div class="app-shell__body">
+        <header class="topbar">
+          <button
+            class="topbar__menu icon-button"
+            aria-label="Buka menu"
+            @click="mobileOpen = true"
+          >
+            <Menu :size="21" />
+          </button>
+          <form class="global-search" @submit.prevent="runSearch">
+            <Search :size="18" /><input
+              v-model="search"
+              placeholder="Cari anggota, transaksi, pinjaman..."
+            /><kbd>⌘ K</kbd>
+          </form>
+          <div class="topbar__tools">
+            <button class="period-control">
+              <CalendarDays :size="17" /><span>Sep 2026</span
+              ><ChevronDown :size="15" /></button
+            ><button
+              class="icon-button notification-button"
+              aria-label="Notifikasi"
             >
-              <Menu class="dashboard-header__menu-icon" />
+              <Bell :size="19" /><i></i>
             </button>
-
-            <div>
-              <p class="dashboard-header__eyebrow">Koperasi</p>
-              <h1 class="dashboard-header__title">Koperasi Sejahtera</h1>
-            </div>
           </div>
-
-          <div class="dashboard-header__user">Admin</div>
         </header>
-
-        <main class="dashboard-content">
-          <RouterView />
+        <main class="app-content">
+          <section v-if="loading" class="backend-state panel">
+            <span class="backend-state__spinner"></span>
+            <strong>Menyiapkan database koperasi…</strong>
+            <p>Memuat anggota, pinjaman, simpanan, dan buku kas 2026.</p>
+          </section>
+          <section v-else-if="backendError" class="backend-state panel">
+            <strong>Backend desktop tidak tersambung</strong>
+            <p>{{ backendError }}</p>
+            <button class="button button--primary" @click="initialize">
+              Coba lagi
+            </button>
+          </section>
+          <RouterView v-else />
         </main>
       </div>
     </div>
+    <ToastHost />
   </div>
 </template>

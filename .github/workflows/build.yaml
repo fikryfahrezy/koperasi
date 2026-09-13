@@ -56,6 +56,7 @@ jobs:
 
       - name: Download WebView2 Fixed Runtime
         if: matrix.platform == 'windows-2025'
+        # Pinned for Windows 7. Revalidate on a real Windows 7 machine before upgrading.
         run: gh release download webview2-runtimes --pattern "Microsoft.WebView2.FixedVersionRuntime.88.0.705.81.x64.cab"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -64,6 +65,15 @@ jobs:
         if: matrix.platform == 'windows-2025'
         run: |
           Expand .\Microsoft.WebView2.FixedVersionRuntime.88.0.705.81.x64.cab -F:* ./src-tauri
+
+      - name: Verify WebView2 Fixed Runtime
+        if: matrix.platform == 'windows-2025'
+        shell: pwsh
+        run: |
+          $runtime = "./src-tauri/Microsoft.WebView2.FixedVersionRuntime.88.0.705.81.x64"
+          if (-not (Test-Path "$runtime/msedgewebview2.exe")) {
+            throw "WebView2 Fixed Runtime 88.0.705.81 was not extracted correctly."
+          }
 
       - name: Install Frontend Dependencies
         run: pnpm install --frozen-lockfile

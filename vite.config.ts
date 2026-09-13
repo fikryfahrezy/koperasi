@@ -7,6 +7,14 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [vue()],
 
+  // The Windows bundle ships WebView2 Fixed Runtime 88.0.705.81. Keeping
+  // generated JavaScript and CSS on this target prevents a modern CI runner
+  // from emitting syntax that the Windows 7 webview cannot parse.
+  build: {
+    target: "chrome88",
+    cssTarget: "chrome88",
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors
