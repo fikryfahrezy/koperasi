@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import {
   ArrowDownLeft,
   ArrowUpRight,
+  CalendarX2,
   Download,
   MoreHorizontal,
   Search,
@@ -17,15 +18,32 @@ import {
   useKoperasiStore,
 } from "../store/koperasi";
 
-const { transactions, totals, reverseTransaction, notify } = useKoperasiStore();
+const {
+  selectedYear,
+  yearTransactions,
+  yearTotals,
+  reverseTransaction,
+  notify,
+} = useKoperasiStore();
 const query = ref("");
 const selected = ref<Transaction | null>(null);
+const cashHasData = computed(() => yearTransactions.value.length > 0);
 const filtered = computed(() =>
-  transactions.filter((item) =>
+  yearTransactions.value.filter((item) =>
     `${item.description} ${item.memberName} ${item.reference}`
       .toLowerCase()
       .includes(query.value.toLowerCase()),
   ),
+);
+const cashIn = computed(() =>
+  yearTransactions.value
+    .filter((item) => item.direction === "Masuk")
+    .reduce((sum, item) => sum + item.amount, 0),
+);
+const cashOut = computed(() =>
+  yearTransactions.value
+    .filter((item) => item.direction === "Keluar")
+    .reduce((sum, item) => sum + item.amount, 0),
 );
 async function reverseSelected() {
   if (!selected.value) return;
@@ -37,17 +55,14 @@ async function reverseSelected() {
 
 <template>
   <div class="page-stack">
-    <PageHeader
-      eyebrow="Ledger otomatis"
-      title="Buku kas"
-      description="Setiap kas masuk dan keluar terhubung ke transaksi sumber dan komponen sub-ledger."
+    <PageHeader title="Buku kas"
       ><template #actions
         ><button
           class="button button--secondary"
           @click="
             notify(
               'Ekspor disiapkan',
-              'Buku kas September akan diekspor.',
+              `Buku kas ${selectedYear} akan diekspor.`,
               'info',
             )
           "
@@ -56,101 +71,109 @@ async function reverseSelected() {
         </button></template
       ></PageHeader
     >
-    <section class="balance-band">
-      <div><span>Saldo awal September</span><strong>Rp43.674.064</strong></div>
-      <i></i>
-      <div>
-        <span>Kas masuk</span><strong class="amount-in">+Rp180.325.747</strong>
-      </div>
-      <i></i>
-      <div>
-        <span>Kas keluar</span><strong class="amount-out">−Rp88.318.000</strong>
-      </div>
-      <i></i>
-      <div class="balance-band__ending">
-        <span>Saldo berjalan</span
-        ><strong>{{ formatCurrency(totals.cash.value) }}</strong>
-      </div>
+    <section v-if="!cashHasData" class="panel year-empty-state">
+      <CalendarX2 :size="36" />
+      <strong>Belum ada transaksi kas untuk {{ selectedYear }}</strong>
+      <p>Pilih tahun lain untuk melihat mutasi buku kas.</p>
     </section>
-    <section class="panel table-panel">
-      <div class="toolbar">
-        <label class="search-field"
-          ><Search :size="18" /><input
-            v-model="query"
-            placeholder="Cari uraian, anggota, atau referensi..." /></label
-        ><select class="select-control">
-          <option>September 2026</option>
-          <option>Agustus 2026</option>
-        </select>
-      </div>
-      <div class="data-table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Tanggal</th>
-              <th>Transaksi</th>
-              <th>Referensi</th>
-              <th>Kas masuk</th>
-              <th>Kas keluar</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in filtered" :key="item.id">
-              <td>
-                {{ item.date }}<small class="cell-sub">{{ item.time }}</small>
-              </td>
-              <td>
-                <div class="ledger-description">
-                  <span :class="item.direction === 'Masuk' ? 'is-in' : 'is-out'"
-                    ><ArrowDownLeft
-                      v-if="item.direction === 'Masuk'"
-                      :size="17" /><ArrowUpRight v-else :size="17"
-                  /></span>
-                  <div>
-                    <strong>{{ item.description }}</strong
-                    ><small>{{ item.memberName }} · {{ item.id }}</small>
+    <template v-else>
+      <section class="balance-band">
+        <div>
+          <span>Kas masuk {{ selectedYear }}</span
+          ><strong class="amount-in">+{{ formatCurrency(cashIn) }}</strong>
+        </div>
+        <i></i>
+        <div>
+          <span>Kas keluar {{ selectedYear }}</span
+          ><strong class="amount-out">−{{ formatCurrency(cashOut) }}</strong>
+        </div>
+        <i></i>
+        <div class="balance-band__ending">
+          <span>Kas net</span
+          ><strong>{{ formatCurrency(yearTotals.cash) }}</strong>
+        </div>
+      </section>
+      <section class="panel table-panel">
+        <div class="toolbar">
+          <label class="search-field"
+            ><Search :size="18" /><input
+              v-model="query"
+              placeholder="Cari uraian, anggota, atau referensi..."
+          /></label>
+          <div class="toolbar__meta">Tahun {{ selectedYear }}</div>
+        </div>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Tanggal</th>
+                <th>Transaksi</th>
+                <th>Referensi</th>
+                <th>Kas masuk</th>
+                <th>Kas keluar</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in filtered" :key="item.id">
+                <td>
+                  {{ item.date }}<small class="cell-sub">{{ item.time }}</small>
+                </td>
+                <td>
+                  <div class="ledger-description">
+                    <span
+                      :class="item.direction === 'Masuk' ? 'is-in' : 'is-out'"
+                      ><ArrowDownLeft
+                        v-if="item.direction === 'Masuk'"
+                        :size="17" /><ArrowUpRight v-else :size="17"
+                    /></span>
+                    <div>
+                      <strong>{{ item.description }}</strong
+                      ><small>{{ item.memberName }} · {{ item.id }}</small>
+                    </div>
                   </div>
-                </div>
-              </td>
-              <td>
-                <code>{{ item.reference }}</code>
-              </td>
-              <td class="num-cell amount-in">
-                {{
-                  item.direction === "Masuk" ? formatCurrency(item.amount) : "—"
-                }}
-              </td>
-              <td class="num-cell amount-out">
-                {{
-                  item.direction === "Keluar"
-                    ? formatCurrency(item.amount)
-                    : "—"
-                }}
-              </td>
-              <td>
-                <StatusPill
-                  :label="item.status"
-                  :tone="
-                    item.status === 'Terposting'
-                      ? 'success'
-                      : item.status === 'Dibalik'
-                        ? 'neutral'
-                        : 'warning'
-                  "
-                />
-              </td>
-              <td>
-                <button class="icon-button" @click="selected = item">
-                  <MoreHorizontal :size="18" />
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
+                </td>
+                <td>
+                  <code>{{ item.reference }}</code>
+                </td>
+                <td class="num-cell amount-in">
+                  {{
+                    item.direction === "Masuk"
+                      ? formatCurrency(item.amount)
+                      : "—"
+                  }}
+                </td>
+                <td class="num-cell amount-out">
+                  {{
+                    item.direction === "Keluar"
+                      ? formatCurrency(item.amount)
+                      : "—"
+                  }}
+                </td>
+                <td>
+                  <StatusPill
+                    :label="item.status"
+                    :tone="
+                      item.status === 'Terposting'
+                        ? 'success'
+                        : item.status === 'Dibalik'
+                          ? 'neutral'
+                          : 'warning'
+                    "
+                  />
+                </td>
+                <td>
+                  <button class="icon-button" @click="selected = item">
+                    <MoreHorizontal :size="18" />
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </template>
     <UiModal
       :open="Boolean(selected)"
       title="Detail transaksi"

@@ -4,6 +4,7 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
 import { DownloadCloud, RefreshCw } from "lucide-vue-next";
+import { useI18n } from "vue-i18n";
 import UiModal from "./UiModal.vue";
 
 type Phase =
@@ -21,6 +22,7 @@ const currentVersion = ref("");
 const update = ref<Update | null>(null);
 const progress = ref(0);
 const errorMessage = ref("");
+const { t } = useI18n();
 
 onMounted(async () => {
   currentVersion.value = await getVersion();
@@ -89,43 +91,47 @@ function closeModal() {
 <template>
   <button
     class="icon-button update-checker-button"
-    :aria-label="phase === 'available' ? 'Pembaruan tersedia' : 'Cek pembaruan'"
+    :aria-label="
+      phase === 'available'
+        ? t('update.availableLabel')
+        : t('update.checkLabel')
+    "
     @click="open = true"
   >
-    <RefreshCw :size="19" :class="{ 'is-spinning': phase === 'checking' }" />
+    <RefreshCw :size="19" />
     <i v-if="phase === 'available'"></i>
   </button>
 
   <UiModal
     :open="open"
-    title="Pembaruan aplikasi"
-    :description="`Versi terpasang saat ini: ${currentVersion}`"
+    :title="t('update.title')"
+    :description="t('update.currentVersion', { version: currentVersion })"
     @close="closeModal"
   >
     <div class="update-checker">
       <div v-if="phase === 'checking'" class="update-checker__state">
         <span class="backend-state__spinner"></span>
-        <p>Memeriksa pembaruan…</p>
+        <p>{{ t("update.checking") }}</p>
       </div>
 
       <div v-else-if="phase === 'available'" class="update-checker__state">
         <DownloadCloud :size="28" />
-        <h3>Versi {{ update?.version }} tersedia</h3>
+        <h3>{{ t("update.available", { version: update?.version }) }}</h3>
         <p v-if="update?.body" class="update-checker__notes">
           {{ update.body }}
         </p>
         <div class="modal-actions">
           <button class="button button--secondary" @click="open = false">
-            Nanti
+            {{ t("update.later") }}
           </button>
           <button class="button button--primary" @click="installUpdate">
-            Update sekarang
+            {{ t("update.installNow") }}
           </button>
         </div>
       </div>
 
       <div v-else-if="phase === 'downloading'" class="update-checker__state">
-        <p>Mengunduh dan memasang pembaruan… {{ progress }}%</p>
+        <p>{{ t("update.installing", { progress }) }}</p>
         <div class="update-checker__progress">
           <div
             class="update-checker__progress-bar"
@@ -135,28 +141,28 @@ function closeModal() {
       </div>
 
       <div v-else-if="phase === 'installed'" class="update-checker__state">
-        <p>Pembaruan terpasang. Memulai ulang aplikasi…</p>
+        <p>{{ t("update.installed") }}</p>
       </div>
 
       <div v-else-if="phase === 'up-to-date'" class="update-checker__state">
-        <p>Aplikasi sudah menggunakan versi terbaru.</p>
+        <p>{{ t("update.upToDate") }}</p>
         <div class="modal-actions">
           <button class="button button--primary" @click="open = false">
-            Tutup
+            {{ t("common.close") }}
           </button>
         </div>
       </div>
 
       <div v-else-if="phase === 'error'" class="update-checker__state">
         <p class="update-checker__error">
-          Gagal memeriksa pembaruan: {{ errorMessage }}
+          {{ t("update.failed", { message: errorMessage }) }}
         </p>
         <div class="modal-actions">
           <button
             class="button button--secondary"
             @click="checkForUpdate(false)"
           >
-            Coba lagi
+            {{ t("common.retry") }}
           </button>
         </div>
       </div>
@@ -164,7 +170,7 @@ function closeModal() {
       <div v-else class="update-checker__state">
         <div class="modal-actions">
           <button class="button button--primary" @click="checkForUpdate(false)">
-            Cek pembaruan
+            {{ t("update.checkLabel") }}
           </button>
         </div>
       </div>
