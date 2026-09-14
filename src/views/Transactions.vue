@@ -68,11 +68,7 @@ function reset() {
 
 <template>
   <div class="page-stack transaction-page">
-    <PageHeader
-      eyebrow="Transaksi"
-      title="Pembayaran anggota"
-      description="Catat satu kali, lalu sistem membagi pembayaran ke seluruh ledger terkait."
-    />
+    <PageHeader title="Pembayaran anggota" />
     <ol class="stepper">
       <li :class="{ active: step >= 1 }">
         <span>1</span>

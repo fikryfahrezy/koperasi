@@ -1,14 +1,10 @@
 <script setup lang="ts">
-defineProps<{ eyebrow?: string; title: string; description: string }>();
+defineProps<{ title: string }>();
 </script>
 
 <template>
   <header class="page-heading">
-    <div>
-      <p v-if="eyebrow" class="page-heading__eyebrow">{{ eyebrow }}</p>
-      <h1>{{ title }}</h1>
-      <p>{{ description }}</p>
-    </div>
+    <h1>{{ title }}</h1>
     <div v-if="$slots.actions" class="page-heading__actions">
       <slot name="actions" />
     </div>

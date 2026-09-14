@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { computed, reactive, ref } from "vue";
+import { DEFAULT_LOCALE, translate } from "../i18n";
 
 export type TransactionStatus = "Terposting" | "Draf" | "Dibalik";
 export type LoanStatus = "Draf" | "Berjalan" | "Perlu review" | "Lunas";
@@ -117,12 +118,63 @@ const admin = reactive<AdminState>({
   auditEvents: [],
 });
 const toasts = ref<ToastMessage[]>([]);
+const FIRST_REPORTING_YEAR = 2025;
+const currentYear = new Date().getFullYear();
+const selectedYear = ref(currentYear);
+const yearOptions = computed(() =>
+  Array.from(
+    { length: Math.max(1, currentYear - FIRST_REPORTING_YEAR + 1) },
+    (_, index) => currentYear - index,
+  ),
+);
 let toastId = 0;
 let initializePromise: Promise<void> | null = null;
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
+
+function yearFrom(value: string) {
+  const match = value.match(/(?:19|20)\d{2}/);
+  return match ? Number(match[0]) : null;
+}
+
+const yearTransactions = computed(() =>
+  transactions.filter(
+    (transaction) => yearFrom(transaction.date) === selectedYear.value,
+  ),
+);
+const yearLoans = computed(() =>
+  loans.filter((loan) => {
+    const year = yearFrom(loan.realizationDate);
+    return (
+      year === selectedYear.value ||
+      (year === null && selectedYear.value === currentYear)
+    );
+  }),
+);
+const yearHasData = computed(
+  () => yearTransactions.value.length > 0 || yearLoans.value.length > 0,
+);
+const yearMembers = computed(() => (yearHasData.value ? members : []));
+const yearTotals = computed(() => ({
+  cash: yearTransactions.value.reduce(
+    (sum, transaction) =>
+      sum +
+      (transaction.direction === "Masuk"
+        ? transaction.amount
+        : -transaction.amount),
+    0,
+  ),
+  savings: yearMembers.value.reduce((sum, member) => sum + member.savings, 0),
+  loanPortfolio: yearLoans.value
+    .filter(
+      (loan) => loan.status === "Berjalan" || loan.status === "Perlu review",
+    )
+    .reduce((sum, loan) => sum + loan.balance, 0),
+  members: yearMembers.value.filter((member) => member.status === "Aktif")
+    .length,
+}));
 
 function notify(
   title: string,
@@ -156,8 +208,8 @@ async function initialize() {
     } catch (error) {
       backendError.value = errorMessage(error);
       notify(
-        "Backend tidak tersedia",
-        "Jalankan aplikasi melalui `pnpm tauri dev`, bukan server web biasa.",
+        translate("notifications.backendUnavailable"),
+        translate("notifications.backendHint"),
         "warning",
       );
     } finally {
@@ -170,7 +222,7 @@ async function initialize() {
 
 async function importWorkbook() {
   const path = await open({
-    title: "Pilih workbook Excel (.xlsm)",
+    title: translate("dialog.workbookPicker"),
     multiple: false,
     filters: [{ name: "Excel Macro Workbook", extensions: ["xlsm", "xlsx"] }],
   });
@@ -178,12 +230,16 @@ async function importWorkbook() {
   try {
     applySnapshot(await invoke<AppSnapshot>("import_workbook", { path }));
     notify(
-      "Workbook berhasil diimpor",
-      "Anggota, pinjaman, simpanan, dan buku kas telah dimuat ke database lokal.",
+      translate("notifications.workbookImported"),
+      translate("notifications.workbookImportedMessage"),
     );
     return true;
   } catch (error) {
-    notify("Impor workbook gagal", errorMessage(error), "warning");
+    notify(
+      translate("notifications.workbookImportFailed"),
+      errorMessage(error),
+      "warning",
+    );
     return false;
   }
 }
@@ -192,16 +248,25 @@ async function addMember(input: {
   name: string;
   memberNumber: string;
   joinedAt: string;
+  principalSavings: number;
 }) {
   try {
-    applySnapshot(await invoke<AppSnapshot>("add_member", { input }));
+    applySnapshot(
+      await invoke<AppSnapshot>("add_member", {
+        input: { ...input, ...operationalTimestamp() },
+      }),
+    );
     notify(
-      "Anggota berhasil ditambahkan",
-      `${input.name} dan tiga rekening simpanannya tersimpan di SQLite.`,
+      translate("notifications.memberAdded"),
+      translate("notifications.memberAddedMessage", { name: input.name }),
     );
     return true;
   } catch (error) {
-    notify("Anggota gagal disimpan", errorMessage(error), "warning");
+    notify(
+      translate("notifications.memberSaveFailed"),
+      errorMessage(error),
+      "warning",
+    );
     return false;
   }
 }
@@ -224,13 +289,17 @@ async function createLoan(input: {
   try {
     applySnapshot(await invoke<AppSnapshot>("create_loan", { input }));
     notify(
-      "Pinjaman disimpan sebagai draf",
-      "Kontrak menunggu persetujuan sebelum pencairan.",
+      translate("notifications.loanDrafted"),
+      translate("notifications.loanDraftedMessage"),
       "info",
     );
     return true;
   } catch (error) {
-    notify("Pinjaman gagal disimpan", errorMessage(error), "warning");
+    notify(
+      translate("notifications.loanSaveFailed"),
+      errorMessage(error),
+      "warning",
+    );
     return false;
   }
 }
@@ -239,7 +308,7 @@ function operationalTimestamp() {
   return {
     businessDate: "2026-09-13",
     displayDate: "13 Sep 2026",
-    displayTime: new Date().toLocaleTimeString("id-ID", {
+    displayTime: new Date().toLocaleTimeString(DEFAULT_LOCALE, {
       hour: "2-digit",
       minute: "2-digit",
     }),
@@ -254,12 +323,16 @@ async function disburseLoan(loanId: string) {
       }),
     );
     notify(
-      "Pinjaman berhasil dicairkan",
-      "Kas keluar, piutang pokok, provisi, dan audit trail telah diposting atomik.",
+      translate("notifications.loanDisbursed"),
+      translate("notifications.loanDisbursedMessage"),
     );
     return true;
   } catch (error) {
-    notify("Pencairan pinjaman gagal", errorMessage(error), "warning");
+    notify(
+      translate("notifications.loanDisbursementFailed"),
+      errorMessage(error),
+      "warning",
+    );
     return false;
   }
 }
@@ -278,12 +351,16 @@ async function postSavingsTransaction(input: {
       }),
     );
     notify(
-      `${input.movement} berhasil diposting`,
-      "Saldo simpanan, buku kas, dan audit trail telah diperbarui.",
+      translate("notifications.movementPosted", { movement: input.movement }),
+      translate("notifications.movementPostedMessage"),
     );
     return true;
   } catch (error) {
-    notify(`${input.movement} gagal`, errorMessage(error), "warning");
+    notify(
+      translate("notifications.movementFailed", { movement: input.movement }),
+      errorMessage(error),
+      "warning",
+    );
     return false;
   }
 }
@@ -305,12 +382,20 @@ async function postPayment(input: {
       await invoke<AppSnapshot>("post_payment", { input: backendInput }),
     );
     notify(
-      "Pembayaran berhasil diposting",
-      `${formatCurrency(input.principal + input.interest + input.wajib + input.voluntary)} masuk melalui transaksi database atomik.`,
+      translate("notifications.paymentPosted"),
+      translate("notifications.paymentPostedMessage", {
+        amount: formatCurrency(
+          input.principal + input.interest + input.wajib + input.voluntary,
+        ),
+      }),
     );
     return true;
   } catch (error) {
-    notify("Pembayaran gagal diposting", errorMessage(error), "warning");
+    notify(
+      translate("notifications.paymentFailed"),
+      errorMessage(error),
+      "warning",
+    );
     return false;
   }
 }
@@ -322,7 +407,11 @@ async function loadAdminState() {
     admin.auditEvents.splice(0, admin.auditEvents.length, ...state.auditEvents);
     return true;
   } catch (error) {
-    notify("Administrasi gagal dimuat", errorMessage(error), "warning");
+    notify(
+      translate("notifications.adminLoadFailed"),
+      errorMessage(error),
+      "warning",
+    );
     return false;
   }
 }
@@ -335,12 +424,18 @@ async function saveFinancialParameters(input: FinancialParameters) {
     Object.assign(admin.parameters, state.parameters);
     admin.auditEvents.splice(0, admin.auditEvents.length, ...state.auditEvents);
     notify(
-      "Versi parameter tersimpan",
-      `Nilai baru berlaku mulai ${input.effectiveDate} dan tercatat di audit trail.`,
+      translate("notifications.parametersSaved"),
+      translate("notifications.parametersSavedMessage", {
+        date: input.effectiveDate,
+      }),
     );
     return true;
   } catch (error) {
-    notify("Parameter gagal disimpan", errorMessage(error), "warning");
+    notify(
+      translate("notifications.parametersSaveFailed"),
+      errorMessage(error),
+      "warning",
+    );
     return false;
   }
 }
@@ -353,19 +448,23 @@ async function reverseTransaction(id: string) {
       }),
     );
     notify(
-      "Reversal berhasil diposting",
-      `${id} dibalik melalui transaksi baru tanpa menghapus histori asal.`,
+      translate("notifications.reversalPosted"),
+      translate("notifications.reversalPostedMessage", { id }),
       "warning",
     );
     return true;
   } catch (error) {
-    notify("Reversal gagal", errorMessage(error), "warning");
+    notify(
+      translate("notifications.reversalFailed"),
+      errorMessage(error),
+      "warning",
+    );
     return false;
   }
 }
 
 export function formatCurrency(value: number, compact = false) {
-  return new Intl.NumberFormat("id-ID", {
+  return new Intl.NumberFormat(DEFAULT_LOCALE, {
     style: "currency",
     currency: "IDR",
     maximumFractionDigits: 0,
@@ -382,6 +481,13 @@ export const useKoperasiStore = () => ({
   backendError,
   admin,
   toasts,
+  selectedYear,
+  yearOptions,
+  yearTransactions,
+  yearLoans,
+  yearMembers,
+  yearTotals,
+  yearHasData,
   initialize,
   notify,
   importWorkbook,
