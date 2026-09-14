@@ -24,17 +24,14 @@ async function handleImport() {
 </script>
 <template>
   <div class="page-stack">
-    <PageHeader
-      eyebrow="Data staging"
-      title="Migrasi Excel"
-      description="Impor anggota, pinjaman, simpanan, dan buku kas langsung dari workbook Excel (.xlsm) ke database lokal."
+    <PageHeader title="Migrasi Excel"
       ><template #actions
         ><button
           class="button button--primary"
           :disabled="importing"
           @click="handleImport"
         >
-          <Loader2 v-if="importing" :size="18" class="spin" />
+          <Loader2 v-if="importing" :size="18" />
           <UploadCloud v-else :size="18" />
           {{ importing ? "Mengimpor..." : "Impor workbook" }}
         </button></template
@@ -90,13 +87,5 @@ async function handleImport() {
   gap: 0.75rem;
   padding: 1.25rem 1.5rem;
   color: var(--muted, #6b7280);
-}
-.spin {
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 </style>

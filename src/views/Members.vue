@@ -1,14 +1,9 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
-import {
-  Download,
-  Plus,
-  Search,
-  UserRound,
-  WalletCards,
-} from "lucide-vue-next";
+import { Download, Plus, Search, UserRound } from "lucide-vue-next";
 import { useRoute } from "vue-router";
 import PageHeader from "../components/PageHeader.vue";
+import RupiahInput from "../components/RupiahInput.vue";
 import StatusPill from "../components/StatusPill.vue";
 import UiModal from "../components/UiModal.vue";
 import { formatCurrency, useKoperasiStore } from "../store/koperasi";
@@ -21,7 +16,13 @@ watch(
   (value) => (query.value = String(value ?? "")),
 );
 const open = ref(false);
-const form = reactive({ name: "", memberNumber: "", joinedAt: "13 Sep 2026" });
+const form = reactive({
+  name: "",
+  memberNumber: "",
+  joinedAt: "2026-09-13",
+  principalSavings: 50_000,
+});
+
 const filteredMembers = computed(() =>
   members.filter((member) =>
     `${member.name} ${member.memberNumber} ${member.id}`
@@ -29,23 +30,29 @@ const filteredMembers = computed(() =>
       .includes(query.value.toLowerCase()),
   ),
 );
-
 async function submit() {
-  if (!form.name || !form.memberNumber) return;
+  if (
+    !form.name ||
+    !form.memberNumber ||
+    !Number.isFinite(form.principalSavings) ||
+    form.principalSavings < 50_000
+  )
+    return;
   const saved = await addMember({ ...form });
   if (!saved) return;
   open.value = false;
-  Object.assign(form, { name: "", memberNumber: "", joinedAt: "13 Sep 2026" });
+  Object.assign(form, {
+    name: "",
+    memberNumber: "",
+    joinedAt: "2026-09-13",
+    principalSavings: 50_000,
+  });
 }
 </script>
 
 <template>
   <div class="page-stack">
-    <PageHeader
-      eyebrow="Master data"
-      title="Anggota"
-      description="Kelola identitas, status keanggotaan, dan seluruh relasi finansial anggota."
-    >
+    <PageHeader title="Anggota">
       <template #actions
         ><button
           class="button button--secondary"
@@ -116,18 +123,21 @@ async function submit() {
                   :tone="member.status === 'Aktif' ? 'success' : 'neutral'"
                 />
               </td>
-              <td><button class="row-action" type="button">Detail</button></td>
+              <td>
+                <RouterLink
+                  class="row-action"
+                  :to="{ name: 'member-detail', params: { id: member.id } }"
+                  :aria-label="`Lihat detail ${member.name}`"
+                >
+                  Detail
+                </RouterLink>
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
     </section>
-    <UiModal
-      :open="open"
-      title="Tambah anggota baru"
-      description="Rekening simpanan pokok, wajib, dan manasuka akan dibuat otomatis."
-      @close="open = false"
-    >
+    <UiModal :open="open" title="Tambah anggota baru" @close="open = false">
       <form class="form-stack" @submit.prevent="submit">
         <label class="field"
           ><span>Nama lengkap</span
@@ -145,16 +155,18 @@ async function submit() {
               placeholder="KBS-0145" /></label
           ><label class="field"
             ><span>Tanggal bergabung</span
-            ><input v-model="form.joinedAt" required
+            ><input v-model="form.joinedAt" type="date" required
           /></label>
         </div>
-        <div class="info-callout">
-          <WalletCards :size="20" />
-          <p>
-            <strong>Simpanan pokok otomatis</strong><br />Rp50.000 akan dicatat
-            sebagai kewajiban awal anggota.
-          </p>
-        </div>
+        <label class="field"
+          ><span>Simpanan pokok</span
+          ><RupiahInput
+            v-model="form.principalSavings"
+            :min="50000"
+            min-message="Simpanan pokok minimal Rp50.000."
+            aria-label="Simpanan pokok dalam Rupiah"
+            required
+        /></label>
         <div class="modal-actions">
           <button
             class="button button--secondary"

@@ -7,20 +7,18 @@ const { toasts } = useKoperasiStore();
 
 <template>
   <div class="toast-stack" aria-live="polite">
-    <TransitionGroup name="toast">
-      <article
-        v-for="toast in toasts"
-        :key="toast.id"
-        :class="['toast-card', `toast-card--${toast.tone}`]"
-      >
-        <CheckCircle2 v-if="toast.tone === 'success'" :size="20" />
-        <TriangleAlert v-else-if="toast.tone === 'warning'" :size="20" />
-        <Info v-else :size="20" />
-        <div>
-          <strong>{{ toast.title }}</strong>
-          <p>{{ toast.message }}</p>
-        </div>
-      </article>
-    </TransitionGroup>
+    <article
+      v-for="toast in toasts"
+      :key="toast.id"
+      :class="['toast-card', `toast-card--${toast.tone}`]"
+    >
+      <CheckCircle2 v-if="toast.tone === 'success'" :size="20" />
+      <TriangleAlert v-else-if="toast.tone === 'warning'" :size="20" />
+      <Info v-else :size="20" />
+      <div>
+        <strong>{{ toast.title }}</strong>
+        <p>{{ toast.message }}</p>
+      </div>
+    </article>
   </div>
 </template>

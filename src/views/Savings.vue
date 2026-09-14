@@ -3,7 +3,8 @@ import { computed, onMounted, reactive, ref } from "vue";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
-  PiggyBank,
+  CalendarX2,
+  Coins,
   Search,
 } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
@@ -11,8 +12,16 @@ import StatusPill from "../components/StatusPill.vue";
 import UiModal from "../components/UiModal.vue";
 import { formatCurrency, useKoperasiStore } from "../store/koperasi";
 
-const { members, totals, admin, loadAdminState, postSavingsTransaction } =
-  useKoperasiStore();
+const {
+  members,
+  selectedYear,
+  yearMembers,
+  yearTotals,
+  yearHasData,
+  admin,
+  loadAdminState,
+  postSavingsTransaction,
+} = useKoperasiStore();
 const query = ref("");
 const open = ref(false);
 const form = reactive({
@@ -23,18 +32,18 @@ const form = reactive({
   reference: "",
 });
 const filtered = computed(() =>
-  members.filter((member) =>
+  yearMembers.value.filter((member) =>
     member.name.toLowerCase().includes(query.value.toLowerCase()),
   ),
 );
 const principalTotal = computed(() =>
-  members.reduce((sum, member) => sum + member.principalSavings, 0),
+  yearMembers.value.reduce((sum, member) => sum + member.principalSavings, 0),
 );
 const mandatoryTotal = computed(() =>
-  members.reduce((sum, member) => sum + member.mandatorySavings, 0),
+  yearMembers.value.reduce((sum, member) => sum + member.mandatorySavings, 0),
 );
 const voluntaryTotal = computed(() =>
-  members.reduce((sum, member) => sum + member.voluntarySavings, 0),
+  yearMembers.value.reduce((sum, member) => sum + member.voluntarySavings, 0),
 );
 onMounted(loadAdminState);
 function startMovement(movement: "Setoran" | "Penarikan") {
@@ -58,10 +67,7 @@ async function submit() {
 </script>
 <template>
   <div class="page-stack">
-    <PageHeader
-      eyebrow="Sub-ledger"
-      title="Simpanan"
-      description="Saldo pokok, wajib, dan manasuka anggota—dihitung langsung dari mutasi transaksi."
+    <PageHeader title="Simpanan"
       ><template #actions
         ><button
           class="button button--secondary"
@@ -76,76 +82,83 @@ async function submit() {
         </button></template
       ></PageHeader
     >
-    <section class="savings-summary">
-      <article class="savings-hero">
-        <span><PiggyBank :size="24" /></span>
-        <p>Total simpanan anggota</p>
-        <strong>{{ formatCurrency(totals.savings.value) }}</strong
-        ><small>Saldo awal + mutasi sampai 13 September 2026</small>
-      </article>
-      <article>
-        <p>Simpanan pokok</p>
-        <strong>{{ formatCurrency(principalTotal, true) }}</strong
-        ><span>{{ totals.members.value }} rekening</span>
-      </article>
-      <article>
-        <p>Simpanan wajib</p>
-        <strong>{{ formatCurrency(mandatoryTotal, true) }}</strong
-        ><span>Saldo ledger</span>
-      </article>
-      <article>
-        <p>Manasuka</p>
-        <strong>{{ formatCurrency(voluntaryTotal, true) }}</strong
-        ><span>Dapat ditarik</span>
-      </article>
+    <section v-if="!yearHasData" class="panel year-empty-state">
+      <CalendarX2 :size="36" />
+      <strong>Belum ada data simpanan untuk {{ selectedYear }}</strong>
+      <p>Pilih tahun lain untuk melihat saldo dan rekening simpanan.</p>
     </section>
-    <section class="panel table-panel">
-      <div class="toolbar">
-        <label class="search-field"
-          ><Search :size="18" /><input
-            v-model="query"
-            placeholder="Cari anggota..."
-        /></label>
-        <div class="toolbar__meta">Posisi September 2026</div>
-      </div>
-      <div class="data-table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Anggota</th>
-              <th>Pokok</th>
-              <th>Wajib</th>
-              <th>Manasuka</th>
-              <th>Total saldo</th>
-              <th>Status rekening</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="member in filtered" :key="member.id">
-              <td>
-                <strong>{{ member.name }}</strong
-                ><small class="cell-sub">{{ member.memberNumber }}</small>
-              </td>
-              <td class="num-cell">
-                {{ formatCurrency(member.principalSavings) }}
-              </td>
-              <td class="num-cell">
-                {{ formatCurrency(member.mandatorySavings) }}
-              </td>
-              <td class="num-cell">
-                {{ formatCurrency(member.voluntarySavings) }}
-              </td>
-              <td class="num-cell">
-                <strong>{{ formatCurrency(member.savings) }}</strong>
-              </td>
-              <td>
-                <StatusPill label="Aktif" tone="success" />
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
+    <template v-else>
+      <section class="savings-summary">
+        <article class="savings-hero">
+          <span><Coins :size="24" /></span>
+          <p>Total simpanan anggota</p>
+          <strong>{{ formatCurrency(yearTotals.savings) }}</strong
+          ><small>Saldo dan mutasi tahun {{ selectedYear }}</small>
+        </article>
+        <article>
+          <p>Simpanan pokok</p>
+          <strong>{{ formatCurrency(principalTotal, true) }}</strong
+          ><span>{{ yearTotals.members }} rekening</span>
+        </article>
+        <article>
+          <p>Simpanan wajib</p>
+          <strong>{{ formatCurrency(mandatoryTotal, true) }}</strong
+          ><span>Saldo ledger</span>
+        </article>
+        <article>
+          <p>Manasuka</p>
+          <strong>{{ formatCurrency(voluntaryTotal, true) }}</strong
+          ><span>Dapat ditarik</span>
+        </article>
+      </section>
+      <section class="panel table-panel">
+        <div class="toolbar">
+          <label class="search-field"
+            ><Search :size="18" /><input
+              v-model="query"
+              placeholder="Cari anggota..."
+          /></label>
+          <div class="toolbar__meta">Tahun {{ selectedYear }}</div>
+        </div>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Anggota</th>
+                <th>Pokok</th>
+                <th>Wajib</th>
+                <th>Manasuka</th>
+                <th>Total saldo</th>
+                <th>Status rekening</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="member in filtered" :key="member.id">
+                <td>
+                  <strong>{{ member.name }}</strong
+                  ><small class="cell-sub">{{ member.memberNumber }}</small>
+                </td>
+                <td class="num-cell">
+                  {{ formatCurrency(member.principalSavings) }}
+                </td>
+                <td class="num-cell">
+                  {{ formatCurrency(member.mandatorySavings) }}
+                </td>
+                <td class="num-cell">
+                  {{ formatCurrency(member.voluntarySavings) }}
+                </td>
+                <td class="num-cell">
+                  <strong>{{ formatCurrency(member.savings) }}</strong>
+                </td>
+                <td>
+                  <StatusPill label="Aktif" tone="success" />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </template>
     <UiModal
       :open="open"
       :title="`${form.movement} simpanan`"

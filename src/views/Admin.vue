@@ -50,11 +50,7 @@ function eventLabel(action: string) {
 
 <template>
   <div class="page-stack">
-    <PageHeader
-      eyebrow="Tata kelola"
-      title="Administrasi"
-      description="Parameter finansial berversi dan jejak audit operasional backend."
-    />
+    <PageHeader title="Administrasi" />
     <div class="admin-tabs">
       <button
         :class="{ active: tab === 'parameter' }"
