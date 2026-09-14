@@ -3,6 +3,7 @@ import App from "./App.vue";
 import "./App.css";
 import { router } from "./router";
 import { reportRuntimeError } from "./runtime-error";
+import { i18n } from "./i18n";
 
 window.addEventListener("error", (event) => {
   reportRuntimeError(event.error ?? event.message, "Unhandled window error");
@@ -20,4 +21,4 @@ app.config.errorHandler = (error, instance, info) => {
   reportRuntimeError(error, `Vue error in ${componentName}: ${info}`);
 };
 
-app.use(router).mount("#app");
+app.use(i18n).use(router).mount("#app");

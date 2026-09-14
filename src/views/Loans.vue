@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
-import { Calculator, Download, Plus, Search } from "lucide-vue-next";
+import {
+  Calculator,
+  CalendarX2,
+  Download,
+  Plus,
+  Search,
+} from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
 import StatusPill from "../components/StatusPill.vue";
 import UiModal from "../components/UiModal.vue";
@@ -11,9 +17,10 @@ import {
 } from "../store/koperasi";
 
 const {
-  loans,
   members,
-  totals,
+  selectedYear,
+  yearLoans,
+  yearTotals,
   createLoan,
   disburseLoan,
   previewLoan,
@@ -23,6 +30,7 @@ const query = ref("");
 const status = ref("Semua status");
 const open = ref(false);
 const disbursing = ref("");
+const loanHasData = computed(() => yearLoans.value.length > 0);
 const form = reactive({
   memberId: "",
   plafond: 10_000_000,
@@ -30,7 +38,7 @@ const form = reactive({
   interestType: "Menurun" as "Menurun" | "Flat",
 });
 const filtered = computed(() =>
-  loans.filter(
+  yearLoans.value.filter(
     (loan) =>
       (status.value === "Semua status" || loan.status === status.value) &&
       `${loan.memberName} ${loan.id}`
@@ -40,19 +48,16 @@ const filtered = computed(() =>
 );
 const preview = ref<LoanPreview | null>(null);
 const activeLoanCount = computed(
-  () => loans.filter((loan) => loan.status === "Berjalan").length,
+  () => yearLoans.value.filter((loan) => loan.status === "Berjalan").length,
 );
 const reviewLoans = computed(() =>
-  loans.filter((loan) => loan.status === "Perlu review"),
+  yearLoans.value.filter((loan) => loan.status === "Perlu review"),
 );
 const reviewBalance = computed(() =>
   reviewLoans.value.reduce((sum, loan) => sum + loan.balance, 0),
 );
-const septemberLoans = computed(() =>
-  loans.filter((loan) => loan.realizationDate.endsWith("Sep-2026")),
-);
-const septemberPlafond = computed(() =>
-  septemberLoans.value.reduce((sum, loan) => sum + loan.plafond, 0),
+const annualPlafond = computed(() =>
+  yearLoans.value.reduce((sum, loan) => sum + loan.plafond, 0),
 );
 watch(
   form,
@@ -80,11 +85,7 @@ async function handleDisbursement(loanId: string) {
 
 <template>
   <div class="page-stack">
-    <PageHeader
-      eyebrow="Sub-ledger"
-      title="Pinjaman"
-      description="Kontrak, jadwal angsuran, pencairan, dan saldo pokok dalam satu alur yang dapat diaudit."
-    >
+    <PageHeader title="Pinjaman">
       <template #actions
         ><button
           class="button button--secondary"
@@ -107,110 +108,117 @@ async function handleDisbursement(loanId: string) {
         </button></template
       >
     </PageHeader>
-    <section class="mini-metrics">
-      <article>
-        <span>Outstanding</span
-        ><strong>{{ formatCurrency(totals.loanPortfolio.value, true) }}</strong
-        ><small>{{ activeLoanCount }} kontrak berjalan</small>
-      </article>
-      <article>
-        <span>Pencairan September</span
-        ><strong>{{ formatCurrency(septemberPlafond, true) }}</strong
-        ><small>{{ septemberLoans.length }} pinjaman baru</small>
-      </article>
-      <article>
-        <span>Perlu review</span
-        ><strong>{{ formatCurrency(reviewBalance, true) }}</strong
-        ><small class="text-warning"
-          >{{ reviewLoans.length }} kontrak perlu ditindaklanjuti</small
-        >
-      </article>
+    <section v-if="!loanHasData" class="panel year-empty-state">
+      <CalendarX2 :size="36" />
+      <strong>Belum ada data pinjaman untuk {{ selectedYear }}</strong>
+      <p>Pilih tahun lain untuk melihat kontrak dan portofolio pinjaman.</p>
     </section>
-    <section class="panel table-panel">
-      <div class="toolbar">
-        <label class="search-field"
-          ><Search :size="18" /><input
-            v-model="query"
-            placeholder="Cari anggota atau ID pinjaman..." /></label
-        ><select v-model="status" class="select-control">
-          <option>Semua status</option>
-          <option>Draf</option>
-          <option>Berjalan</option>
-          <option>Perlu review</option>
-          <option>Lunas</option>
-        </select>
-      </div>
-      <div class="data-table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Kontrak</th>
-              <th>Anggota</th>
-              <th>Plafond</th>
-              <th>Saldo pokok</th>
-              <th>Skema</th>
-              <th>Jatuh tempo</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="loan in filtered" :key="loan.id">
-              <td>
-                <strong>{{ loan.id }}</strong
-                ><small class="cell-sub"
-                  >Realisasi {{ loan.realizationDate }}</small
-                >
-              </td>
-              <td>
-                <strong>{{ loan.memberName }}</strong
-                ><small class="cell-sub">{{
-                  loan.memberId || "Belum dipadankan"
-                }}</small>
-              </td>
-              <td class="num-cell">
-                {{ loan.plafond ? formatCurrency(loan.plafond) : "—" }}
-              </td>
-              <td class="num-cell">
-                <strong>{{ formatCurrency(loan.balance) }}</strong>
-              </td>
-              <td>
-                {{ loan.interestType
-                }}<small class="cell-sub"
-                  >{{ loan.rate }}% / tahun · {{ loan.tenor }} bln</small
-                >
-              </td>
-              <td>{{ loan.dueDate }}</td>
-              <td>
-                <StatusPill
-                  :label="loan.status"
-                  :tone="
-                    loan.status === 'Berjalan'
-                      ? 'success'
-                      : loan.status === 'Perlu review'
-                        ? 'warning'
-                        : loan.status === 'Draf'
-                          ? 'info'
-                          : 'neutral'
-                  "
-                />
-              </td>
-              <td>
-                <button
-                  v-if="loan.status === 'Draf'"
-                  class="row-action"
-                  type="button"
-                  :disabled="disbursing === loan.id"
-                  @click="handleDisbursement(loan.id)"
-                >
-                  {{ disbursing === loan.id ? "Memproses…" : "Cairkan" }}
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
+    <template v-else>
+      <section class="mini-metrics">
+        <article>
+          <span>Outstanding</span
+          ><strong>{{ formatCurrency(yearTotals.loanPortfolio, true) }}</strong
+          ><small>{{ activeLoanCount }} kontrak berjalan</small>
+        </article>
+        <article>
+          <span>Pencairan {{ selectedYear }}</span
+          ><strong>{{ formatCurrency(annualPlafond, true) }}</strong
+          ><small>{{ yearLoans.length }} pinjaman baru</small>
+        </article>
+        <article>
+          <span>Perlu review</span
+          ><strong>{{ formatCurrency(reviewBalance, true) }}</strong
+          ><small class="text-warning"
+            >{{ reviewLoans.length }} kontrak perlu ditindaklanjuti</small
+          >
+        </article>
+      </section>
+      <section class="panel table-panel">
+        <div class="toolbar">
+          <label class="search-field"
+            ><Search :size="18" /><input
+              v-model="query"
+              placeholder="Cari anggota atau ID pinjaman..." /></label
+          ><select v-model="status" class="select-control">
+            <option>Semua status</option>
+            <option>Draf</option>
+            <option>Berjalan</option>
+            <option>Perlu review</option>
+            <option>Lunas</option>
+          </select>
+        </div>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Kontrak</th>
+                <th>Anggota</th>
+                <th>Plafond</th>
+                <th>Saldo pokok</th>
+                <th>Skema</th>
+                <th>Jatuh tempo</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="loan in filtered" :key="loan.id">
+                <td>
+                  <strong>{{ loan.id }}</strong
+                  ><small class="cell-sub"
+                    >Realisasi {{ loan.realizationDate }}</small
+                  >
+                </td>
+                <td>
+                  <strong>{{ loan.memberName }}</strong
+                  ><small class="cell-sub">{{
+                    loan.memberId || "Belum dipadankan"
+                  }}</small>
+                </td>
+                <td class="num-cell">
+                  {{ loan.plafond ? formatCurrency(loan.plafond) : "—" }}
+                </td>
+                <td class="num-cell">
+                  <strong>{{ formatCurrency(loan.balance) }}</strong>
+                </td>
+                <td>
+                  {{ loan.interestType
+                  }}<small class="cell-sub"
+                    >{{ loan.rate }}% / tahun · {{ loan.tenor }} bln</small
+                  >
+                </td>
+                <td>{{ loan.dueDate }}</td>
+                <td>
+                  <StatusPill
+                    :label="loan.status"
+                    :tone="
+                      loan.status === 'Berjalan'
+                        ? 'success'
+                        : loan.status === 'Perlu review'
+                          ? 'warning'
+                          : loan.status === 'Draf'
+                            ? 'info'
+                            : 'neutral'
+                    "
+                  />
+                </td>
+                <td>
+                  <button
+                    v-if="loan.status === 'Draf'"
+                    class="row-action"
+                    type="button"
+                    :disabled="disbursing === loan.id"
+                    @click="handleDisbursement(loan.id)"
+                  >
+                    {{ disbursing === loan.id ? "Memproses…" : "Cairkan" }}
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </template>
     <UiModal
       :open="open"
       size="lg"
