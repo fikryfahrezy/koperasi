@@ -9,7 +9,8 @@ import {
   useKoperasiStore,
 } from "../store/koperasi";
 
-const { admin, loadAdminState, saveFinancialParameters } = useKoperasiStore();
+const { admin, loadAdminState, saveFinancialParameters, refresh } =
+  useKoperasiStore();
 const tab = ref<"parameter" | "audit">("parameter");
 const saving = ref(false);
 const form = reactive<FinancialParameters>({
@@ -19,6 +20,17 @@ const form = reactive<FinancialParameters>({
   annualRate: 24,
   effectiveDate: "2026-10-01",
 });
+async function loadPage() {
+  const [, adminLoaded] = await Promise.all([refresh(), loadAdminState()]);
+  if (!adminLoaded) return;
+  Object.assign(form, {
+    principalSavings: admin.parameters.principalSavings,
+    mandatorySavings: admin.parameters.mandatorySavings,
+    provisionRate: admin.parameters.provisionRate,
+    annualRate: admin.parameters.annualRate,
+  });
+}
+
 onMounted(async () => {
   if (!(await loadAdminState())) return;
   Object.assign(form, {
@@ -50,7 +62,7 @@ function eventLabel(action: string) {
 
 <template>
   <div class="page-stack">
-    <PageHeader title="Administrasi" />
+    <PageHeader title="Administrasi" :refresh="loadPage" />
     <div class="admin-tabs">
       <button
         :class="{ active: tab === 'parameter' }"

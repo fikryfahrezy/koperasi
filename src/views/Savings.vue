@@ -21,6 +21,7 @@ const {
   admin,
   loadAdminState,
   postSavingsTransaction,
+  refresh,
 } = useKoperasiStore();
 const query = ref("");
 const open = ref(false);
@@ -46,6 +47,9 @@ const voluntaryTotal = computed(() =>
   yearMembers.value.reduce((sum, member) => sum + member.voluntarySavings, 0),
 );
 onMounted(loadAdminState);
+async function refreshPage() {
+  await Promise.all([refresh(), loadAdminState()]);
+}
 function startMovement(movement: "Setoran" | "Penarikan") {
   Object.assign(form, {
     memberId: "",
@@ -67,7 +71,7 @@ async function submit() {
 </script>
 <template>
   <div class="page-stack">
-    <PageHeader title="Simpanan"
+    <PageHeader title="Simpanan" :refresh="refreshPage"
       ><template #actions
         ><button
           class="button button--secondary"

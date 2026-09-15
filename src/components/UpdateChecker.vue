@@ -50,6 +50,11 @@ async function checkForUpdate(silent = false) {
   }
 }
 
+async function openAndCheckForUpdate() {
+  open.value = true;
+  await checkForUpdate(false);
+}
+
 async function installUpdate() {
   if (!update.value) return;
   phase.value = "downloading";
@@ -96,7 +101,7 @@ function closeModal() {
         ? t('update.availableLabel')
         : t('update.checkLabel')
     "
-    @click="open = true"
+    @click="openAndCheckForUpdate"
   >
     <RefreshCw :size="19" />
     <i v-if="phase === 'available'"></i>
