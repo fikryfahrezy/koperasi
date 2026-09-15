@@ -106,6 +106,7 @@ const totals = {
   members: ref(0),
 };
 const loading = ref(true);
+const refreshing = ref(false);
 const backendError = ref<string | null>(null);
 const admin = reactive<AdminState>({
   parameters: {
@@ -129,6 +130,7 @@ const yearOptions = computed(() =>
 );
 let toastId = 0;
 let initializePromise: Promise<void> | null = null;
+let refreshPromise: Promise<boolean> | null = null;
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -218,6 +220,28 @@ async function initialize() {
     }
   })();
   return initializePromise;
+}
+
+async function refresh() {
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
+    refreshing.value = true;
+    try {
+      applySnapshot(await invoke<AppSnapshot>("get_app_snapshot"));
+      return true;
+    } catch (error) {
+      notify(
+        translate("notifications.refreshFailed"),
+        errorMessage(error),
+        "warning",
+      );
+      return false;
+    } finally {
+      refreshing.value = false;
+      refreshPromise = null;
+    }
+  })();
+  return refreshPromise;
 }
 
 async function importWorkbook() {
@@ -478,6 +502,7 @@ export const useKoperasiStore = () => ({
   transactions,
   totals,
   loading,
+  refreshing,
   backendError,
   admin,
   toasts,
@@ -489,6 +514,7 @@ export const useKoperasiStore = () => ({
   yearTotals,
   yearHasData,
   initialize,
+  refresh,
   notify,
   importWorkbook,
   addMember,
