@@ -14,11 +14,12 @@ import {
   Users,
 } from "lucide-vue-next";
 import { useRouter } from "vue-router";
+import PageHeader from "../components/PageHeader.vue";
 import StatusPill from "../components/StatusPill.vue";
 import { formatCurrency, useKoperasiStore } from "../store/koperasi";
 
 const router = useRouter();
-const { selectedYear, yearTransactions, yearTotals, yearHasData } =
+const { selectedYear, yearTransactions, yearTotals, yearHasData, refresh } =
   useKoperasiStore();
 const cashflow = [
   { month: "Apr", masuk: 110.4, keluar: 98.7 },
@@ -32,6 +33,7 @@ const cashflow = [
 
 <template>
   <div class="page-stack">
+    <PageHeader title="Ringkasan" :refresh="refresh" />
     <section class="welcome-band">
       <div>
         <p class="eyebrow eyebrow--light">Ringkasan tahun {{ selectedYear }}</p>

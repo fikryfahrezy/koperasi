@@ -12,7 +12,7 @@ import {
 import PageHeader from "../components/PageHeader.vue";
 import { formatCurrency, useKoperasiStore } from "../store/koperasi";
 
-const { members, postPayment } = useKoperasiStore();
+const { members, postPayment, refresh } = useKoperasiStore();
 const step = ref(1);
 const query = ref("");
 const form = reactive({
@@ -68,7 +68,7 @@ function reset() {
 
 <template>
   <div class="page-stack transaction-page">
-    <PageHeader title="Pembayaran anggota" />
+    <PageHeader title="Pembayaran anggota" :refresh="refresh" />
     <ol class="stepper">
       <li :class="{ active: step >= 1 }">
         <span>1</span>

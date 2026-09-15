@@ -63,6 +63,7 @@ export default {
     failed: "Gagal memeriksa pembaruan: {message}",
   },
   notifications: {
+    refreshFailed: "Data gagal dimuat ulang",
     backendUnavailable: "Backend tidak tersedia",
     backendHint:
       "Jalankan aplikasi melalui `pnpm tauri dev`, bukan server web biasa.",
