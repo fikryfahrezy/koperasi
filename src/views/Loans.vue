@@ -25,6 +25,7 @@ const {
   disburseLoan,
   previewLoan,
   notify,
+  refresh,
 } = useKoperasiStore();
 const query = ref("");
 const status = ref("Semua status");
@@ -85,7 +86,7 @@ async function handleDisbursement(loanId: string) {
 
 <template>
   <div class="page-stack">
-    <PageHeader title="Pinjaman">
+    <PageHeader title="Pinjaman" :refresh="refresh">
       <template #actions
         ><button
           class="button button--secondary"

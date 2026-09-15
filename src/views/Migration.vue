@@ -10,7 +10,7 @@ import PageHeader from "../components/PageHeader.vue";
 import StatusPill from "../components/StatusPill.vue";
 import { formatCurrency, useKoperasiStore } from "../store/koperasi";
 
-const { totals, loans, importWorkbook } = useKoperasiStore();
+const { totals, loans, importWorkbook, refresh } = useKoperasiStore();
 const importing = ref(false);
 
 async function handleImport() {
@@ -24,7 +24,7 @@ async function handleImport() {
 </script>
 <template>
   <div class="page-stack">
-    <PageHeader title="Migrasi Excel"
+    <PageHeader title="Migrasi Excel" :refresh="refresh"
       ><template #actions
         ><button
           class="button button--primary"

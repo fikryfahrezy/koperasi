@@ -8,7 +8,7 @@ import StatusPill from "../components/StatusPill.vue";
 import UiModal from "../components/UiModal.vue";
 import { formatCurrency, useKoperasiStore } from "../store/koperasi";
 
-const { members, totals, addMember, notify } = useKoperasiStore();
+const { members, totals, addMember, notify, refresh } = useKoperasiStore();
 const route = useRoute();
 const query = ref(String(route.query.q ?? ""));
 watch(
@@ -52,7 +52,7 @@ async function submit() {
 
 <template>
   <div class="page-stack">
-    <PageHeader title="Anggota">
+    <PageHeader title="Anggota" :refresh="refresh">
       <template #actions
         ><button
           class="button button--secondary"

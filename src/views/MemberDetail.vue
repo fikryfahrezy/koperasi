@@ -14,7 +14,7 @@ import StatusPill from "../components/StatusPill.vue";
 import { formatCurrency, useKoperasiStore } from "../store/koperasi";
 
 const route = useRoute();
-const { members, loans, transactions } = useKoperasiStore();
+const { members, loans, transactions, refresh } = useKoperasiStore();
 
 const member = computed(() =>
   members.find((item) => item.id === String(route.params.id)),
@@ -35,7 +35,7 @@ const memberTransactions = computed(() => {
 
 <template>
   <div class="page-stack">
-    <PageHeader :title="member?.name ?? 'Detail anggota'">
+    <PageHeader :title="member?.name ?? 'Detail anggota'" :refresh="refresh">
       <template #actions>
         <RouterLink class="button button--secondary" to="/members">
           <ArrowLeft :size="18" /> Kembali ke anggota

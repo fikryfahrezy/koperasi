@@ -24,6 +24,7 @@ const {
   yearTotals,
   reverseTransaction,
   notify,
+  refresh,
 } = useKoperasiStore();
 const query = ref("");
 const selected = ref<Transaction | null>(null);
@@ -55,7 +56,7 @@ async function reverseSelected() {
 
 <template>
   <div class="page-stack">
-    <PageHeader title="Buku kas"
+    <PageHeader title="Buku kas" :refresh="refresh"
       ><template #actions
         ><button
           class="button button--secondary"
