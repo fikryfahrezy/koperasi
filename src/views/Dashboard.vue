@@ -16,7 +16,11 @@ import {
 import { useRouter } from "vue-router";
 import PageHeader from "../components/PageHeader.vue";
 import StatusPill from "../components/StatusPill.vue";
-import { formatCurrency, useKoperasiStore } from "../store/koperasi";
+import {
+  formatCurrency,
+  TransactionDirection,
+  useKoperasiStore,
+} from "../store/koperasi";
 
 const router = useRouter();
 const { selectedYear, yearTransactions, yearTotals, yearHasData, refresh } =
@@ -222,10 +226,12 @@ const cashflow = [
               <span
                 :class="[
                   'activity-row__icon',
-                  transaction.direction === 'Masuk' ? 'is-in' : 'is-out',
+                  transaction.direction === TransactionDirection.In
+                    ? 'is-in'
+                    : 'is-out',
                 ]"
                 ><ArrowDownLeft
-                  v-if="transaction.direction === 'Masuk'"
+                  v-if="transaction.direction === TransactionDirection.In"
                   :size="18" /><ArrowUpRight v-else :size="18"
               /></span>
               <div class="activity-row__main">
@@ -237,11 +243,14 @@ const cashflow = [
               <div class="activity-row__amount">
                 <strong
                   :class="
-                    transaction.direction === 'Masuk'
+                    transaction.direction === TransactionDirection.In
                       ? 'amount-in'
                       : 'amount-out'
                   "
-                  >{{ transaction.direction === "Masuk" ? "+" : "-"
+                  >{{
+                    transaction.direction === TransactionDirection.In
+                      ? "+"
+                      : "-"
                   }}{{ formatCurrency(transaction.amount) }}</strong
                 ><span>{{ transaction.reference }}</span>
               </div>

@@ -3,15 +3,67 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { computed, reactive, ref } from "vue";
 import { DEFAULT_LOCALE, translate } from "../i18n";
 
-export type TransactionStatus = "Terposting" | "Draf" | "Dibalik";
-export type LoanStatus = "Draf" | "Berjalan" | "Perlu review" | "Lunas";
+export const TransactionStatus = {
+  Posted: "Terposting",
+  Draft: "Draf",
+  Reversed: "Dibalik",
+} as const;
+export type TransactionStatus =
+  (typeof TransactionStatus)[keyof typeof TransactionStatus];
+
+export const LoanStatus = {
+  Draft: "Draf",
+  Active: "Berjalan",
+  NeedsReview: "Perlu review",
+  PaidOff: "Lunas",
+} as const;
+export type LoanStatus = (typeof LoanStatus)[keyof typeof LoanStatus];
+
+export const MemberStatus = {
+  Active: "Aktif",
+  Inactive: "Nonaktif",
+} as const;
+export type MemberStatus = (typeof MemberStatus)[keyof typeof MemberStatus];
+
+export const TransactionDirection = {
+  In: "Masuk",
+  Out: "Keluar",
+} as const;
+export type TransactionDirection =
+  (typeof TransactionDirection)[keyof typeof TransactionDirection];
+
+export const SavingsAccountType = {
+  Principal: "POKOK",
+  Mandatory: "WAJIB",
+  Voluntary: "MANASUKA",
+} as const;
+export type SavingsAccountType =
+  (typeof SavingsAccountType)[keyof typeof SavingsAccountType];
+
+export const SavingsMovement = {
+  Deposit: "Setoran",
+  Withdrawal: "Penarikan",
+} as const;
+export type SavingsMovement =
+  (typeof SavingsMovement)[keyof typeof SavingsMovement];
+
+export const InterestType = {
+  Declining: "Menurun",
+  Flat: "Flat",
+} as const;
+export type InterestType = (typeof InterestType)[keyof typeof InterestType];
+
+export interface Company {
+  id: string;
+  name: string;
+}
 
 export interface Member {
   id: string;
   name: string;
   memberNumber: string;
   joinedAt: string;
-  status: "Aktif" | "Nonaktif";
+  status: MemberStatus;
   savings: number;
   principalSavings: number;
   mandatorySavings: number;
@@ -27,7 +79,7 @@ export interface Loan {
   balance: number;
   rate: number;
   tenor: number;
-  interestType: "Menurun" | "Flat";
+  interestType: InterestType;
   realizationDate: string;
   dueDate: string;
   status: LoanStatus;
@@ -40,7 +92,7 @@ export interface Transaction {
   memberName: string;
   description: string;
   reference: string;
-  direction: "Masuk" | "Keluar";
+  direction: TransactionDirection;
   amount: number;
   status: TransactionStatus;
   components: { label: string; amount: number }[];
@@ -62,6 +114,39 @@ export interface FinancialParameters {
   annualRate: number;
   effectiveDate: string;
 }
+
+interface AddMemberInput {
+  name: string;
+  memberNumber: string;
+  joinedAt: string;
+  principalSavings: number;
+}
+
+interface CreateLoanInput {
+  memberId: string;
+  plafond: number;
+  tenor: number;
+  interestType: InterestType;
+}
+
+interface SavingsTransactionInput {
+  memberId: string;
+  accountType: SavingsAccountType;
+  movement: SavingsMovement;
+  amount: number;
+  reference: string;
+}
+
+interface PaymentInput {
+  memberId: string;
+  principal: number;
+  interest: number;
+  wajib: number;
+  voluntary: number;
+  reference: string;
+}
+
+type OperationalTimestamp = ReturnType<typeof operationalTimestamp>;
 
 export interface AuditEvent {
   id: number;
@@ -119,6 +204,83 @@ const admin = reactive<AdminState>({
   auditEvents: [],
 });
 const toasts = ref<ToastMessage[]>([]);
+const companies = ref<Company[]>([]);
+const selectedCompanyId = ref("default");
+
+const command = {
+  listCompanies: "list_companies",
+  getAppSnapshot: "get_app_snapshot",
+  importWorkbook: "import_workbook",
+  addMember: "add_member",
+  previewLoan: "preview_loan",
+  createLoan: "create_loan",
+  disburseLoan: "disburse_loan",
+  postSavingsTransaction: "post_savings_transaction",
+  postPayment: "post_payment",
+  reverseTransaction: "reverse_transaction",
+  getAdminState: "get_admin_state",
+  saveFinancialParameters: "save_financial_parameters",
+} as const;
+
+const backend = {
+  listCompanies: () => invoke<Company[]>(command.listCompanies),
+  getAppSnapshot: () =>
+    invoke<AppSnapshot>(command.getAppSnapshot, {
+      companyId: selectedCompanyId.value,
+    }),
+  importWorkbook: (path: string) =>
+    invoke<AppSnapshot>(command.importWorkbook, {
+      path,
+      companyId: selectedCompanyId.value,
+    }),
+  addMember: (input: AddMemberInput & OperationalTimestamp) =>
+    invoke<AppSnapshot>(command.addMember, {
+      input,
+      companyId: selectedCompanyId.value,
+    }),
+  previewLoan: (input: CreateLoanInput) =>
+    invoke<LoanPreview>(command.previewLoan, {
+      input,
+      companyId: selectedCompanyId.value,
+    }),
+  createLoan: (input: CreateLoanInput) =>
+    invoke<AppSnapshot>(command.createLoan, {
+      input,
+      companyId: selectedCompanyId.value,
+    }),
+  disburseLoan: (input: { loanId: string } & OperationalTimestamp) =>
+    invoke<AppSnapshot>(command.disburseLoan, {
+      input,
+      companyId: selectedCompanyId.value,
+    }),
+  postSavingsTransaction: (
+    input: SavingsTransactionInput & OperationalTimestamp,
+  ) =>
+    invoke<AppSnapshot>(command.postSavingsTransaction, {
+      input,
+      companyId: selectedCompanyId.value,
+    }),
+  postPayment: (input: PaymentInput & OperationalTimestamp) =>
+    invoke<AppSnapshot>(command.postPayment, {
+      input,
+      companyId: selectedCompanyId.value,
+    }),
+  reverseTransaction: (input: { id: string } & OperationalTimestamp) =>
+    invoke<AppSnapshot>(command.reverseTransaction, {
+      input,
+      companyId: selectedCompanyId.value,
+    }),
+  getAdminState: () =>
+    invoke<AdminState>(command.getAdminState, {
+      companyId: selectedCompanyId.value,
+    }),
+  saveFinancialParameters: (input: FinancialParameters) =>
+    invoke<AdminState>(command.saveFinancialParameters, {
+      input,
+      companyId: selectedCompanyId.value,
+    }),
+};
+
 const FIRST_REPORTING_YEAR = 2025;
 const currentYear = new Date().getFullYear();
 const selectedYear = ref(currentYear);
@@ -163,7 +325,7 @@ const yearTotals = computed(() => ({
   cash: yearTransactions.value.reduce(
     (sum, transaction) =>
       sum +
-      (transaction.direction === "Masuk"
+      (transaction.direction === TransactionDirection.In
         ? transaction.amount
         : -transaction.amount),
     0,
@@ -171,11 +333,14 @@ const yearTotals = computed(() => ({
   savings: yearMembers.value.reduce((sum, member) => sum + member.savings, 0),
   loanPortfolio: yearLoans.value
     .filter(
-      (loan) => loan.status === "Berjalan" || loan.status === "Perlu review",
+      (loan) =>
+        loan.status === LoanStatus.Active ||
+        loan.status === LoanStatus.NeedsReview,
     )
     .reduce((sum, loan) => sum + loan.balance, 0),
-  members: yearMembers.value.filter((member) => member.status === "Aktif")
-    .length,
+  members: yearMembers.value.filter(
+    (member) => member.status === MemberStatus.Active,
+  ).length,
 }));
 
 function notify(
@@ -206,7 +371,15 @@ async function initialize() {
   initializePromise = (async () => {
     loading.value = true;
     try {
-      applySnapshot(await invoke<AppSnapshot>("get_app_snapshot"));
+      companies.value = await backend.listCompanies();
+      if (
+        !companies.value.some(
+          (company) => company.id === selectedCompanyId.value,
+        )
+      ) {
+        selectedCompanyId.value = companies.value[0]?.id ?? "default";
+      }
+      applySnapshot(await backend.getAppSnapshot());
     } catch (error) {
       backendError.value = errorMessage(error);
       notify(
@@ -227,7 +400,7 @@ async function refresh() {
   refreshPromise = (async () => {
     refreshing.value = true;
     try {
-      applySnapshot(await invoke<AppSnapshot>("get_app_snapshot"));
+      applySnapshot(await backend.getAppSnapshot());
       return true;
     } catch (error) {
       notify(
@@ -244,6 +417,27 @@ async function refresh() {
   return refreshPromise;
 }
 
+async function selectCompany(companyId: string) {
+  if (companyId === selectedCompanyId.value) return true;
+  selectedCompanyId.value = companyId;
+  loading.value = true;
+  try {
+    applySnapshot(await backend.getAppSnapshot());
+    await loadAdminState();
+    return true;
+  } catch (error) {
+    backendError.value = errorMessage(error);
+    notify(
+      translate("notifications.refreshFailed"),
+      errorMessage(error),
+      "warning",
+    );
+    return false;
+  } finally {
+    loading.value = false;
+  }
+}
+
 async function importWorkbook() {
   const path = await open({
     title: translate("dialog.workbookPicker"),
@@ -252,7 +446,7 @@ async function importWorkbook() {
   });
   if (!path || Array.isArray(path)) return false;
   try {
-    applySnapshot(await invoke<AppSnapshot>("import_workbook", { path }));
+    applySnapshot(await backend.importWorkbook(path));
     notify(
       translate("notifications.workbookImported"),
       translate("notifications.workbookImportedMessage"),
@@ -268,17 +462,10 @@ async function importWorkbook() {
   }
 }
 
-async function addMember(input: {
-  name: string;
-  memberNumber: string;
-  joinedAt: string;
-  principalSavings: number;
-}) {
+async function addMember(input: AddMemberInput) {
   try {
     applySnapshot(
-      await invoke<AppSnapshot>("add_member", {
-        input: { ...input, ...operationalTimestamp() },
-      }),
+      await backend.addMember({ ...input, ...operationalTimestamp() }),
     );
     notify(
       translate("notifications.memberAdded"),
@@ -295,23 +482,13 @@ async function addMember(input: {
   }
 }
 
-async function previewLoan(input: {
-  memberId: string;
-  plafond: number;
-  tenor: number;
-  interestType: "Menurun" | "Flat";
-}) {
-  return invoke<LoanPreview>("preview_loan", { input });
+async function previewLoan(input: CreateLoanInput) {
+  return backend.previewLoan(input);
 }
 
-async function createLoan(input: {
-  memberId: string;
-  plafond: number;
-  tenor: number;
-  interestType: "Menurun" | "Flat";
-}) {
+async function createLoan(input: CreateLoanInput) {
   try {
-    applySnapshot(await invoke<AppSnapshot>("create_loan", { input }));
+    applySnapshot(await backend.createLoan(input));
     notify(
       translate("notifications.loanDrafted"),
       translate("notifications.loanDraftedMessage"),
@@ -342,9 +519,7 @@ function operationalTimestamp() {
 async function disburseLoan(loanId: string) {
   try {
     applySnapshot(
-      await invoke<AppSnapshot>("disburse_loan", {
-        input: { loanId, ...operationalTimestamp() },
-      }),
+      await backend.disburseLoan({ loanId, ...operationalTimestamp() }),
     );
     notify(
       translate("notifications.loanDisbursed"),
@@ -361,17 +536,12 @@ async function disburseLoan(loanId: string) {
   }
 }
 
-async function postSavingsTransaction(input: {
-  memberId: string;
-  accountType: "POKOK" | "WAJIB" | "MANASUKA";
-  movement: "Setoran" | "Penarikan";
-  amount: number;
-  reference: string;
-}) {
+async function postSavingsTransaction(input: SavingsTransactionInput) {
   try {
     applySnapshot(
-      await invoke<AppSnapshot>("post_savings_transaction", {
-        input: { ...input, ...operationalTimestamp() },
+      await backend.postSavingsTransaction({
+        ...input,
+        ...operationalTimestamp(),
       }),
     );
     notify(
@@ -389,22 +559,13 @@ async function postSavingsTransaction(input: {
   }
 }
 
-async function postPayment(input: {
-  memberId: string;
-  principal: number;
-  interest: number;
-  wajib: number;
-  voluntary: number;
-  reference: string;
-}) {
+async function postPayment(input: PaymentInput) {
   const backendInput = {
     ...input,
     ...operationalTimestamp(),
   };
   try {
-    applySnapshot(
-      await invoke<AppSnapshot>("post_payment", { input: backendInput }),
-    );
+    applySnapshot(await backend.postPayment(backendInput));
     notify(
       translate("notifications.paymentPosted"),
       translate("notifications.paymentPostedMessage", {
@@ -426,7 +587,7 @@ async function postPayment(input: {
 
 async function loadAdminState() {
   try {
-    const state = await invoke<AdminState>("get_admin_state");
+    const state = await backend.getAdminState();
     Object.assign(admin.parameters, state.parameters);
     admin.auditEvents.splice(0, admin.auditEvents.length, ...state.auditEvents);
     return true;
@@ -442,9 +603,7 @@ async function loadAdminState() {
 
 async function saveFinancialParameters(input: FinancialParameters) {
   try {
-    const state = await invoke<AdminState>("save_financial_parameters", {
-      input,
-    });
+    const state = await backend.saveFinancialParameters(input);
     Object.assign(admin.parameters, state.parameters);
     admin.auditEvents.splice(0, admin.auditEvents.length, ...state.auditEvents);
     notify(
@@ -467,9 +626,7 @@ async function saveFinancialParameters(input: FinancialParameters) {
 async function reverseTransaction(id: string) {
   try {
     applySnapshot(
-      await invoke<AppSnapshot>("reverse_transaction", {
-        input: { id, ...operationalTimestamp() },
-      }),
+      await backend.reverseTransaction({ id, ...operationalTimestamp() }),
     );
     notify(
       translate("notifications.reversalPosted"),
@@ -506,6 +663,8 @@ export const useKoperasiStore = () => ({
   backendError,
   admin,
   toasts,
+  companies,
+  selectedCompanyId,
   selectedYear,
   yearOptions,
   yearTransactions,
@@ -514,6 +673,7 @@ export const useKoperasiStore = () => ({
   yearTotals,
   yearHasData,
   initialize,
+  selectCompany,
   refresh,
   notify,
   importWorkbook,
@@ -527,6 +687,6 @@ export const useKoperasiStore = () => ({
   loadAdminState,
   saveFinancialParameters,
   activeLoans: computed(() =>
-    loans.filter((loan) => loan.status === "Berjalan"),
+    loans.filter((loan) => loan.status === LoanStatus.Active),
   ),
 });

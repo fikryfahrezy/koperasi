@@ -6,7 +6,11 @@ import PageHeader from "../components/PageHeader.vue";
 import RupiahInput from "../components/RupiahInput.vue";
 import StatusPill from "../components/StatusPill.vue";
 import UiModal from "../components/UiModal.vue";
-import { formatCurrency, useKoperasiStore } from "../store/koperasi";
+import {
+  formatCurrency,
+  MemberStatus,
+  useKoperasiStore,
+} from "../store/koperasi";
 
 const { members, totals, addMember, notify, refresh } = useKoperasiStore();
 const route = useRoute();
@@ -120,7 +124,11 @@ async function submit() {
               <td>
                 <StatusPill
                   :label="member.status"
-                  :tone="member.status === 'Aktif' ? 'success' : 'neutral'"
+                  :tone="
+                    member.status === MemberStatus.Active
+                      ? 'success'
+                      : 'neutral'
+                  "
                 />
               </td>
               <td>

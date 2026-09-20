@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted } from "vue";
 import { RouterView } from "vue-router";
-import { CalendarDays, ChevronDown } from "lucide-vue-next";
+import { Building2, CalendarDays, ChevronDown } from "lucide-vue-next";
 import logo from "./assets/logo.png";
 import AppMenu from "./components/AppMenu.vue";
 import ToastHost from "./components/ToastHost.vue";
@@ -11,8 +11,16 @@ import { clearRuntimeError, runtimeError } from "./runtime-error";
 import { useKoperasiStore } from "./store/koperasi";
 import { activeWorkspaceTabId } from "./workspace-tabs";
 
-const { initialize, loading, backendError, selectedYear, yearOptions } =
-  useKoperasiStore();
+const {
+  initialize,
+  loading,
+  backendError,
+  selectedYear,
+  yearOptions,
+  companies,
+  selectedCompanyId,
+  selectCompany,
+} = useKoperasiStore();
 
 onMounted(initialize);
 </script>
@@ -38,6 +46,29 @@ onMounted(initialize);
               </div>
             </div>
             <div class="topbar__tools">
+              <label class="period-control company-control">
+                <Building2 :size="16" />
+                <span>{{
+                  companies.find((company) => company.id === selectedCompanyId)
+                    ?.name
+                }}</span>
+                <ChevronDown :size="14" />
+                <select
+                  :value="selectedCompanyId"
+                  aria-label="Perusahaan"
+                  @change="
+                    selectCompany(($event.target as HTMLSelectElement).value)
+                  "
+                >
+                  <option
+                    v-for="company in companies"
+                    :key="company.id"
+                    :value="company.id"
+                  >
+                    {{ company.name }}
+                  </option>
+                </select>
+              </label>
               <label class="period-control">
                 <CalendarDays :size="16" />
                 <span>{{ selectedYear }}</span>

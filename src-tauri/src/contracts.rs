@@ -2,6 +2,17 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::domain::{
+    InterestType, LoanStatus, MemberStatus, TransactionDirection, TransactionStatus,
+};
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CompanyDto {
+    pub(crate) id: String,
+    pub(crate) name: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MemberDto {
@@ -9,7 +20,7 @@ pub(crate) struct MemberDto {
     pub(crate) member_number: String,
     pub(crate) name: String,
     pub(crate) joined_at: String,
-    pub(crate) status: String,
+    pub(crate) status: MemberStatus,
     pub(crate) savings: i64,
     pub(crate) principal_savings: i64,
     pub(crate) mandatory_savings: i64,
@@ -27,10 +38,10 @@ pub(crate) struct LoanDto {
     pub(crate) balance: i64,
     pub(crate) rate: f64,
     pub(crate) tenor: i64,
-    pub(crate) interest_type: String,
+    pub(crate) interest_type: InterestType,
     pub(crate) realization_date: String,
     pub(crate) due_date: String,
-    pub(crate) status: String,
+    pub(crate) status: LoanStatus,
 }
 
 #[derive(Serialize)]
@@ -49,9 +60,9 @@ pub(crate) struct TransactionDto {
     pub(crate) member_name: String,
     pub(crate) description: String,
     pub(crate) reference: String,
-    pub(crate) direction: String,
+    pub(crate) direction: TransactionDirection,
     pub(crate) amount: i64,
-    pub(crate) status: String,
+    pub(crate) status: TransactionStatus,
     pub(crate) components: Vec<ComponentDto>,
     pub(crate) actor: String,
 }
