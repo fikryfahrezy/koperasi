@@ -12,6 +12,8 @@ import StatusPill from "../components/StatusPill.vue";
 import UiModal from "../components/UiModal.vue";
 import {
   formatCurrency,
+  InterestType,
+  LoanStatus,
   type LoanPreview,
   useKoperasiStore,
 } from "../store/koperasi";
@@ -36,7 +38,7 @@ const form = reactive({
   memberId: "",
   plafond: 10_000_000,
   tenor: 24,
-  interestType: "Menurun" as "Menurun" | "Flat",
+  interestType: InterestType.Declining,
 });
 const filtered = computed(() =>
   yearLoans.value.filter(
@@ -49,10 +51,11 @@ const filtered = computed(() =>
 );
 const preview = ref<LoanPreview | null>(null);
 const activeLoanCount = computed(
-  () => yearLoans.value.filter((loan) => loan.status === "Berjalan").length,
+  () =>
+    yearLoans.value.filter((loan) => loan.status === LoanStatus.Active).length,
 );
 const reviewLoans = computed(() =>
-  yearLoans.value.filter((loan) => loan.status === "Perlu review"),
+  yearLoans.value.filter((loan) => loan.status === LoanStatus.NeedsReview),
 );
 const reviewBalance = computed(() =>
   reviewLoans.value.reduce((sum, loan) => sum + loan.balance, 0),
@@ -142,9 +145,9 @@ async function handleDisbursement(loanId: string) {
               placeholder="Cari anggota atau ID pinjaman..." /></label
           ><select v-model="status" class="select-control">
             <option>Semua status</option>
-            <option>Draf</option>
-            <option>Berjalan</option>
-            <option>Perlu review</option>
+            <option :value="LoanStatus.Draft">Draf</option>
+            <option :value="LoanStatus.Active">Berjalan</option>
+            <option :value="LoanStatus.NeedsReview">Perlu review</option>
             <option>Lunas</option>
           </select>
         </div>
@@ -193,11 +196,11 @@ async function handleDisbursement(loanId: string) {
                   <StatusPill
                     :label="loan.status"
                     :tone="
-                      loan.status === 'Berjalan'
+                      loan.status === LoanStatus.Active
                         ? 'success'
-                        : loan.status === 'Perlu review'
+                        : loan.status === LoanStatus.NeedsReview
                           ? 'warning'
-                          : loan.status === 'Draf'
+                          : loan.status === LoanStatus.Draft
                             ? 'info'
                             : 'neutral'
                     "
@@ -205,7 +208,7 @@ async function handleDisbursement(loanId: string) {
                 </td>
                 <td>
                   <button
-                    v-if="loan.status === 'Draf'"
+                    v-if="loan.status === LoanStatus.Draft"
                     class="row-action"
                     type="button"
                     :disabled="disbursing === loan.id"
@@ -265,8 +268,8 @@ async function handleDisbursement(loanId: string) {
           <label class="field"
             ><span>Jenis bunga</span
             ><select v-model="form.interestType">
-              <option>Menurun</option>
-              <option>Flat</option>
+              <option :value="InterestType.Declining">Menurun</option>
+              <option :value="InterestType.Flat">Flat</option>
             </select></label
           ><label class="field"
             ><span>Rate tahunan</span

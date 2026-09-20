@@ -11,7 +11,13 @@ import {
 } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
 import StatusPill from "../components/StatusPill.vue";
-import { formatCurrency, useKoperasiStore } from "../store/koperasi";
+import {
+  formatCurrency,
+  LoanStatus,
+  MemberStatus,
+  TransactionDirection,
+  useKoperasiStore,
+} from "../store/koperasi";
 
 const route = useRoute();
 const { members, loans, transactions, refresh } = useKoperasiStore();
@@ -53,7 +59,9 @@ const memberTransactions = computed(() => {
             <span><CalendarDays :size="14" /> {{ member.joinedAt }}</span>
             <StatusPill
               :label="member.status"
-              :tone="member.status === 'Aktif' ? 'success' : 'neutral'"
+              :tone="
+                member.status === MemberStatus.Active ? 'success' : 'neutral'
+              "
             />
           </div>
         </div>
@@ -111,11 +119,11 @@ const memberTransactions = computed(() => {
               <StatusPill
                 :label="loan.status"
                 :tone="
-                  loan.status === 'Berjalan'
+                  loan.status === LoanStatus.Active
                     ? 'success'
-                    : loan.status === 'Perlu review'
+                    : loan.status === LoanStatus.NeedsReview
                       ? 'warning'
-                      : loan.status === 'Draf'
+                      : loan.status === LoanStatus.Draft
                         ? 'info'
                         : 'neutral'
                 "
@@ -138,9 +146,13 @@ const memberTransactions = computed(() => {
               <small>{{ item.date }} · {{ item.reference }}</small>
             </div>
             <strong
-              :class="item.direction === 'Masuk' ? 'amount-in' : 'amount-out'"
+              :class="
+                item.direction === TransactionDirection.In
+                  ? 'amount-in'
+                  : 'amount-out'
+              "
             >
-              {{ item.direction === "Masuk" ? "+" : "−"
+              {{ item.direction === TransactionDirection.In ? "+" : "−"
               }}{{ formatCurrency(item.amount) }}
             </strong>
           </div>
