@@ -14,6 +14,8 @@ import StatusPill from "../components/StatusPill.vue";
 import UiModal from "../components/UiModal.vue";
 import {
   formatCurrency,
+  TransactionDirection,
+  TransactionStatus,
   type Transaction,
   useKoperasiStore,
 } from "../store/koperasi";
@@ -38,12 +40,12 @@ const filtered = computed(() =>
 );
 const cashIn = computed(() =>
   yearTransactions.value
-    .filter((item) => item.direction === "Masuk")
+    .filter((item) => item.direction === TransactionDirection.In)
     .reduce((sum, item) => sum + item.amount, 0),
 );
 const cashOut = computed(() =>
   yearTransactions.value
-    .filter((item) => item.direction === "Keluar")
+    .filter((item) => item.direction === TransactionDirection.Out)
     .reduce((sum, item) => sum + item.amount, 0),
 );
 async function reverseSelected() {
@@ -124,9 +126,13 @@ async function reverseSelected() {
                 <td>
                   <div class="ledger-description">
                     <span
-                      :class="item.direction === 'Masuk' ? 'is-in' : 'is-out'"
+                      :class="
+                        item.direction === TransactionDirection.In
+                          ? 'is-in'
+                          : 'is-out'
+                      "
                       ><ArrowDownLeft
-                        v-if="item.direction === 'Masuk'"
+                        v-if="item.direction === TransactionDirection.In"
                         :size="17" /><ArrowUpRight v-else :size="17"
                     /></span>
                     <div>
@@ -140,14 +146,14 @@ async function reverseSelected() {
                 </td>
                 <td class="num-cell amount-in">
                   {{
-                    item.direction === "Masuk"
+                    item.direction === TransactionDirection.In
                       ? formatCurrency(item.amount)
                       : "—"
                   }}
                 </td>
                 <td class="num-cell amount-out">
                   {{
-                    item.direction === "Keluar"
+                    item.direction === TransactionDirection.Out
                       ? formatCurrency(item.amount)
                       : "—"
                   }}
@@ -156,9 +162,9 @@ async function reverseSelected() {
                   <StatusPill
                     :label="item.status"
                     :tone="
-                      item.status === 'Terposting'
+                      item.status === TransactionStatus.Posted
                         ? 'success'
-                        : item.status === 'Dibalik'
+                        : item.status === TransactionStatus.Reversed
                           ? 'neutral'
                           : 'warning'
                     "
@@ -209,7 +215,7 @@ async function reverseSelected() {
         <div class="modal-actions">
           <button
             class="button button--danger"
-            :disabled="selected.status !== 'Terposting'"
+            :disabled="selected.status !== TransactionStatus.Posted"
             @click="reverseSelected"
           >
             <Undo2 :size="17" /> Buat reversal</button
