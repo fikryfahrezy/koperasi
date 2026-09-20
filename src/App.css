@@ -2939,18 +2939,6 @@ strong {
   margin: 0;
   color: var(--muted);
 }
-.update-checker__notes {
-  max-width: 420px;
-  max-height: 160px;
-  overflow-y: auto;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--surface-soft);
-  white-space: pre-wrap;
-  text-align: left;
-  font-size: 12px;
-}
 .update-checker__progress {
   width: 100%;
   max-width: 320px;
