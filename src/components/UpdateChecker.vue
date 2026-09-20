@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, markRaw, ref } from "vue";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
@@ -35,7 +35,7 @@ async function checkForUpdate(silent = false) {
   try {
     const result = await check();
     if (result) {
-      update.value = result;
+      update.value = markRaw(result);
       phase.value = "available";
       open.value = true;
     } else {
@@ -122,9 +122,6 @@ function closeModal() {
       <div v-else-if="phase === 'available'" class="update-checker__state">
         <DownloadCloud :size="28" />
         <h3>{{ t("update.available", { version: update?.version }) }}</h3>
-        <p v-if="update?.body" class="update-checker__notes">
-          {{ update.body }}
-        </p>
         <div class="modal-actions">
           <button class="button button--secondary" @click="open = false">
             {{ t("update.later") }}
