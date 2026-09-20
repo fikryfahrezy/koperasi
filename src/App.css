@@ -411,6 +411,16 @@ strong {
   position: relative;
   cursor: pointer;
 }
+
+.company-control {
+  max-width: 240px;
+}
+
+.company-control > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .period-control select {
   position: absolute;
   inset: 0;

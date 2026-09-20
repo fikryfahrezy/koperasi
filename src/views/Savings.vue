@@ -10,7 +10,13 @@ import {
 import PageHeader from "../components/PageHeader.vue";
 import StatusPill from "../components/StatusPill.vue";
 import UiModal from "../components/UiModal.vue";
-import { formatCurrency, useKoperasiStore } from "../store/koperasi";
+import {
+  formatCurrency,
+  MemberStatus,
+  SavingsAccountType,
+  SavingsMovement,
+  useKoperasiStore,
+} from "../store/koperasi";
 
 const {
   members,
@@ -27,8 +33,8 @@ const query = ref("");
 const open = ref(false);
 const form = reactive({
   memberId: "",
-  accountType: "WAJIB" as "POKOK" | "WAJIB" | "MANASUKA",
-  movement: "Setoran" as "Setoran" | "Penarikan",
+  accountType: SavingsAccountType.Mandatory,
+  movement: SavingsMovement.Deposit,
   amount: 50_000,
   reference: "",
 });
@@ -50,13 +56,16 @@ onMounted(loadAdminState);
 async function refreshPage() {
   await Promise.all([refresh(), loadAdminState()]);
 }
-function startMovement(movement: "Setoran" | "Penarikan") {
+function startMovement(movement: SavingsMovement) {
   Object.assign(form, {
     memberId: "",
-    accountType: movement === "Penarikan" ? "MANASUKA" : "WAJIB",
+    accountType:
+      movement === SavingsMovement.Withdrawal
+        ? SavingsAccountType.Voluntary
+        : SavingsAccountType.Mandatory,
     movement,
     amount:
-      movement === "Setoran"
+      movement === SavingsMovement.Deposit
         ? admin.parameters.mandatorySavings || 50_000
         : 50_000,
     reference: "",
@@ -75,12 +84,12 @@ async function submit() {
       ><template #actions
         ><button
           class="button button--secondary"
-          @click="startMovement('Penarikan')"
+          @click="startMovement(SavingsMovement.Withdrawal)"
         >
           <ArrowUpFromLine :size="18" /> Penarikan</button
         ><button
           class="button button--primary"
-          @click="startMovement('Setoran')"
+          @click="startMovement(SavingsMovement.Deposit)"
         >
           <ArrowDownToLine :size="18" /> Setoran
         </button></template
@@ -155,7 +164,7 @@ async function submit() {
                   <strong>{{ formatCurrency(member.savings) }}</strong>
                 </td>
                 <td>
-                  <StatusPill label="Aktif" tone="success" />
+                  <StatusPill :label="MemberStatus.Active" tone="success" />
                 </td>
               </tr>
             </tbody>
@@ -187,11 +196,11 @@ async function submit() {
           ><span>Jenis simpanan</span
           ><select
             v-model="form.accountType"
-            :disabled="form.movement === 'Penarikan'"
+            :disabled="form.movement === SavingsMovement.Withdrawal"
           >
-            <option value="POKOK">Pokok</option>
-            <option value="WAJIB">Wajib</option>
-            <option value="MANASUKA">Manasuka</option>
+            <option :value="SavingsAccountType.Principal">Pokok</option>
+            <option :value="SavingsAccountType.Mandatory">Wajib</option>
+            <option :value="SavingsAccountType.Voluntary">Manasuka</option>
           </select></label
         >
         <label class="field"

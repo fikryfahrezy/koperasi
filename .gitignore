@@ -25,3 +25,7 @@ dist-ssr
 
 src-tauri/Microsoft.WebView2.FixedVersionRuntime.*/
 Microsoft.WebView2.FixedVersionRuntime.*.cab
+
+# Real cooperative member/financial data used to test the workbook import
+# feature. Never commit this — use the in-app "Impor workbook" instead.
+docs/

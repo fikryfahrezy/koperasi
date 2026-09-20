@@ -28,6 +28,7 @@ pub(crate) fn run() {
         .plugin(tauri_plugin_persisted_scope::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            crate::commands::list_companies,
             crate::commands::get_app_snapshot,
             crate::commands::import_workbook,
             crate::commands::add_member,

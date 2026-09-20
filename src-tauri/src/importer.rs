@@ -4,10 +4,19 @@ use std::collections::HashMap;
 
 use sqlx::SqlitePool;
 
-use crate::{application, contracts::AppSnapshot, domain::normalize_name, workbook::*};
+use crate::{
+    application,
+    contracts::AppSnapshot,
+    domain::{
+        normalize_name, InterestType, LoanStatus, MemberStatus, PeriodStatus, SavingsAccountStatus,
+        SavingsAccountType, TransactionDirection, TransactionStatus,
+    },
+    workbook::*,
+};
 
 pub(crate) async fn seed_database(
     pool: &SqlitePool,
+    company_id: &str,
     sheets: &WorkbookSheets,
 ) -> Result<(), String> {
     let mut transaction = pool.begin().await.map_err(|error| error.to_string())?;
@@ -18,9 +27,9 @@ pub(crate) async fn seed_database(
             latest_savings.insert(
                 cell_text(&row[0]),
                 (
-                    cell_money(&row[14]),
-                    cell_money(&row[15]),
-                    cell_money(&row[16]),
+                    cell_money(&row[14])?,
+                    cell_money(&row[15])?,
+                    cell_money(&row[16])?,
                 ),
             );
         }
@@ -31,36 +40,41 @@ pub(crate) async fn seed_database(
         if row.len() < 8 || cell_text(&row[0]).is_empty() {
             continue;
         }
-        let member_id = cell_text(&row[0]);
+        let source_member_id = cell_text(&row[0]);
+        let member_id = format!("{company_id}-{source_member_id}");
         let name = cell_text(&row[3]);
         member_by_name.insert(normalize_name(&name), member_id.clone());
-        sqlx::query("INSERT INTO members (id, member_number, name, joined_at, status) VALUES (?, ?, ?, ?, 'Aktif')")
+        sqlx::query("INSERT INTO members (id, company_id, member_number, name, joined_at, status) VALUES (?, ?, ?, ?, ?, ?)")
             .bind(&member_id)
+            .bind(company_id)
             // Kolom `No` pada workbook berisi nomor 134 dua kali (M134 dan M135).
             // Member ID hasil pembersihan sudah unik dan berurutan, sehingga menjadi
             // sumber nomor anggota migrasi yang deterministik.
-            .bind(format!("KBS-{:0>4}", member_id.trim_start_matches('M')))
+            .bind(format!("KBS-{:0>4}", source_member_id.trim_start_matches('M')))
             .bind(&name)
             .bind("Migrasi 2026")
+            .bind(MemberStatus::Active.as_str())
             .execute(&mut *transaction)
             .await
             .map_err(|error| error.to_string())?;
 
-        let balances = latest_savings.get(&member_id).copied().unwrap_or((
-            cell_money(&row[4]),
-            cell_money(&row[5]),
-            cell_money(&row[6]),
+        let balances = latest_savings.get(&source_member_id).copied().unwrap_or((
+            cell_money(&row[4])?,
+            cell_money(&row[5])?,
+            cell_money(&row[6])?,
         ));
         for (kind, balance) in [
-            ("POKOK", balances.0),
-            ("WAJIB", balances.1),
-            ("MANASUKA", balances.2),
+            (SavingsAccountType::Principal, balances.0),
+            (SavingsAccountType::Mandatory, balances.1),
+            (SavingsAccountType::Voluntary, balances.2),
         ] {
-            sqlx::query("INSERT INTO savings_accounts (id, member_id, account_type, balance) VALUES (?, ?, ?, ?)")
-                .bind(format!("SA-{member_id}-{kind}"))
+            sqlx::query("INSERT INTO savings_accounts (id, company_id, member_id, account_type, balance, status) VALUES (?, ?, ?, ?, ?, ?)")
+                .bind(format!("SA-{member_id}-{}", kind.as_str()))
+                .bind(company_id)
                 .bind(&member_id)
-                .bind(kind)
+                .bind(kind.as_str())
                 .bind(balance.max(0))
+                .bind(SavingsAccountStatus::Active.as_str())
                 .execute(&mut *transaction)
                 .await
                 .map_err(|error| error.to_string())?;
@@ -70,7 +84,7 @@ pub(crate) async fn seed_database(
     let mut latest_loan_balance: HashMap<String, i64> = HashMap::new();
     for row in &sheets.loans_2026 {
         if row.len() >= 23 {
-            latest_loan_balance.insert(cell_text(&row[0]), cell_money(&row[22]).max(0));
+            latest_loan_balance.insert(cell_text(&row[0]), cell_money(&row[22])?.max(0));
         }
     }
 
@@ -78,33 +92,35 @@ pub(crate) async fn seed_database(
         if row.len() < 16 || cell_text(&row[0]).is_empty() {
             continue;
         }
-        let loan_id = cell_text(&row[0]);
+        let source_loan_id = cell_text(&row[0]);
+        let loan_id = format!("{company_id}-{source_loan_id}");
         let name = cell_text(&row[3]);
-        let plafond = cell_money(&row[4]).max(0);
+        let plafond = cell_money(&row[4])?.max(0);
         let balance = latest_loan_balance
-            .get(&loan_id)
+            .get(&source_loan_id)
             .copied()
             .unwrap_or(plafond);
         let member_id = member_by_name.get(&normalize_name(&name)).cloned();
         let status = if cell_text(&row[15]) == "PERLU CEK" {
-            "Perlu review"
+            LoanStatus::NeedsReview
         } else if balance == 0 {
-            "Lunas"
+            LoanStatus::PaidOff
         } else {
-            "Berjalan"
+            LoanStatus::Active
         };
-        sqlx::query("INSERT INTO loans (id, member_id, member_name, plafond, balance, rate_annual, tenor, interest_type, realization_date, due_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        sqlx::query("INSERT INTO loans (id, company_id, member_id, member_name, plafond, balance, rate_annual, tenor, interest_type, realization_date, due_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
             .bind(&loan_id)
+            .bind(company_id)
             .bind(member_id)
             .bind(&name)
             .bind(plafond)
             .bind(balance)
-            .bind(cell_percentage(&row[6]))
-            .bind(cell_int(&row[11]).max(1))
-            .bind(if cell_text(&row[7]) == "Flat" { "Flat" } else { "Menurun" })
-            .bind(cell_date_display(&row[9]))
-            .bind(cell_date_display(&row[10]))
-            .bind(status)
+            .bind(cell_percentage(&row[6])?)
+            .bind(cell_int(&row[11])?.max(1))
+            .bind(if cell_text(&row[7]) == InterestType::Flat.as_str() { InterestType::Flat.as_str() } else { InterestType::Declining.as_str() })
+            .bind(cell_date_display(&row[9])?)
+            .bind(cell_date_display(&row[10])?)
+            .bind(status.as_str())
             .execute(&mut *transaction)
             .await
             .map_err(|error| error.to_string())?;
@@ -113,15 +129,19 @@ pub(crate) async fn seed_database(
     // Buku kas sumber memulai mutasi 2026 dari saldo bawaan Rp21.974.442.
     // Saldo tersebut harus menjadi posting tersendiri agar ledger database dapat
     // menghitung saldo akhir tanpa bergantung pada kolom saldo hasil Excel.
-    sqlx::query("INSERT INTO transactions (id, business_date, display_date, display_time, member_name, transaction_type, description, reference, direction, amount, status, actor) VALUES ('OPENING-CASH-2026', '2026-01-01', '01-Jan-2026', '00:00', 'Koperasi', 'OPENING_BALANCE', 'Saldo awal kas 2026', 'OPENING/KAS/2026', 'Masuk', 21974442, 'Terposting', 'System Migration')")
+    let opening_id = format!("{company_id}-OPENING-CASH-2026");
+    sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, transaction_type, description, reference, direction, amount, status, actor) VALUES (?, ?, '2026-01-01', '01-Jan-2026', '00:00', 'Koperasi', 'OPENING_BALANCE', 'Saldo awal kas 2026', 'OPENING/KAS/2026', ?, 21974442, ?, 'System Migration')")
+        .bind(&opening_id).bind(company_id).bind(TransactionDirection::In.as_str()).bind(TransactionStatus::Posted.as_str())
         .execute(&mut *transaction)
         .await
         .map_err(|error| error.to_string())?;
-    sqlx::query("INSERT INTO transaction_components (transaction_id, component_type, label, amount) VALUES ('OPENING-CASH-2026', 'CASH_OPENING', 'Saldo awal kas', 21974442)")
+    sqlx::query("INSERT INTO transaction_components (company_id, transaction_id, component_type, label, amount) VALUES (?, ?, 'CASH_OPENING', 'Saldo awal kas', 21974442)")
+        .bind(company_id).bind(&opening_id)
         .execute(&mut *transaction)
         .await
         .map_err(|error| error.to_string())?;
-    sqlx::query("INSERT INTO cash_postings (transaction_id, direction, amount) VALUES ('OPENING-CASH-2026', 'Masuk', 21974442)")
+    sqlx::query("INSERT INTO cash_postings (company_id, transaction_id, direction, amount) VALUES (?, ?, ?, 21974442)")
+        .bind(company_id).bind(&opening_id).bind(TransactionDirection::In.as_str())
         .execute(&mut *transaction)
         .await
         .map_err(|error| error.to_string())?;
@@ -130,50 +150,64 @@ pub(crate) async fn seed_database(
         if row.len() < 11 {
             continue;
         }
-        let cash_out = cell_money(&row[4]);
-        let cash_in = cell_money(&row[5]);
-        let net_amount = cash_in - cash_out;
+        let cash_out = cell_money(&row[4])?;
+        let cash_in = cell_money(&row[5])?;
+        let net_amount = cash_in
+            .checked_sub(cash_out)
+            .ok_or("Nilai mutasi kas terlalu besar.")?;
         if net_amount == 0 {
             continue;
         }
-        let amount = net_amount.abs();
+        let amount = net_amount
+            .checked_abs()
+            .ok_or("Nilai mutasi kas terlalu besar.")?;
         let source_row = cell_text(&row[9]);
-        let id = format!("MIG-KAS-{source_row}");
-        let direction = if net_amount > 0 { "Masuk" } else { "Keluar" };
-        let business_date = cell_date_iso(&row[0]);
-        let display_date = cell_date_display(&row[0]);
+        let id = format!("{company_id}-MIG-KAS-{source_row}");
+        let direction = if net_amount > 0 {
+            TransactionDirection::In
+        } else {
+            TransactionDirection::Out
+        };
+        let business_date = cell_date_iso(&row[0])?;
+        let display_date = cell_date_display(&row[0])?;
         let description = cell_text(&row[1]);
         let reference = format!("MIG/KAS/2026/{source_row}");
-        sqlx::query("INSERT INTO transactions (id, business_date, display_date, display_time, member_name, transaction_type, description, reference, direction, amount, status, actor) VALUES (?, ?, ?, '00:00', ?, 'MIGRATED_CASH', ?, ?, ?, ?, 'Terposting', 'Import Excel 2026')")
+        sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, transaction_type, description, reference, direction, amount, status, actor) VALUES (?, ?, ?, ?, '00:00', ?, 'MIGRATED_CASH', ?, ?, ?, ?, ?, 'Import Excel 2026')")
             .bind(&id)
+            .bind(company_id)
             .bind(&business_date)
             .bind(&display_date)
             .bind(&description)
             .bind(&description)
             .bind(&reference)
-            .bind(direction)
+            .bind(direction.as_str())
             .bind(amount)
+            .bind(TransactionStatus::Posted.as_str())
             .execute(&mut *transaction)
             .await
             .map_err(|error| error.to_string())?;
-        sqlx::query("INSERT INTO transaction_components (transaction_id, component_type, label, amount) VALUES (?, 'MIGRATION_UNCLASSIFIED', 'Migrasi buku kas', ?)")
+        sqlx::query("INSERT INTO transaction_components (company_id, transaction_id, component_type, label, amount) VALUES (?, ?, 'MIGRATION_UNCLASSIFIED', 'Migrasi buku kas', ?)")
+            .bind(company_id)
             .bind(&id)
             .bind(amount)
             .execute(&mut *transaction)
             .await
             .map_err(|error| error.to_string())?;
         sqlx::query(
-            "INSERT INTO cash_postings (transaction_id, direction, amount) VALUES (?, ?, ?)",
+            "INSERT INTO cash_postings (company_id, transaction_id, direction, amount) VALUES (?, ?, ?, ?)",
         )
+        .bind(company_id)
         .bind(&id)
-        .bind(direction)
+        .bind(direction.as_str())
         .bind(amount)
         .execute(&mut *transaction)
         .await
         .map_err(|error| error.to_string())?;
     }
 
-    sqlx::query("INSERT INTO periods (period, status) VALUES ('2026-09', 'OPEN')")
+    sqlx::query("INSERT INTO periods (company_id, period, status) VALUES (?, '2026-09', ?)")
+        .bind(company_id)
+        .bind(PeriodStatus::Open.as_str())
         .execute(&mut *transaction)
         .await
         .map_err(|error| error.to_string())?;
@@ -183,10 +217,11 @@ pub(crate) async fn seed_database(
         ("LOAN_PROVISION_RATE", 0.01),
         ("LOAN_ANNUAL_RATE", 0.24),
     ] {
-        sqlx::query("INSERT INTO parameters (parameter_key, value, effective_date, created_by) VALUES (?, ?, '2026-01-01', 'System Migration')")
-            .bind(key).bind(value).execute(&mut *transaction).await.map_err(|error| error.to_string())?;
+        sqlx::query("INSERT INTO parameters (company_id, parameter_key, value, effective_date, created_by) VALUES (?, ?, ?, '2026-01-01', 'System Migration') ON CONFLICT(company_id, parameter_key, effective_date) DO UPDATE SET value = excluded.value, created_by = excluded.created_by")
+            .bind(company_id).bind(key).bind(value).execute(&mut *transaction).await.map_err(|error| error.to_string())?;
     }
-    sqlx::query("INSERT INTO app_meta (key, value) VALUES ('seed_version', '1')")
+    sqlx::query("INSERT INTO app_meta (company_id, key, value) VALUES (?, 'seed_version', '1')")
+        .bind(company_id)
         .execute(&mut *transaction)
         .await
         .map_err(|error| error.to_string())?;
@@ -198,26 +233,42 @@ pub(crate) async fn seed_database(
 
 pub(crate) async fn import_workbook(
     path: String,
+    company_id: &str,
     pool: &SqlitePool,
 ) -> Result<AppSnapshot, String> {
-    let already_seeded: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM app_meta WHERE key = 'seed_version'")
-            .fetch_one(pool)
-            .await
-            .map_err(|error| error.to_string())?;
+    let path = std::path::PathBuf::from(path)
+        .canonicalize()
+        .map_err(|error| format!("Berkas workbook tidak dapat dibuka: {error}"))?;
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase);
+    if !path.is_file()
+        || !matches!(
+            extension.as_deref(),
+            Some("xlsx" | "xls" | "xlsm" | "xlsb" | "ods")
+        )
+    {
+        return Err("Berkas impor harus berupa workbook yang didukung.".into());
+    }
+    let already_seeded: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM app_meta WHERE company_id = ? AND key = 'seed_version'",
+    )
+    .bind(company_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| error.to_string())?;
     if already_seeded > 0 {
         return Err(
             "Data sudah pernah diimpor. Hapus data aplikasi terlebih dahulu untuk mengimpor ulang."
                 .into(),
         );
     }
-    let sheets = tauri::async_runtime::spawn_blocking(move || {
-        load_workbook_sheets(std::path::Path::new(&path))
-    })
-    .await
-    .map_err(|error| error.to_string())??;
-    seed_database(pool, &sheets).await?;
-    application::get_app_snapshot(pool).await
+    let sheets = tauri::async_runtime::spawn_blocking(move || load_workbook_sheets(&path))
+        .await
+        .map_err(|error| error.to_string())??;
+    seed_database(pool, company_id, &sheets).await?;
+    application::get_app_snapshot(company_id, pool).await
 }
 
 #[cfg(test)]
@@ -256,7 +307,15 @@ mod tests {
                 .execute(&pool)
                 .await
                 .unwrap();
-            seed_database(&pool, &sheets).await.unwrap();
+            sqlx::raw_sql(include_str!("../migrations/002_multi_company.sql"))
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::raw_sql(include_str!("../migrations/003_remove_enum_checks.sql"))
+                .execute(&pool)
+                .await
+                .unwrap();
+            seed_database(&pool, "default", &sheets).await.unwrap();
 
             let member_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM members")
                 .fetch_one(&pool)
@@ -266,10 +325,13 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-            let cash: i64 = sqlx::query_scalar("SELECT SUM(CASE direction WHEN 'Masuk' THEN amount ELSE -amount END) FROM cash_postings")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+            let cash: i64 = sqlx::query_scalar(
+                "SELECT SUM(CASE direction WHEN ? THEN amount ELSE -amount END) FROM cash_postings",
+            )
+            .bind(TransactionDirection::In.as_str())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
             let savings: i64 = sqlx::query_scalar("SELECT SUM(balance) FROM savings_accounts")
                 .fetch_one(&pool)
                 .await
