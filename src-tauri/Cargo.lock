@@ -2524,7 +2524,7 @@ dependencies = [
 
 [[package]]
 name = "koperasi"
-version = "0.6.9"
+version = "0.7.9"
 dependencies = [
  "async-lock",
  "base64ct",
