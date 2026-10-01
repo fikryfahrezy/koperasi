@@ -273,16 +273,6 @@ const cashflow = [
             </div>
             <ArrowRight :size="17" />
           </button>
-          <button class="review-item" @click="router.push('/migration')">
-            <span class="review-item__icon review-item__icon--blue"
-              ><Users :size="19"
-            /></span>
-            <div>
-              <strong>Data migrasi ambigu</strong
-              ><small>4 anggota perlu dipadankan</small>
-            </div>
-            <ArrowRight :size="17" />
-          </button>
           <button class="review-item" @click="router.push('/loans')">
             <span class="review-item__icon review-item__icon--violet"
               ><Landmark :size="19"

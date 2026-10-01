@@ -88,6 +88,14 @@ impl TransactionDirection {
     }
 }
 
+// Dari/ke mana uang bergerak. Buku Kas Harian hanya berisi channel Kas.
+string_enum!(Channel {
+    Cash => "KAS",
+    Bank => "BANK",
+    Deduction => "POTONGAN",
+    NonCash => "NON_KAS",
+});
+
 string_enum!(TransactionStatus {
     Posted => "Terposting",
     Draft => "Draf",

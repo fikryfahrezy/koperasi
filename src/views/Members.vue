@@ -1,18 +1,13 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
-import { Download, Plus, Search, UserRound } from "lucide-vue-next";
+import { Plus, Search, UserRound } from "lucide-vue-next";
 import { useRoute } from "vue-router";
 import PageHeader from "../components/PageHeader.vue";
 import RupiahInput from "../components/RupiahInput.vue";
-import StatusPill from "../components/StatusPill.vue";
 import UiModal from "../components/UiModal.vue";
-import {
-  formatCurrency,
-  MemberStatus,
-  useKoperasiStore,
-} from "../store/koperasi";
+import { SavingsAccountType, useKoperasiStore } from "../store/koperasi";
 
-const { members, totals, addMember, notify, refresh } = useKoperasiStore();
+const { members, totals, addMember, refresh } = useKoperasiStore();
 const route = useRoute();
 const query = ref(String(route.query.q ?? ""));
 watch(
@@ -22,32 +17,50 @@ watch(
 const open = ref(false);
 const form = reactive({
   name: "",
-  memberNumber: "",
   joinedAt: "2026-09-13",
   principalSavings: 50_000,
 });
 
 const filteredMembers = computed(() =>
   members.filter((member) =>
-    `${member.name} ${member.memberNumber} ${member.id}`
-      .toLowerCase()
-      .includes(query.value.toLowerCase()),
+    member.name.toLowerCase().includes(query.value.toLowerCase()),
   ),
 );
+const joinedAtFormatter = new Intl.DateTimeFormat("id-ID", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
+function formatJoinedAt(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return "—";
+  const date = new Date(
+    Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])),
+  );
+  return Number.isNaN(date.getTime()) ? "—" : joinedAtFormatter.format(date);
+}
 async function submit() {
   if (
     !form.name ||
-    !form.memberNumber ||
     !Number.isFinite(form.principalSavings) ||
     form.principalSavings < 50_000
   )
     return;
-  const saved = await addMember({ ...form });
+  const saved = await addMember({
+    name: form.name,
+    joinedAt: form.joinedAt,
+    openingSavings: [
+      {
+        accountType: SavingsAccountType.Principal,
+        amount: form.principalSavings,
+      },
+    ],
+  });
   if (!saved) return;
   open.value = false;
   Object.assign(form, {
     name: "",
-    memberNumber: "",
     joinedAt: "2026-09-13",
     principalSavings: 50_000,
   });
@@ -58,18 +71,6 @@ async function submit() {
   <div class="page-stack">
     <PageHeader title="Anggota" :refresh="refresh">
       <template #actions
-        ><button
-          class="button button--secondary"
-          type="button"
-          @click="
-            notify(
-              'Ekspor disiapkan',
-              'Data anggota akan diekspor ke Excel.',
-              'info',
-            )
-          "
-        >
-          <Download :size="18" /> Ekspor</button
         ><button
           class="button button--primary"
           type="button"
@@ -84,7 +85,7 @@ async function submit() {
         <label class="search-field"
           ><Search :size="18" /><input
             v-model="query"
-            placeholder="Cari nama, ID, atau nomor anggota..."
+            placeholder="Cari nama anggota..."
         /></label>
         <div class="toolbar__meta">
           <strong>{{ filteredMembers.length }}</strong> dari
@@ -97,10 +98,7 @@ async function submit() {
             <tr>
               <th>Anggota</th>
               <th>Bergabung</th>
-              <th>Total simpanan</th>
-              <th>Saldo pinjaman</th>
-              <th>Status</th>
-              <th></th>
+              <th class="action-cell"></th>
             </tr>
           </thead>
           <tbody>
@@ -109,29 +107,17 @@ async function submit() {
                 <div class="person-cell">
                   <span><UserRound :size="19" /></span>
                   <div>
-                    <strong>{{ member.name }}</strong
-                    ><small>{{ member.memberNumber }} · {{ member.id }}</small>
+                    <RouterLink
+                      class="member-name-link"
+                      :to="{ name: 'member-detail', params: { id: member.id } }"
+                    >
+                      {{ member.name }}
+                    </RouterLink>
                   </div>
                 </div>
               </td>
-              <td>{{ member.joinedAt }}</td>
-              <td class="num-cell">{{ formatCurrency(member.savings) }}</td>
-              <td class="num-cell">
-                {{
-                  member.loanBalance ? formatCurrency(member.loanBalance) : "—"
-                }}
-              </td>
-              <td>
-                <StatusPill
-                  :label="member.status"
-                  :tone="
-                    member.status === MemberStatus.Active
-                      ? 'success'
-                      : 'neutral'
-                  "
-                />
-              </td>
-              <td>
+              <td>{{ formatJoinedAt(member.joinedAt) }}</td>
+              <td class="action-cell">
                 <RouterLink
                   class="row-action"
                   :to="{ name: 'member-detail', params: { id: member.id } }"
@@ -154,18 +140,10 @@ async function submit() {
             required
             placeholder="Contoh: Nani Suryani"
         /></label>
-        <div class="field-row">
-          <label class="field"
-            ><span>Nomor anggota</span
-            ><input
-              v-model="form.memberNumber"
-              required
-              placeholder="KBS-0145" /></label
-          ><label class="field"
-            ><span>Tanggal bergabung</span
-            ><input v-model="form.joinedAt" type="date" required
-          /></label>
-        </div>
+        <label class="field"
+          ><span>Tanggal bergabung</span
+          ><input v-model="form.joinedAt" type="date" required
+        /></label>
         <label class="field"
           ><span>Simpanan pokok</span
           ><RupiahInput

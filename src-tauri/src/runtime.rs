@@ -30,6 +30,9 @@ pub(crate) fn run() {
         .invoke_handler(tauri::generate_handler![
             crate::commands::list_companies,
             crate::commands::get_app_snapshot,
+            crate::commands::get_monthly_ledger,
+            crate::commands::get_cash_book,
+            crate::commands::post_cash_entry,
             crate::commands::import_workbook,
             crate::commands::add_member,
             crate::commands::preview_loan,

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { computed, onMounted } from "vue";
 import { RouterView } from "vue-router";
-import { Building2, CalendarDays, ChevronDown } from "lucide-vue-next";
+import { Building2, CalendarDays } from "lucide-vue-next";
 import logo from "./assets/logo.png";
 import AppMenu from "./components/AppMenu.vue";
 import ToastHost from "./components/ToastHost.vue";
+import UiSelect from "./components/UiSelect.vue";
 import UpdateChecker from "./components/UpdateChecker.vue";
 import WorkspaceTabs from "./components/WorkspaceTabs.vue";
 import { clearRuntimeError, runtimeError } from "./runtime-error";
@@ -21,6 +22,16 @@ const {
   selectedCompanyId,
   selectCompany,
 } = useKoperasiStore();
+
+const companyOptions = computed(() =>
+  companies.value.map((company) => ({
+    value: company.id,
+    label: company.name,
+  })),
+);
+const reportYearOptions = computed(() =>
+  yearOptions.value.map((year) => ({ value: year, label: String(year) })),
+);
 
 onMounted(initialize);
 </script>
@@ -46,42 +57,25 @@ onMounted(initialize);
               </div>
             </div>
             <div class="topbar__tools">
-              <label class="period-control company-control">
-                <Building2 :size="16" />
-                <span>{{
-                  companies.find((company) => company.id === selectedCompanyId)
-                    ?.name
-                }}</span>
-                <ChevronDown :size="14" />
-                <select
-                  :value="selectedCompanyId"
-                  aria-label="Perusahaan"
-                  @change="
-                    selectCompany(($event.target as HTMLSelectElement).value)
-                  "
-                >
-                  <option
-                    v-for="company in companies"
-                    :key="company.id"
-                    :value="company.id"
-                  >
-                    {{ company.name }}
-                  </option>
-                </select>
-              </label>
-              <label class="period-control">
-                <CalendarDays :size="16" />
-                <span>{{ selectedYear }}</span>
-                <ChevronDown :size="14" />
-                <select
-                  v-model.number="selectedYear"
-                  aria-label="Tahun laporan"
-                >
-                  <option v-for="year in yearOptions" :key="year" :value="year">
-                    {{ year }}
-                  </option>
-                </select>
-              </label>
+              <UiSelect
+                class="company-control"
+                :model-value="selectedCompanyId"
+                :options="companyOptions"
+                aria-label="Perusahaan"
+                variant="toolbar"
+                @update:model-value="selectCompany(String($event))"
+              >
+                <template #icon><Building2 :size="16" /></template>
+              </UiSelect>
+              <UiSelect
+                :model-value="selectedYear"
+                :options="reportYearOptions"
+                aria-label="Tahun laporan"
+                variant="toolbar"
+                @update:model-value="selectedYear = Number($event)"
+              >
+                <template #icon><CalendarDays :size="16" /></template>
+              </UiSelect>
               <UpdateChecker />
             </div>
           </header>

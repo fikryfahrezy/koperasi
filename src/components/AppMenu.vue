@@ -6,7 +6,7 @@ import {
   Coins,
   FileSpreadsheet,
   Gauge,
-  Landmark,
+  HandCoins,
   Settings2,
   ShieldCheck,
   Users,
@@ -31,7 +31,7 @@ const menuItems = [
   },
   { to: "/cash-ledger", labelKey: "sidebar.nav.cashLedger", icon: BookOpen },
   { to: "/savings", labelKey: "sidebar.nav.savings", icon: Coins },
-  { to: "/loans", labelKey: "sidebar.nav.loans", icon: Landmark },
+  { to: "/loans", labelKey: "sidebar.nav.loans", icon: HandCoins },
   { to: "/members", labelKey: "sidebar.nav.members", icon: Users },
   {
     to: "/reconciliation",
@@ -45,6 +45,8 @@ const menuItems = [
     labelKey: "sidebar.nav.migration",
     icon: FileSpreadsheet,
     divider: true,
+    // Migrasi Excel disembunyikan untuk sementara.
+    hidden: true,
   },
   {
     to: "/admin",
