@@ -1,235 +1,232 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
-import {
-  ArrowDownToLine,
-  ArrowUpFromLine,
-  CalendarX2,
-  Coins,
-  Search,
-} from "lucide-vue-next";
+import { computed, ref, watch } from "vue";
+import { CalendarX2 } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
-import StatusPill from "../components/StatusPill.vue";
-import UiModal from "../components/UiModal.vue";
+import UiSelect from "../components/UiSelect.vue";
 import {
-  formatCurrency,
-  MemberStatus,
-  SavingsAccountType,
-  SavingsMovement,
+  formatPeriod,
+  formatPreviousPeriod,
+  formatSheetDate,
+  formatSheetNumber,
+  type SavingsMonth,
   useKoperasiStore,
+  useMonthlyLedger,
 } from "../store/koperasi";
 
-const {
-  members,
-  selectedYear,
-  yearMembers,
-  yearTotals,
-  yearHasData,
-  admin,
-  loadAdminState,
-  postSavingsTransaction,
-  refresh,
-} = useKoperasiStore();
-const query = ref("");
-const open = ref(false);
-const form = reactive({
-  memberId: "",
-  accountType: SavingsAccountType.Mandatory,
-  movement: SavingsMovement.Deposit,
-  amount: 50_000,
-  reference: "",
+const { members, selectedYear, refresh } = useKoperasiStore();
+const { monthlyLedger, monthlyLedgerLoading } = useMonthlyLedger();
+
+const period = ref("");
+const periodOptions = computed(() =>
+  [...monthlyLedger.periods]
+    .reverse()
+    .map((value) => ({ value, label: formatPeriod(value) })),
+);
+watch(
+  () => monthlyLedger.periods,
+  (periods) => {
+    if (!periods.includes(period.value))
+      period.value = periods[periods.length - 1] ?? "";
+  },
+  { immediate: true },
+);
+
+const memberNames = computed(
+  () => new Map(members.map((member) => [member.id, member.name])),
+);
+
+// Urutan sheet mengikuti nomor anggota (M001, M002, ...).
+const monthRows = computed(() =>
+  monthlyLedger.savings
+    .filter((row) => row.period === period.value)
+    .sort((a, b) => a.memberId.localeCompare(b.memberId))
+    .map((row, index) => ({
+      ...row,
+      no: index + 1,
+      name: memberNames.value.get(row.memberId) ?? row.memberId,
+    })),
+);
+type NumericKey = {
+  [K in keyof SavingsMonth]: SavingsMonth[K] extends number ? K : never;
+}[keyof SavingsMonth];
+const numericKeys: NumericKey[] = [
+  "principalOpening",
+  "mandatoryOpening",
+  "voluntaryOpening",
+  "principalIn",
+  "principalOut",
+  "mandatoryIn",
+  "mandatoryOut",
+  "voluntaryIn",
+  "voluntaryOut",
+  "shu",
+  "principalClosing",
+  "mandatoryClosing",
+  "voluntaryClosing",
+];
+const totals = computed(() => {
+  const sum = Object.fromEntries(numericKeys.map((key) => [key, 0])) as Record<
+    NumericKey,
+    number
+  >;
+  for (const row of monthRows.value) {
+    for (const key of numericKeys) sum[key] += row[key];
+  }
+  return sum;
 });
-const filtered = computed(() =>
-  yearMembers.value.filter((member) =>
-    member.name.toLowerCase().includes(query.value.toLowerCase()),
-  ),
+const openingTotal = (row: Record<NumericKey, number>) =>
+  row.principalOpening + row.mandatoryOpening + row.voluntaryOpening;
+const closingTotal = (row: Record<NumericKey, number>) =>
+  row.principalClosing + row.mandatoryClosing + row.voluntaryClosing;
+
+const openingKeys = [
+  "principalOpening",
+  "mandatoryOpening",
+  "voluntaryOpening",
+] as const;
+// Debet = keluar, Kredit = masuk, sama seperti sheet. Kolom SHU hanya ada
+// di blok Januari (SHU Tahun Buku tahun sebelumnya).
+const hasShu = computed(() => period.value.endsWith("-01"));
+const movementKeys = computed(() =>
+  (
+    [
+      "principalOut",
+      "principalIn",
+      "mandatoryOut",
+      "mandatoryIn",
+      "voluntaryOut",
+      "voluntaryIn",
+      "shu",
+    ] as const
+  ).filter((key) => key !== "shu" || hasShu.value),
 );
-const principalTotal = computed(() =>
-  yearMembers.value.reduce((sum, member) => sum + member.principalSavings, 0),
-);
-const mandatoryTotal = computed(() =>
-  yearMembers.value.reduce((sum, member) => sum + member.mandatorySavings, 0),
-);
-const voluntaryTotal = computed(() =>
-  yearMembers.value.reduce((sum, member) => sum + member.voluntarySavings, 0),
-);
-onMounted(loadAdminState);
-async function refreshPage() {
-  await Promise.all([refresh(), loadAdminState()]);
-}
-function startMovement(movement: SavingsMovement) {
-  Object.assign(form, {
-    memberId: "",
-    accountType:
-      movement === SavingsMovement.Withdrawal
-        ? SavingsAccountType.Voluntary
-        : SavingsAccountType.Mandatory,
-    movement,
-    amount:
-      movement === SavingsMovement.Deposit
-        ? admin.parameters.mandatorySavings || 50_000
-        : 50_000,
-    reference: "",
-  });
-  open.value = true;
-}
-async function submit() {
-  if (!form.memberId || form.amount <= 0) return;
-  if (!(await postSavingsTransaction({ ...form }))) return;
-  open.value = false;
-}
+const closingKeys = [
+  "principalClosing",
+  "mandatoryClosing",
+  "voluntaryClosing",
+] as const;
 </script>
 <template>
   <div class="page-stack">
-    <PageHeader title="Simpanan" :refresh="refreshPage"
-      ><template #actions
-        ><button
-          class="button button--secondary"
-          @click="startMovement(SavingsMovement.Withdrawal)"
-        >
-          <ArrowUpFromLine :size="18" /> Penarikan</button
-        ><button
-          class="button button--primary"
-          @click="startMovement(SavingsMovement.Deposit)"
-        >
-          <ArrowDownToLine :size="18" /> Setoran
-        </button></template
-      ></PageHeader
+    <PageHeader title="Simpanan" :refresh="refresh" />
+    <section
+      v-if="!monthlyLedgerLoading && !monthlyLedger.periods.length"
+      class="panel year-empty-state"
     >
-    <section v-if="!yearHasData" class="panel year-empty-state">
       <CalendarX2 :size="36" />
       <strong>Belum ada data simpanan untuk {{ selectedYear }}</strong>
-      <p>Pilih tahun lain untuk melihat saldo dan rekening simpanan.</p>
+      <p>Pilih tahun lain.</p>
     </section>
     <template v-else>
-      <section class="savings-summary">
-        <article class="savings-hero">
-          <span><Coins :size="24" /></span>
-          <p>Total simpanan anggota</p>
-          <strong>{{ formatCurrency(yearTotals.savings) }}</strong
-          ><small>Saldo dan mutasi tahun {{ selectedYear }}</small>
-        </article>
-        <article>
-          <p>Simpanan pokok</p>
-          <strong>{{ formatCurrency(principalTotal, true) }}</strong
-          ><span>{{ yearTotals.members }} rekening</span>
-        </article>
-        <article>
-          <p>Simpanan wajib</p>
-          <strong>{{ formatCurrency(mandatoryTotal, true) }}</strong
-          ><span>Saldo ledger</span>
-        </article>
-        <article>
-          <p>Manasuka</p>
-          <strong>{{ formatCurrency(voluntaryTotal, true) }}</strong
-          ><span>Dapat ditarik</span>
-        </article>
-      </section>
       <section class="panel table-panel">
         <div class="toolbar">
-          <label class="search-field"
-            ><Search :size="18" /><input
-              v-model="query"
-              placeholder="Cari anggota..."
-          /></label>
-          <div class="toolbar__meta">Tahun {{ selectedYear }}</div>
+          <UiSelect
+            v-model="period"
+            :options="periodOptions"
+            aria-label="Bulan"
+            variant="toolbar"
+          />
         </div>
-        <div class="data-table-wrap">
-          <table class="data-table">
+        <div v-if="period" class="data-table-wrap sheet-wrap">
+          <table class="sheet-table">
             <thead>
               <tr>
-                <th>Anggota</th>
-                <th>Pokok</th>
-                <th>Wajib</th>
-                <th>Manasuka</th>
-                <th>Total saldo</th>
-                <th>Status rekening</th>
+                <th rowspan="3" class="sheet-sticky sheet-no">No</th>
+                <th rowspan="3" class="sheet-sticky sheet-name">
+                  Nama Pensiunan
+                </th>
+                <th colspan="3" class="sheet-group">
+                  Saldo bulan {{ formatPreviousPeriod(period) }}
+                </th>
+                <th rowspan="3" class="sheet-total">
+                  Total simpanan<br />{{ formatPreviousPeriod(period) }}
+                </th>
+                <th
+                  :colspan="hasShu ? 8 : 7"
+                  class="sheet-group sheet-group--mutasi"
+                >
+                  Mutasi bulan {{ formatPeriod(period) }}
+                </th>
+                <th colspan="3" class="sheet-group">
+                  Saldo simpanan bulan {{ formatPeriod(period) }}
+                </th>
+                <th rowspan="3" class="sheet-total">
+                  Total simpanan<br />{{ formatPeriod(period) }}
+                </th>
+              </tr>
+              <tr>
+                <th rowspan="2">Pokok</th>
+                <th rowspan="2">Wajib</th>
+                <th rowspan="2">Manasuka</th>
+                <th rowspan="2">Tanggal</th>
+                <th colspan="2">Simpanan Pokok</th>
+                <th colspan="2">Simpanan Wajib</th>
+                <th colspan="2">Manasuka</th>
+                <th v-if="hasShu" rowspan="2">
+                  SHU Tahun Buku {{ selectedYear - 1 }}
+                </th>
+                <th rowspan="2">Pokok</th>
+                <th rowspan="2">Wajib</th>
+                <th rowspan="2">Manasuka</th>
+              </tr>
+              <tr>
+                <th>Debet</th>
+                <th>Kredit</th>
+                <th>Debet</th>
+                <th>Kredit</th>
+                <th>Debet</th>
+                <th>Kredit</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="member in filtered" :key="member.id">
-                <td>
-                  <strong>{{ member.name }}</strong
-                  ><small class="cell-sub">{{ member.memberNumber }}</small>
+              <tr v-for="row in monthRows" :key="row.memberId">
+                <td class="sheet-sticky sheet-no">{{ row.no }}</td>
+                <td class="sheet-sticky sheet-name">
+                  <strong>{{ row.name }}</strong>
                 </td>
-                <td class="num-cell">
-                  {{ formatCurrency(member.principalSavings) }}
+                <td v-for="key in openingKeys" :key="key" class="num-cell">
+                  {{ formatSheetNumber(row[key]) }}
                 </td>
-                <td class="num-cell">
-                  {{ formatCurrency(member.mandatorySavings) }}
+                <td class="num-cell sheet-total">
+                  {{ formatSheetNumber(openingTotal(row)) }}
                 </td>
-                <td class="num-cell">
-                  {{ formatCurrency(member.voluntarySavings) }}
+                <td>{{ formatSheetDate(row.transactionDate) || "-" }}</td>
+                <td v-for="key in movementKeys" :key="key" class="num-cell">
+                  {{ formatSheetNumber(row[key]) }}
                 </td>
-                <td class="num-cell">
-                  <strong>{{ formatCurrency(member.savings) }}</strong>
+                <td v-for="key in closingKeys" :key="key" class="num-cell">
+                  {{ formatSheetNumber(row[key]) }}
                 </td>
-                <td>
-                  <StatusPill :label="MemberStatus.Active" tone="success" />
+                <td class="num-cell sheet-total">
+                  <strong>{{ formatSheetNumber(closingTotal(row)) }}</strong>
                 </td>
               </tr>
             </tbody>
+            <tfoot>
+              <tr>
+                <td class="sheet-sticky sheet-no"></td>
+                <td class="sheet-sticky sheet-name">JUMLAH</td>
+                <td v-for="key in openingKeys" :key="key" class="num-cell">
+                  {{ formatSheetNumber(totals[key]) }}
+                </td>
+                <td class="num-cell sheet-total">
+                  {{ formatSheetNumber(openingTotal(totals)) }}
+                </td>
+                <td></td>
+                <td v-for="key in movementKeys" :key="key" class="num-cell">
+                  {{ formatSheetNumber(totals[key]) }}
+                </td>
+                <td v-for="key in closingKeys" :key="key" class="num-cell">
+                  {{ formatSheetNumber(totals[key]) }}
+                </td>
+                <td class="num-cell sheet-total">
+                  {{ formatSheetNumber(closingTotal(totals)) }}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </section>
     </template>
-    <UiModal
-      :open="open"
-      :title="`${form.movement} simpanan`"
-      description="Posting akan memperbarui sub-ledger, kas, dan audit trail dalam satu transaksi database."
-      @close="open = false"
-    >
-      <form class="form-stack" @submit.prevent="submit">
-        <label class="field"
-          ><span>Anggota</span
-          ><select v-model="form.memberId" required>
-            <option value="" disabled>Pilih anggota</option>
-            <option
-              v-for="member in members"
-              :key="member.id"
-              :value="member.id"
-            >
-              {{ member.name }} · {{ member.memberNumber }}
-            </option>
-          </select></label
-        >
-        <label class="field"
-          ><span>Jenis simpanan</span
-          ><select
-            v-model="form.accountType"
-            :disabled="form.movement === SavingsMovement.Withdrawal"
-          >
-            <option :value="SavingsAccountType.Principal">Pokok</option>
-            <option :value="SavingsAccountType.Mandatory">Wajib</option>
-            <option :value="SavingsAccountType.Voluntary">Manasuka</option>
-          </select></label
-        >
-        <label class="field"
-          ><span>Nominal</span
-          ><input
-            v-model.number="form.amount"
-            type="number"
-            min="1000"
-            step="1000"
-            required
-        /></label>
-        <label class="field"
-          ><span>Nomor referensi (opsional)</span
-          ><input
-            v-model="form.reference"
-            placeholder="Dibuat otomatis bila kosong"
-        /></label>
-        <div class="modal-actions">
-          <button
-            class="button button--secondary"
-            type="button"
-            @click="open = false"
-          >
-            Batal</button
-          ><button class="button button--primary" type="submit">
-            Post {{ form.movement.toLowerCase() }}
-          </button>
-        </div>
-      </form>
-    </UiModal>
   </div>
 </template>

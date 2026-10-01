@@ -116,6 +116,15 @@ pub(crate) fn cell_date_iso(cell: &Data) -> Result<String, String> {
         .ok_or_else(|| "Tanggal workbook tidak valid.".to_string())
 }
 
+/// Tanggal opsional: sel kosong atau "-" menjadi string kosong.
+pub(crate) fn cell_optional_date_iso(cell: &Data) -> Result<String, String> {
+    match cell {
+        Data::Empty => Ok(String::new()),
+        Data::String(value) if value.trim().is_empty() || value.trim() == "-" => Ok(String::new()),
+        _ => cell_date_iso(cell),
+    }
+}
+
 pub(crate) fn cell_date_display(cell: &Data) -> Result<String, String> {
     cell.as_datetime()
         .map(|value| value.format("%d-%b-%Y").to_string())

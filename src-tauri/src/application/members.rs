@@ -2,12 +2,13 @@
 
 use sqlx::SqlitePool;
 
+use super::posting::{append, audit, ensure_period_open, Component, Entry, APP_ACTOR};
 use super::read_model::get_app_snapshot;
+use super::savings::money_channel;
 use crate::{
     contracts::{AddMemberInput, AppSnapshot},
     domain::{
-        business_period, timestamp_id, MemberStatus, PeriodStatus, SavingsAccountStatus,
-        SavingsAccountType, TransactionDirection, TransactionStatus,
+        timestamp_id, MemberStatus, SavingsAccountStatus, SavingsAccountType, TransactionDirection,
     },
 };
 
@@ -16,107 +17,129 @@ pub(crate) async fn add_member(
     company_id: &str,
     pool: &SqlitePool,
 ) -> Result<AppSnapshot, String> {
-    if input.name.trim().is_empty() || input.member_number.trim().is_empty() {
-        return Err("Nama dan nomor anggota wajib diisi.".into());
+    if input.name.trim().is_empty() {
+        return Err("Nama anggota wajib diisi.".into());
     }
-    if input.principal_savings < 50_000 {
+    let channel = money_channel(&input.channel)?;
+
+    let mut opening_savings = Vec::with_capacity(input.opening_savings.len());
+    for opening in &input.opening_savings {
+        let account_type = SavingsAccountType::try_from(opening.account_type.as_str())?;
+        if opening.amount < 0 {
+            return Err("Saldo awal simpanan tidak boleh negatif.".into());
+        }
+        if opening_savings
+            .iter()
+            .any(|(existing, _)| *existing == account_type)
+        {
+            return Err(format!(
+                "Jenis simpanan {} tidak boleh diduplikasi.",
+                account_type.as_str().to_lowercase()
+            ));
+        }
+        opening_savings.push((account_type, opening.amount));
+    }
+    let principal_savings = opening_savings
+        .iter()
+        .find_map(|(kind, amount)| (*kind == SavingsAccountType::Principal).then_some(*amount))
+        .ok_or("Simpanan pokok wajib disertakan.")?;
+    if principal_savings < 50_000 {
         return Err("Simpanan pokok minimal Rp50.000.".into());
     }
-    let period = business_period(&input.business_date)?;
+
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
-    let locked: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM periods WHERE company_id = ? AND period = ? AND status = ?",
-    )
-    .bind(company_id)
-    .bind(period)
-    .bind(PeriodStatus::Locked.as_str())
-    .fetch_one(&mut *db)
-    .await
-    .map_err(|error| error.to_string())?;
-    if locked > 0 {
-        return Err("Periode transaksi sudah dikunci.".into());
-    }
-    let duplicate: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM members WHERE company_id = ? AND UPPER(member_number) = UPPER(?)",
-    )
-    .bind(company_id)
-    .bind(input.member_number.trim())
-    .fetch_one(&mut *db)
-    .await
-    .map_err(|error| error.to_string())?;
-    if duplicate > 0 {
-        return Err("Nomor anggota sudah digunakan.".into());
-    }
+    ensure_period_open(&mut db, company_id, &input.business_date).await?;
     let next: i64 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(CAST(SUBSTR(id, INSTR(id, '-M') + 2) AS INTEGER)), 0) + 1 FROM members WHERE company_id = ?",
     )
-        .bind(company_id)
-        .fetch_one(&mut *db)
-        .await
-        .map_err(|error| error.to_string())?;
+    .bind(company_id)
+    .fetch_one(&mut *db)
+    .await
+    .map_err(|error| error.to_string())?;
     let id = format!("{company_id}-M{next:03}");
-    sqlx::query("INSERT INTO members (id, company_id, member_number, name, joined_at, status) VALUES (?, ?, ?, ?, ?, ?)")
-        .bind(&id).bind(company_id).bind(input.member_number.trim()).bind(input.name.trim()).bind(input.joined_at.trim()).bind(MemberStatus::Active.as_str()).execute(&mut *db).await.map_err(|error| error.to_string())?;
+    let name = input.name.trim();
+    sqlx::query(
+        "INSERT INTO members (id, company_id, name, joined_at, status) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(company_id)
+    .bind(name)
+    .bind(input.joined_at.trim())
+    .bind(MemberStatus::Active.as_str())
+    .execute(&mut *db)
+    .await
+    .map_err(|error| error.to_string())?;
     for kind in [
         SavingsAccountType::Principal,
         SavingsAccountType::Mandatory,
         SavingsAccountType::Voluntary,
     ] {
-        sqlx::query("INSERT INTO savings_accounts (id, company_id, member_id, account_type, balance, status) VALUES (?, ?, ?, ?, ?, ?)")
-            .bind(format!("SA-{id}-{}", kind.as_str())).bind(company_id).bind(&id).bind(kind.as_str()).bind(0_i64).bind(SavingsAccountStatus::Active.as_str()).execute(&mut *db).await.map_err(|error| error.to_string())?;
+        sqlx::query("INSERT INTO savings_accounts (id, company_id, member_id, account_type, status) VALUES (?, ?, ?, ?, ?)")
+            .bind(format!("SA-{id}-{}", kind.as_str())).bind(company_id).bind(&id).bind(kind.as_str()).bind(SavingsAccountStatus::Active.as_str()).execute(&mut *db).await.map_err(|error| error.to_string())?;
     }
+
     let transaction_id = timestamp_id("SAV-IN");
-    let account_id = format!("SA-{id}-{}", SavingsAccountType::Principal.as_str());
     let reference = format!("KBS/SAV/{transaction_id}");
-    sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_id, member_name, transaction_type, description, reference, direction, amount, status, actor) VALUES (?, ?, ?, ?, ?, ?, ?, 'SAVINGS_DEPOSIT', 'Setoran simpanan pokok', ?, ?, ?, ?, 'Aplikasi lokal')")
-        .bind(&transaction_id)
-        .bind(company_id)
-        .bind(&input.business_date)
-        .bind(&input.display_date)
-        .bind(&input.display_time)
-        .bind(&id)
-        .bind(input.name.trim())
-        .bind(&reference)
-        .bind(TransactionDirection::In.as_str())
-        .bind(input.principal_savings)
-        .bind(TransactionStatus::Posted.as_str())
-        .execute(&mut *db)
-        .await
-        .map_err(|error| error.to_string())?;
-    sqlx::query("INSERT INTO transaction_components (company_id, transaction_id, component_type, label, amount, savings_account_id) VALUES (?, ?, 'SAVINGS_DEPOSIT', 'Setoran simpanan pokok', ?, ?)")
-        .bind(company_id)
-        .bind(&transaction_id)
-        .bind(input.principal_savings)
-        .bind(&account_id)
-        .execute(&mut *db)
-        .await
-        .map_err(|error| error.to_string())?;
-    sqlx::query("UPDATE savings_accounts SET balance = ? WHERE company_id = ? AND id = ?")
-        .bind(input.principal_savings)
-        .bind(company_id)
-        .bind(&account_id)
-        .execute(&mut *db)
-        .await
-        .map_err(|error| error.to_string())?;
-    sqlx::query(
-        "INSERT INTO cash_postings (company_id, transaction_id, direction, amount) VALUES (?, ?, ?, ?)",
+    let description = if opening_savings
+        .iter()
+        .filter(|(_, amount)| *amount > 0)
+        .count()
+        == 1
+    {
+        "Setoran simpanan pokok"
+    } else {
+        "Setoran awal simpanan"
+    };
+    let components = opening_savings
+        .iter()
+        .map(|(kind, amount)| {
+            Component::new(
+                "SAVINGS_DEPOSIT",
+                format!("Setoran simpanan {}", kind.as_str().to_lowercase()),
+                *amount,
+            )
+            .for_savings(format!("SA-{id}-{}", kind.as_str()))
+        })
+        .collect();
+    let amount = append(
+        &mut db,
+        company_id,
+        Entry {
+            id: transaction_id.clone(),
+            business_date: &input.business_date,
+            display_date: &input.display_date,
+            display_time: &input.display_time,
+            member_id: Some(&id),
+            member_name: name,
+            transaction_type: "SAVINGS_DEPOSIT",
+            channel,
+            description,
+            reference: &reference,
+            direction: TransactionDirection::In,
+            actor: APP_ACTOR,
+            reversed_transaction_id: None,
+            components,
+        },
     )
-    .bind(company_id)
-    .bind(&transaction_id)
-    .bind(TransactionDirection::In.as_str())
-    .bind(input.principal_savings)
-    .execute(&mut *db)
-    .await
-    .map_err(|error| error.to_string())?;
-    sqlx::query("INSERT INTO audit_events (company_id, entity_type, entity_id, action, after_json, actor) VALUES (?, 'TRANSACTION', ?, 'POSTED', ?, 'Aplikasi lokal')")
-        .bind(company_id)
-        .bind(&transaction_id)
-        .bind(serde_json::to_string(&serde_json::json!({"movement": crate::domain::SavingsMovement::Deposit.as_str(), "accountType": SavingsAccountType::Principal.as_str(), "amount": input.principal_savings, "reference": reference})).unwrap_or_default())
-        .execute(&mut *db)
-        .await
-        .map_err(|error| error.to_string())?;
-    sqlx::query("INSERT INTO audit_events (company_id, entity_type, entity_id, action, after_json, actor) VALUES (?, 'MEMBER', ?, 'CREATED', ?, 'Aplikasi lokal')")
-        .bind(company_id).bind(&id).bind(serde_json::to_string(&serde_json::json!({"name": input.name, "memberNumber": input.member_number, "principalSavings": input.principal_savings})).unwrap_or_default()).execute(&mut *db).await.map_err(|error| error.to_string())?;
+    .await?;
+    audit(
+        &mut db,
+        company_id,
+        "TRANSACTION",
+        &transaction_id,
+        "POSTED",
+        serde_json::json!({"openingSavings": opening_savings.iter().map(|(kind, amount)| (kind.as_str(), amount)).collect::<Vec<_>>(), "amount": amount, "reference": reference}),
+    )
+    .await?;
+    audit(
+        &mut db,
+        company_id,
+        "MEMBER",
+        &id,
+        "CREATED",
+        serde_json::json!({"name": name}),
+    )
+    .await?;
     db.commit().await.map_err(|error| error.to_string())?;
     get_app_snapshot(company_id, pool).await
 }

@@ -1,176 +1,179 @@
-//! Application use cases for transactions.
+//! Application use cases for transactions: reversals and general cash entries.
 
 use sqlx::{Row, SqlitePool};
 
+use super::posting::{
+    append, audit, ensure_period_open, ensure_reference_unused, loan_balance, savings_balance,
+    Component, Entry, APP_ACTOR,
+};
 use super::read_model::get_app_snapshot;
+use super::savings::money_channel;
 use crate::{
-    contracts::{AppSnapshot, ReverseTransactionInput},
-    domain::{
-        business_period, timestamp_id, LoanStatus, PeriodStatus, TransactionDirection,
-        TransactionStatus,
-    },
+    contracts::{AppSnapshot, CashEntryInput, ReverseTransactionInput},
+    domain::{timestamp_id, Channel, TransactionDirection},
 };
 
+/// Koreksi tanpa mengubah data: transaksi baru berlawanan arah yang menunjuk ke
+/// transaksi asal. Keduanya lalu tidak dihitung dalam saldo.
 pub(crate) async fn reverse_transaction(
     input: ReverseTransactionInput,
     company_id: &str,
     pool: &SqlitePool,
 ) -> Result<AppSnapshot, String> {
-    let period = business_period(&input.business_date)?;
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
-    let locked: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM periods WHERE company_id = ? AND period = ? AND status = ?",
-    )
-    .bind(company_id)
-    .bind(period)
-    .bind(PeriodStatus::Locked.as_str())
-    .fetch_one(&mut *db)
-    .await
-    .map_err(|error| error.to_string())?;
-    if locked > 0 {
-        return Err("Periode transaksi sudah dikunci.".into());
-    }
+    ensure_period_open(&mut db, company_id, &input.business_date).await?;
     let id = &input.id;
-    let original = sqlx::query("SELECT business_date, display_date, display_time, member_id, member_name, description, reference, direction, amount, status FROM transactions WHERE company_id = ? AND id = ?")
-        .bind(company_id).bind(id).fetch_optional(&mut *db).await.map_err(|error| error.to_string())?.ok_or("Transaksi tidak ditemukan.")?;
-    let status: String = original
-        .try_get("status")
-        .map_err(|error| error.to_string())?;
-    if TransactionStatus::try_from(status.as_str())? != TransactionStatus::Posted {
-        return Err("Hanya transaksi terposting yang dapat dibalik.".into());
-    }
-    let direction: String = original
-        .try_get("direction")
-        .map_err(|error| error.to_string())?;
-    let reversal_direction = TransactionDirection::try_from(direction.as_str())?.reversed();
-    let reference: String = original
-        .try_get("reference")
-        .map_err(|error| error.to_string())?;
-    let amount: i64 = original
-        .try_get("amount")
-        .map_err(|error| error.to_string())?;
+    let original = sqlx::query("SELECT member_id, member_name, transaction_type, channel, description, reference, direction FROM effective_transactions WHERE company_id = ? AND id = ?")
+        .bind(company_id)
+        .bind(id)
+        .fetch_optional(&mut *db)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or("Transaksi tidak ditemukan atau sudah dibalik.")?;
+    let get = |column: &str| -> Result<String, String> {
+        original.try_get(column).map_err(|error| error.to_string())
+    };
     let member_id: Option<String> = original
         .try_get("member_id")
         .map_err(|error| error.to_string())?;
-    let member_name: String = original
-        .try_get("member_name")
-        .map_err(|error| error.to_string())?;
-    let description: String = original
-        .try_get("description")
-        .map_err(|error| error.to_string())?;
-    let components = sqlx::query("SELECT component_type, label, amount, loan_id, savings_account_id FROM transaction_components WHERE company_id = ? AND transaction_id = ?")
-        .bind(company_id).bind(id).fetch_all(&mut *db).await.map_err(|error| error.to_string())?;
-    for component in &components {
-        let component_type: String = component
-            .try_get("component_type")
-            .map_err(|error| error.to_string())?;
-        let value: i64 = component
-            .try_get("amount")
-            .map_err(|error| error.to_string())?;
-        if component_type == "LOAN_PRINCIPAL" {
-            let loan_id: Option<String> = component
-                .try_get("loan_id")
-                .map_err(|error| error.to_string())?;
-            let loan_id = loan_id.ok_or("Komponen pembayaran tidak memiliki pinjaman terkait.")?;
-            let result = sqlx::query(
-                "UPDATE loans SET balance = balance + ?, status = ? WHERE company_id = ? AND id = ? AND balance <= ?",
-            )
-                .bind(value)
-                .bind(LoanStatus::Active.as_str())
-                .bind(company_id)
-                .bind(loan_id)
-                .bind(i64::MAX - value)
-                .execute(&mut *db)
-                .await
-                .map_err(|error| error.to_string())?;
-            if result.rows_affected() != 1 {
-                return Err("Pinjaman terkait komponen pembayaran tidak ditemukan.".into());
-            }
-        } else if component_type == "LOAN_DISBURSEMENT" {
-            let loan_id: Option<String> = component
-                .try_get("loan_id")
-                .map_err(|error| error.to_string())?;
-            let loan_id = loan_id.ok_or("Komponen pencairan tidak memiliki pinjaman terkait.")?;
-            let result = sqlx::query("UPDATE loans SET balance = balance - ?, status = ?, realization_date = '-', due_date = '-' WHERE company_id = ? AND id = ? AND balance = ?")
-                .bind(value)
-                .bind(LoanStatus::Draft.as_str())
-                .bind(company_id)
-                .bind(loan_id)
-                .bind(value)
-                .execute(&mut *db)
-                .await
-                .map_err(|error| error.to_string())?;
-            if result.rows_affected() != 1 {
-                return Err(
-                    "Pencairan tidak dapat dibalik setelah pinjaman memiliki pembayaran.".into(),
-                );
-            }
-        } else if component_type.starts_with("SAVINGS_") {
-            let account_id: Option<String> = component
-                .try_get("savings_account_id")
-                .map_err(|error| error.to_string())?;
-            let account_id =
-                account_id.ok_or("Komponen simpanan tidak memiliki rekening terkait.")?;
-            let result = if component_type == "SAVINGS_WITHDRAWAL" {
-                sqlx::query("UPDATE savings_accounts SET balance = balance + ? WHERE company_id = ? AND id = ? AND balance <= ?")
-                    .bind(value)
-                    .bind(company_id)
-                    .bind(account_id)
-                    .bind(i64::MAX - value)
-                    .execute(&mut *db)
-                    .await
-                    .map_err(|error| error.to_string())?
-            } else {
-                sqlx::query("UPDATE savings_accounts SET balance = balance - ? WHERE company_id = ? AND id = ? AND balance >= ?")
-                    .bind(value)
-                    .bind(company_id)
-                    .bind(account_id)
-                    .bind(value)
-                    .execute(&mut *db)
-                    .await
-                    .map_err(|error| error.to_string())?
-            };
-            if result.rows_affected() != 1 {
-                return Err("Reversal ditolak karena saldo sub-ledger tidak mencukupi.".into());
-            }
-        }
-    }
-    sqlx::query("UPDATE transactions SET status = ? WHERE company_id = ? AND id = ?")
-        .bind(TransactionStatus::Reversed.as_str())
+    let channel = Channel::try_from(get("channel")?.as_str())?;
+    let direction = TransactionDirection::try_from(get("direction")?.as_str())?.reversed();
+
+    let mut components = Vec::new();
+    for component in sqlx::query("SELECT component_type, label, amount, loan_id, savings_account_id FROM transaction_components WHERE company_id = ? AND transaction_id = ? ORDER BY id")
         .bind(company_id)
         .bind(id)
-        .execute(&mut *db)
+        .fetch_all(&mut *db)
         .await
-        .map_err(|error| error.to_string())?;
-    let reversal_id = timestamp_id("REV");
-    sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_id, member_name, transaction_type, description, reference, direction, amount, status, reversed_transaction_id, actor) VALUES (?, ?, ?, ?, ?, ?, ?, 'REVERSAL', ?, ?, ?, ?, ?, ?, 'Aplikasi lokal')")
-        .bind(&reversal_id).bind(company_id).bind(&input.business_date).bind(&input.display_date).bind(&input.display_time).bind(member_id).bind(member_name).bind(format!("Reversal · {description}")).bind(format!("{reference}/REV/{}", timestamp_id("R"))).bind(reversal_direction.as_str()).bind(amount).bind(TransactionStatus::Posted.as_str()).bind(id).execute(&mut *db).await.map_err(|error| error.to_string())?;
-    for component in components {
-        let label: String = component
-            .try_get("label")
-            .map_err(|error| error.to_string())?;
-        let component_amount: i64 = component
-            .try_get("amount")
-            .map_err(|error| error.to_string())?;
-        let loan_id: Option<String> = component
-            .try_get("loan_id")
-            .map_err(|error| error.to_string())?;
-        let savings_account_id: Option<String> = component
-            .try_get("savings_account_id")
-            .map_err(|error| error.to_string())?;
-        sqlx::query("INSERT INTO transaction_components (company_id, transaction_id, component_type, label, amount, loan_id, savings_account_id) VALUES (?, ?, 'REVERSAL', ?, ?, ?, ?)")
-            .bind(company_id).bind(&reversal_id).bind(format!("Reversal · {label}")).bind(component_amount).bind(loan_id).bind(savings_account_id).execute(&mut *db).await.map_err(|error| error.to_string())?;
+        .map_err(|error| error.to_string())?
+    {
+        let component_type: String = component.try_get("component_type").map_err(|error| error.to_string())?;
+        let label: String = component.try_get("label").map_err(|error| error.to_string())?;
+        let amount: i64 = component.try_get("amount").map_err(|error| error.to_string())?;
+        let loan_id: Option<String> = component.try_get("loan_id").map_err(|error| error.to_string())?;
+        let savings_account_id: Option<String> = component.try_get("savings_account_id").map_err(|error| error.to_string())?;
+        // Membatalkan uang masuk tidak boleh membuat saldo menjadi negatif.
+        if let Some(account_id) = &savings_account_id {
+            if component_type != "SAVINGS_WITHDRAWAL"
+                && savings_balance(&mut db, company_id, account_id).await? < amount
+            {
+                return Err("Reversal ditolak karena saldo simpanan tidak mencukupi.".into());
+            }
+        }
+        if let Some(loan_id) = &loan_id {
+            if matches!(component_type.as_str(), "LOAN_DISBURSEMENT" | "LOAN_OPENING")
+                && loan_balance(&mut db, company_id, loan_id).await? < amount
+            {
+                return Err("Reversal ditolak karena pinjaman sudah memiliki angsuran.".into());
+            }
+        }
+        let mut reversal = Component::new("REVERSAL", format!("Reversal · {label}"), amount);
+        reversal.loan_id = loan_id;
+        reversal.savings_account_id = savings_account_id;
+        components.push(reversal);
     }
-    sqlx::query("INSERT INTO cash_postings (company_id, transaction_id, direction, amount) VALUES (?, ?, ?, ?)")
-        .bind(company_id)
-        .bind(&reversal_id)
-        .bind(reversal_direction.as_str())
-        .bind(amount)
-        .execute(&mut *db)
-        .await
-        .map_err(|error| error.to_string())?;
-    sqlx::query("INSERT INTO audit_events (company_id, entity_type, entity_id, action, before_json, after_json, actor) VALUES (?, 'TRANSACTION', ?, 'REVERSED', ?, ?, 'Aplikasi lokal')")
-        .bind(company_id).bind(id).bind(serde_json::to_string(&serde_json::json!({"status": TransactionStatus::Posted.as_str()})).unwrap_or_default()).bind(serde_json::to_string(&serde_json::json!({"status": TransactionStatus::Reversed.as_str(), "reversalId": reversal_id})).unwrap_or_default()).execute(&mut *db).await.map_err(|error| error.to_string())?;
+
+    let reversal_id = timestamp_id("REV");
+    let description = format!("Reversal · {}", get("description")?);
+    let reference = format!("{}/REV/{reversal_id}", get("reference")?);
+    append(
+        &mut db,
+        company_id,
+        Entry {
+            id: reversal_id.clone(),
+            business_date: &input.business_date,
+            display_date: &input.display_date,
+            display_time: &input.display_time,
+            member_id: member_id.as_deref(),
+            member_name: &get("member_name")?,
+            transaction_type: "REVERSAL",
+            channel,
+            description: &description,
+            reference: &reference,
+            direction,
+            actor: APP_ACTOR,
+            reversed_transaction_id: Some(id),
+            components,
+        },
+    )
+    .await?;
+    audit(
+        &mut db,
+        company_id,
+        "TRANSACTION",
+        id,
+        "REVERSED",
+        serde_json::json!({"reversalId": reversal_id}),
+    )
+    .await?;
+    db.commit().await.map_err(|error| error.to_string())?;
+    get_app_snapshot(company_id, pool).await
+}
+
+/// Pemasukan/pengeluaran kas umum (biaya, tambahan kas, transfer ke bank, ...).
+pub(crate) async fn post_cash_entry(
+    input: CashEntryInput,
+    company_id: &str,
+    pool: &SqlitePool,
+) -> Result<AppSnapshot, String> {
+    if input.amount <= 0 {
+        return Err("Nominal transaksi harus lebih dari nol.".into());
+    }
+    let category = input.category.trim();
+    if category.is_empty() {
+        return Err("Kategori transaksi wajib diisi.".into());
+    }
+    let direction = TransactionDirection::try_from(input.direction.as_str())?;
+    let channel = money_channel(&input.channel)?;
+    let mut db = pool.begin().await.map_err(|error| error.to_string())?;
+    ensure_period_open(&mut db, company_id, &input.business_date).await?;
+    let id = timestamp_id("CASH");
+    let reference = if input.reference.trim().is_empty() {
+        format!("KBS/CASH/{id}")
+    } else {
+        input.reference.trim().to_string()
+    };
+    ensure_reference_unused(&mut db, company_id, &reference).await?;
+    let description = if input.description.trim().is_empty() {
+        category.to_string()
+    } else {
+        input.description.trim().to_string()
+    };
+    let transaction_type = if direction == TransactionDirection::In {
+        "CASH_INCOME"
+    } else {
+        "CASH_EXPENSE"
+    };
+    append(
+        &mut db,
+        company_id,
+        Entry {
+            id: id.clone(),
+            business_date: &input.business_date,
+            display_date: &input.display_date,
+            display_time: &input.display_time,
+            member_id: None,
+            member_name: "Koperasi",
+            transaction_type,
+            channel,
+            description: &description,
+            reference: &reference,
+            direction,
+            actor: APP_ACTOR,
+            reversed_transaction_id: None,
+            components: vec![Component::new("CASH_OTHER", category, input.amount)],
+        },
+    )
+    .await?;
+    audit(
+        &mut db,
+        company_id,
+        "TRANSACTION",
+        &id,
+        "POSTED",
+        serde_json::json!({"category": category, "amount": input.amount, "channel": channel.as_str()}),
+    )
+    .await?;
     db.commit().await.map_err(|error| error.to_string())?;
     get_app_snapshot(company_id, pool).await
 }

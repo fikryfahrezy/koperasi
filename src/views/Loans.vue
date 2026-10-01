@@ -1,316 +1,273 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
-import {
-  Calculator,
-  CalendarX2,
-  Download,
-  Plus,
-  Search,
-} from "lucide-vue-next";
+import { computed, ref, watch } from "vue";
+import { CalendarX2 } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
-import StatusPill from "../components/StatusPill.vue";
-import UiModal from "../components/UiModal.vue";
+import UiSelect from "../components/UiSelect.vue";
 import {
-  formatCurrency,
-  InterestType,
-  LoanStatus,
-  type LoanPreview,
+  formatPeriod,
+  formatPreviousPeriod,
+  formatSheetDate,
+  formatSheetNumber,
+  type Loan,
   useKoperasiStore,
+  useMonthlyLedger,
 } from "../store/koperasi";
 
-const {
-  members,
-  selectedYear,
-  yearLoans,
-  yearTotals,
-  createLoan,
-  disburseLoan,
-  previewLoan,
-  notify,
-  refresh,
-} = useKoperasiStore();
-const query = ref("");
-const status = ref("Semua status");
-const open = ref(false);
-const disbursing = ref("");
-const loanHasData = computed(() => yearLoans.value.length > 0);
-const form = reactive({
-  memberId: "",
-  plafond: 10_000_000,
-  tenor: 24,
-  interestType: InterestType.Declining,
-});
-const filtered = computed(() =>
-  yearLoans.value.filter(
-    (loan) =>
-      (status.value === "Semua status" || loan.status === status.value) &&
-      `${loan.memberName} ${loan.id}`
-        .toLowerCase()
-        .includes(query.value.toLowerCase()),
-  ),
-);
-const preview = ref<LoanPreview | null>(null);
-const activeLoanCount = computed(
-  () =>
-    yearLoans.value.filter((loan) => loan.status === LoanStatus.Active).length,
-);
-const reviewLoans = computed(() =>
-  yearLoans.value.filter((loan) => loan.status === LoanStatus.NeedsReview),
-);
-const reviewBalance = computed(() =>
-  reviewLoans.value.reduce((sum, loan) => sum + loan.balance, 0),
-);
-const annualPlafond = computed(() =>
-  yearLoans.value.reduce((sum, loan) => sum + loan.plafond, 0),
+const { loans, selectedYear, refresh } = useKoperasiStore();
+const { monthlyLedger, monthlyLedgerLoading } = useMonthlyLedger();
+
+const period = ref("");
+const periodOptions = computed(() =>
+  [...monthlyLedger.periods]
+    .reverse()
+    .map((value) => ({ value, label: formatPeriod(value) })),
 );
 watch(
-  form,
-  async () => {
-    try {
-      preview.value = await previewLoan({ ...form });
-    } catch {
-      preview.value = null;
-    }
+  () => monthlyLedger.periods,
+  (periods) => {
+    if (!periods.includes(period.value))
+      period.value = periods[periods.length - 1] ?? "";
   },
-  { deep: true, immediate: true },
+  { immediate: true },
 );
-async function submit() {
-  if (!form.memberId || form.plafond <= 0) return;
-  const saved = await createLoan({ ...form });
-  if (!saved) return;
-  open.value = false;
-}
-async function handleDisbursement(loanId: string) {
-  disbursing.value = loanId;
-  await disburseLoan(loanId);
-  disbursing.value = "";
-}
+
+const loanById = computed(() => new Map(loans.map((loan) => [loan.id, loan])));
+
+// Urutan sheet mengikuti nomor pinjaman (L001, L002, ...). Kolom turunan:
+// tunggakan awal bulan = tunggakan akhir - kewajiban bulan ini + dibayar;
+// kewajiban setor s/d bulan ini = tunggakan awal + kewajiban bulan ini.
+const monthRows = computed(() =>
+  monthlyLedger.loans
+    .filter((row) => row.period === period.value)
+    .map((row) => ({ ...row, loan: loanById.value.get(row.loanId) }))
+    .filter((row): row is typeof row & { loan: Loan } => Boolean(row.loan))
+    .sort((a, b) => a.loanId.localeCompare(b.loanId))
+    .map((row, index) => {
+      const priorArrearsPrincipal =
+        row.arrearsPrincipal - row.scheduledPrincipal + row.principalPaid;
+      const priorArrearsInterest =
+        row.arrearsInterest - row.scheduledInterest + row.interestPaid;
+      return {
+        ...row,
+        no: index + 1,
+        plafond: row.loan.plafond,
+        scheduledTotal: row.scheduledPrincipal + row.scheduledInterest,
+        priorArrearsPrincipal,
+        priorArrearsInterest,
+        priorArrearsTotal: priorArrearsPrincipal + priorArrearsInterest,
+        duePrincipal: priorArrearsPrincipal + row.scheduledPrincipal,
+        dueInterest: priorArrearsInterest + row.scheduledInterest,
+        dueTotal:
+          priorArrearsPrincipal +
+          row.scheduledPrincipal +
+          priorArrearsInterest +
+          row.scheduledInterest,
+        cashIn: row.principalPaid + row.interestPaid + row.provision,
+        arrearsTotal: row.arrearsPrincipal + row.arrearsInterest,
+      };
+    }),
+);
+type MonthRow = (typeof monthRows.value)[number];
+
+// Kolom angka setelah Jangka Waktu, berurutan seperti di sheet.
+const beforeMutation = [
+  "openingBalance",
+  "scheduledPrincipal",
+  "scheduledInterest",
+  "scheduledTotal",
+  "priorArrearsPrincipal",
+  "priorArrearsInterest",
+  "priorArrearsTotal",
+  "duePrincipal",
+  "dueInterest",
+  "dueTotal",
+] as const;
+const mutation = [
+  "cashIn",
+  "disbursed",
+  "principalPaid",
+  "interestPaid",
+  "provision",
+] as const;
+const afterMutation = [
+  "closingBalance",
+  "arrearsPrincipal",
+  "arrearsInterest",
+  "arrearsTotal",
+] as const;
+type TotalKey =
+  | "plafond"
+  | (typeof beforeMutation)[number]
+  | (typeof mutation)[number]
+  | (typeof afterMutation)[number];
+const totals = computed(() => {
+  const keys: TotalKey[] = [
+    "plafond",
+    ...beforeMutation,
+    ...mutation,
+    ...afterMutation,
+  ];
+  const sum = Object.fromEntries(keys.map((key) => [key, 0])) as Record<
+    TotalKey,
+    number
+  >;
+  for (const row of monthRows.value as MonthRow[]) {
+    for (const key of keys) sum[key] += row[key];
+  }
+  return sum;
+});
+
+const monthlyRate = (loan: Loan) =>
+  `${(loan.rate / 12).toLocaleString("id-ID", { maximumFractionDigits: 2 })}%`;
+const totalColumns = (key: string) =>
+  key === "openingBalance" || key === "closingBalance";
 </script>
 
 <template>
   <div class="page-stack">
-    <PageHeader title="Pinjaman" :refresh="refresh">
-      <template #actions
-        ><button
-          class="button button--secondary"
-          type="button"
-          @click="
-            notify(
-              'Ekspor disiapkan',
-              'Laporan portofolio akan diekspor.',
-              'info',
-            )
-          "
-        >
-          <Download :size="18" /> Ekspor</button
-        ><button
-          class="button button--primary"
-          type="button"
-          @click="open = true"
-        >
-          <Plus :size="18" /> Buat pinjaman
-        </button></template
-      >
-    </PageHeader>
-    <section v-if="!loanHasData" class="panel year-empty-state">
+    <PageHeader title="Pinjaman" :refresh="refresh" />
+    <section
+      v-if="!monthlyLedgerLoading && !monthlyLedger.periods.length"
+      class="panel year-empty-state"
+    >
       <CalendarX2 :size="36" />
       <strong>Belum ada data pinjaman untuk {{ selectedYear }}</strong>
-      <p>Pilih tahun lain untuk melihat kontrak dan portofolio pinjaman.</p>
+      <p>Pilih tahun lain.</p>
     </section>
-    <template v-else>
-      <section class="mini-metrics">
-        <article>
-          <span>Outstanding</span
-          ><strong>{{ formatCurrency(yearTotals.loanPortfolio, true) }}</strong
-          ><small>{{ activeLoanCount }} kontrak berjalan</small>
-        </article>
-        <article>
-          <span>Pencairan {{ selectedYear }}</span
-          ><strong>{{ formatCurrency(annualPlafond, true) }}</strong
-          ><small>{{ yearLoans.length }} pinjaman baru</small>
-        </article>
-        <article>
-          <span>Perlu review</span
-          ><strong>{{ formatCurrency(reviewBalance, true) }}</strong
-          ><small class="text-warning"
-            >{{ reviewLoans.length }} kontrak perlu ditindaklanjuti</small
-          >
-        </article>
-      </section>
-      <section class="panel table-panel">
-        <div class="toolbar">
-          <label class="search-field"
-            ><Search :size="18" /><input
-              v-model="query"
-              placeholder="Cari anggota atau ID pinjaman..." /></label
-          ><select v-model="status" class="select-control">
-            <option>Semua status</option>
-            <option :value="LoanStatus.Draft">Draf</option>
-            <option :value="LoanStatus.Active">Berjalan</option>
-            <option :value="LoanStatus.NeedsReview">Perlu review</option>
-            <option>Lunas</option>
-          </select>
-        </div>
-        <div class="data-table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Kontrak</th>
-                <th>Anggota</th>
-                <th>Plafond</th>
-                <th>Saldo pokok</th>
-                <th>Skema</th>
-                <th>Jatuh tempo</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="loan in filtered" :key="loan.id">
-                <td>
-                  <strong>{{ loan.id }}</strong
-                  ><small class="cell-sub"
-                    >Realisasi {{ loan.realizationDate }}</small
-                  >
-                </td>
-                <td>
-                  <strong>{{ loan.memberName }}</strong
-                  ><small class="cell-sub">{{
-                    loan.memberId || "Belum dipadankan"
-                  }}</small>
-                </td>
-                <td class="num-cell">
-                  {{ loan.plafond ? formatCurrency(loan.plafond) : "—" }}
-                </td>
-                <td class="num-cell">
-                  <strong>{{ formatCurrency(loan.balance) }}</strong>
-                </td>
-                <td>
-                  {{ loan.interestType
-                  }}<small class="cell-sub"
-                    >{{ loan.rate }}% / tahun · {{ loan.tenor }} bln</small
-                  >
-                </td>
-                <td>{{ loan.dueDate }}</td>
-                <td>
-                  <StatusPill
-                    :label="loan.status"
-                    :tone="
-                      loan.status === LoanStatus.Active
-                        ? 'success'
-                        : loan.status === LoanStatus.NeedsReview
-                          ? 'warning'
-                          : loan.status === LoanStatus.Draft
-                            ? 'info'
-                            : 'neutral'
-                    "
-                  />
-                </td>
-                <td>
-                  <button
-                    v-if="loan.status === LoanStatus.Draft"
-                    class="row-action"
-                    type="button"
-                    :disabled="disbursing === loan.id"
-                    @click="handleDisbursement(loan.id)"
-                  >
-                    {{ disbursing === loan.id ? "Memproses…" : "Cairkan" }}
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </template>
-    <UiModal
-      :open="open"
-      size="lg"
-      title="Buat pinjaman baru"
-      description="Parameter default mengikuti versi aktif per 1 Januari 2026."
-      @close="open = false"
-    >
-      <form class="form-stack" @submit.prevent="submit">
-        <label class="field"
-          ><span>Anggota</span
-          ><select v-model="form.memberId" required>
-            <option value="" disabled>Pilih anggota</option>
-            <option
-              v-for="member in members"
-              :key="member.id"
-              :value="member.id"
-            >
-              {{ member.name }} · {{ member.memberNumber }}
-            </option>
-          </select></label
-        >
-        <div class="field-row">
-          <label class="field"
-            ><span>Plafond pinjaman</span
-            ><input
-              v-model.number="form.plafond"
-              type="number"
-              min="100000"
-              step="100000"
-              required /></label
-          ><label class="field"
-            ><span>Tenor</span
-            ><select v-model.number="form.tenor">
-              <option :value="10">10 bulan</option>
-              <option :value="12">12 bulan</option>
-              <option :value="15">15 bulan</option>
-              <option :value="24">24 bulan</option>
-              <option :value="36">36 bulan</option>
-            </select></label
-          >
-        </div>
-        <div class="field-row">
-          <label class="field"
-            ><span>Jenis bunga</span
-            ><select v-model="form.interestType">
-              <option :value="InterestType.Declining">Menurun</option>
-              <option :value="InterestType.Flat">Flat</option>
-            </select></label
-          ><label class="field"
-            ><span>Rate tahunan</span
-            ><input :value="`${preview?.annualRate ?? 0}%`" disabled
-          /></label>
-        </div>
-        <div class="calculation-preview">
-          <div class="calculation-preview__title">
-            <Calculator :size="19" /> Preview bulan pertama
-          </div>
-          <dl>
-            <div>
-              <dt>Angsuran pokok</dt>
-              <dd>{{ formatCurrency(preview?.principalInstallment ?? 0) }}</dd>
-            </div>
-            <div>
-              <dt>Estimasi bunga</dt>
-              <dd>{{ formatCurrency(preview?.firstInterest ?? 0) }}</dd>
-            </div>
-            <div>
-              <dt>Provisi 1%</dt>
-              <dd>{{ formatCurrency(preview?.provision ?? 0) }}</dd>
-            </div>
-            <div class="is-total">
-              <dt>Total tagihan pertama</dt>
-              <dd>{{ formatCurrency(preview?.firstTotal ?? 0) }}</dd>
-            </div>
-          </dl>
-        </div>
-        <div class="modal-actions">
-          <button
-            class="button button--secondary"
-            type="button"
-            @click="open = false"
-          >
-            Batal</button
-          ><button class="button button--primary" type="submit">
-            Simpan sebagai draf
-          </button>
-        </div>
-      </form>
-    </UiModal>
+    <section v-else class="panel table-panel">
+      <div class="toolbar">
+        <UiSelect
+          v-model="period"
+          :options="periodOptions"
+          aria-label="Bulan"
+          variant="toolbar"
+        />
+      </div>
+      <div v-if="period" class="data-table-wrap sheet-wrap">
+        <table class="sheet-table">
+          <thead>
+            <tr>
+              <th rowspan="3" class="sheet-sticky sheet-no">No</th>
+              <th rowspan="3" class="sheet-sticky sheet-name">Nama</th>
+              <th rowspan="3">Plafond</th>
+              <th rowspan="3" colspan="2">Bunga per-bulan</th>
+              <th rowspan="3">PG/TN</th>
+              <th rowspan="3">Jenis<br />Pinjaman</th>
+              <th rowspan="3">Tanggal<br />Realisasi</th>
+              <th rowspan="3">Tanggal<br />Jatuh Tempo</th>
+              <th rowspan="3">Jangka<br />Waktu</th>
+              <th rowspan="3" class="sheet-total">
+                Saldo Posisi<br />{{ formatPreviousPeriod(period) }}
+              </th>
+              <th colspan="3" rowspan="2" class="sheet-group">
+                Kewajiban setor tiap bulan
+              </th>
+              <th colspan="3" rowspan="2" class="sheet-group">
+                Tunggakan s/d {{ formatPreviousPeriod(period) }}
+              </th>
+              <th colspan="3" rowspan="2" class="sheet-group">
+                Kewajiban setor s/d {{ formatPeriod(period) }}
+              </th>
+              <th colspan="6" class="sheet-group sheet-group--mutasi">
+                Bulan {{ formatPeriod(period) }}
+              </th>
+              <th rowspan="3" class="sheet-total">
+                Saldo Posisi<br />{{ formatPeriod(period) }}
+              </th>
+              <th colspan="3" rowspan="2" class="sheet-group">
+                Tunggakan s/d {{ formatPeriod(period) }}
+              </th>
+            </tr>
+            <tr>
+              <th colspan="6" class="sheet-group sheet-group--mutasi">
+                Mutasi bulan {{ formatPeriod(period) }}
+              </th>
+            </tr>
+            <tr>
+              <template v-for="block in 3" :key="block">
+                <th>Pokok</th>
+                <th>Bunga</th>
+                <th>Jumlah</th>
+              </template>
+              <th>Tanggal</th>
+              <th>Jumlah</th>
+              <th>Pokok Debet</th>
+              <th>Pokok Kredit</th>
+              <th>Bunga</th>
+              <th>Provisi</th>
+              <th>Pokok</th>
+              <th>Bunga</th>
+              <th>Jumlah</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in monthRows" :key="row.loanId">
+              <td class="sheet-sticky sheet-no">{{ row.no }}</td>
+              <td class="sheet-sticky sheet-name">
+                <strong>{{ row.loan.memberName }}</strong>
+              </td>
+              <td class="num-cell">
+                {{ formatSheetNumber(row.loan.plafond) }}
+              </td>
+              <td class="num-cell">{{ monthlyRate(row.loan) }}</td>
+              <td>{{ row.loan.interestType.toLowerCase() }}</td>
+              <td>{{ row.loan.guarantee }}</td>
+              <td>Bulanan</td>
+              <td>{{ row.loan.realizationDate }}</td>
+              <td>{{ row.loan.dueDate }}</td>
+              <td class="num-cell">{{ row.loan.tenor }}</td>
+              <td
+                v-for="key in beforeMutation"
+                :key="key"
+                class="num-cell"
+                :class="{ 'sheet-total': totalColumns(key) }"
+              >
+                {{ formatSheetNumber(row[key]) }}
+              </td>
+              <td>{{ formatSheetDate(row.transactionDate) }}</td>
+              <td v-for="key in mutation" :key="key" class="num-cell">
+                {{ formatSheetNumber(row[key]) }}
+              </td>
+              <td
+                v-for="key in afterMutation"
+                :key="key"
+                class="num-cell"
+                :class="{ 'sheet-total': totalColumns(key) }"
+              >
+                {{ formatSheetNumber(row[key]) }}
+              </td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td class="sheet-sticky sheet-no"></td>
+              <td class="sheet-sticky sheet-name">JUMLAH</td>
+              <td class="num-cell">{{ formatSheetNumber(totals.plafond) }}</td>
+              <td colspan="7"></td>
+              <td
+                v-for="key in beforeMutation"
+                :key="key"
+                class="num-cell"
+                :class="{ 'sheet-total': totalColumns(key) }"
+              >
+                {{ formatSheetNumber(totals[key]) }}
+              </td>
+              <td></td>
+              <td v-for="key in mutation" :key="key" class="num-cell">
+                {{ formatSheetNumber(totals[key]) }}
+              </td>
+              <td
+                v-for="key in afterMutation"
+                :key="key"
+                class="num-cell"
+                :class="{ 'sheet-total': totalColumns(key) }"
+              >
+                {{ formatSheetNumber(totals[key]) }}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
   </div>
 </template>

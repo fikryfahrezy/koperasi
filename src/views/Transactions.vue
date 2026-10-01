@@ -10,9 +10,15 @@ import {
   UserRound,
 } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
-import { formatCurrency, useKoperasiStore } from "../store/koperasi";
+import {
+  formatCurrency,
+  memberLoanBalance,
+  memberSavings,
+  useKoperasiStore,
+} from "../store/koperasi";
 
-const { members, postPayment, refresh } = useKoperasiStore();
+const { members, savingsBalances, loans, postPayment, refresh } =
+  useKoperasiStore();
 const step = ref(1);
 const query = ref("");
 const form = reactive({
@@ -29,6 +35,9 @@ const total = computed(
 const selectedMember = computed(() =>
   members.find((member) => member.id === form.memberId),
 );
+const selectedMemberLoanBalance = computed(() =>
+  selectedMember.value ? memberLoanBalance(selectedMember.value.id, loans) : 0,
+);
 const results = computed(() =>
   members
     .filter((member) =>
@@ -39,10 +48,9 @@ const results = computed(() =>
 watch(
   () => form.memberId,
   () => {
-    const member = selectedMember.value;
-    if (member?.loanBalance) {
-      form.principal = Math.min(500_000, member.loanBalance);
-      form.interest = Math.round(member.loanBalance * 0.02);
+    if (selectedMemberLoanBalance.value) {
+      form.principal = Math.min(500_000, selectedMemberLoanBalance.value);
+      form.interest = Math.round(selectedMemberLoanBalance.value * 0.02);
     }
   },
 );
@@ -92,7 +100,7 @@ function reset() {
           /></span>
           <div>
             <h2>Cari anggota</h2>
-            <p>Gunakan nama atau nomor anggota.</p>
+            <p>Gunakan nama anggota.</p>
           </div>
         </div>
         <label class="search-field search-field--large"
@@ -114,17 +122,20 @@ function reset() {
           >
             <span class="avatar"><UserRound :size="21" /></span>
             <div>
-              <strong>{{ member.name }}</strong
-              ><small>{{ member.memberNumber }} · {{ member.id }}</small>
+              <strong>{{ member.name }}</strong>
             </div>
             <dl>
               <div>
                 <dt>Simpanan</dt>
-                <dd>{{ formatCurrency(member.savings) }}</dd>
+                <dd>
+                  {{ formatCurrency(memberSavings(member, savingsBalances)) }}
+                </dd>
               </div>
               <div>
                 <dt>Pinjaman</dt>
-                <dd>{{ formatCurrency(member.loanBalance) }}</dd>
+                <dd>
+                  {{ formatCurrency(memberLoanBalance(member.id, loans)) }}
+                </dd>
               </div>
             </dl>
             <ArrowRight :size="19" />
@@ -162,8 +173,8 @@ function reset() {
             <small>Anggota terpilih</small
             ><strong>{{ selectedMember?.name }}</strong
             ><span
-              >{{ selectedMember?.memberNumber }} · Saldo pinjaman
-              {{ formatCurrency(selectedMember?.loanBalance ?? 0) }}</span
+              >Saldo pinjaman
+              {{ formatCurrency(selectedMemberLoanBalance) }}</span
             >
           </div>
           <button class="text-button" type="button" @click="step = 1">
