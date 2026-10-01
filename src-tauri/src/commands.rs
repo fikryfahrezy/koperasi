@@ -9,9 +9,9 @@ use tauri::State;
 use crate::{
     application,
     contracts::{
-        AddMemberInput, AdminStateDto, AppSnapshot, CompanyDto, CreateLoanInput, DisburseLoanInput,
-        LoanPreview, PaymentInput, ReverseTransactionInput, SaveParametersInput,
-        SavingsTransactionInput,
+        AddMemberInput, AdminStateDto, AppSnapshot, CashBookDto, CashEntryInput, CompanyDto,
+        CreateLoanInput, DisburseLoanInput, LoanPreview, MonthlyLedgerDto, PaymentInput,
+        ReverseTransactionInput, SaveParametersInput, SavingsTransactionInput,
     },
     importer,
     state::AppState,
@@ -28,6 +28,34 @@ pub(crate) async fn get_app_snapshot(
     state: State<'_, AppState>,
 ) -> Result<AppSnapshot, String> {
     application::get_app_snapshot(&company_id, &state.db).await
+}
+
+#[tauri::command]
+pub(crate) async fn get_monthly_ledger(
+    company_id: String,
+    year: i32,
+    state: State<'_, AppState>,
+) -> Result<MonthlyLedgerDto, String> {
+    application::get_monthly_ledger(&company_id, year, &state.db).await
+}
+
+#[tauri::command]
+pub(crate) async fn get_cash_book(
+    company_id: String,
+    year: i32,
+    channel: String,
+    state: State<'_, AppState>,
+) -> Result<CashBookDto, String> {
+    application::get_cash_book(&company_id, year, &channel, &state.db).await
+}
+
+#[tauri::command]
+pub(crate) async fn post_cash_entry(
+    input: CashEntryInput,
+    company_id: String,
+    state: State<'_, AppState>,
+) -> Result<AppSnapshot, String> {
+    application::post_cash_entry(input, &company_id, &state.db).await
 }
 
 #[tauri::command]

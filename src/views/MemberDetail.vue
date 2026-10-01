@@ -53,7 +53,6 @@ const memberTransactions = computed(() => {
       <section class="member-detail__identity">
         <span class="member-detail__avatar"><UserRound :size="28" /></span>
         <div>
-          <small>{{ member.memberNumber }} · {{ member.id }}</small>
           <h3>{{ member.name }}</h3>
           <div class="member-detail__meta">
             <span><CalendarDays :size="14" /> {{ member.joinedAt }}</span>
@@ -67,21 +66,6 @@ const memberTransactions = computed(() => {
         </div>
       </section>
 
-      <section class="member-detail__metrics">
-        <article>
-          <span>Total simpanan</span>
-          <strong>{{ formatCurrency(member.savings) }}</strong>
-        </article>
-        <article>
-          <span>Saldo pinjaman</span>
-          <strong>{{ formatCurrency(member.loanBalance) }}</strong>
-        </article>
-        <article>
-          <span>Kontrak pinjaman</span>
-          <strong>{{ memberLoans.length }}</strong>
-        </article>
-      </section>
-
       <section class="member-detail__section">
         <div class="member-detail__section-title">
           <WalletCards :size="17" />
@@ -91,14 +75,6 @@ const memberTransactions = computed(() => {
           <div>
             <span>Simpanan pokok</span>
             <strong>{{ formatCurrency(member.principalSavings) }}</strong>
-          </div>
-          <div>
-            <span>Simpanan wajib</span>
-            <strong>{{ formatCurrency(member.mandatorySavings) }}</strong>
-          </div>
-          <div>
-            <span>Simpanan manasuka</span>
-            <strong>{{ formatCurrency(member.voluntarySavings) }}</strong>
           </div>
         </div>
       </section>
@@ -164,7 +140,7 @@ const memberTransactions = computed(() => {
     <section v-else class="panel member-detail__not-found">
       <UserRound :size="32" />
       <strong>Anggota tidak ditemukan</strong>
-      <p>ID anggota pada alamat ini tidak tersedia.</p>
+      <p>Data anggota pada alamat ini tidak tersedia.</p>
       <RouterLink class="button button--primary" to="/members">
         Kembali ke daftar anggota
       </RouterLink>

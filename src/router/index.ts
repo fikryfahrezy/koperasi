@@ -6,7 +6,6 @@ import Dashboard from "../views/Dashboard.vue";
 import Loans from "../views/Loans.vue";
 import Members from "../views/Members.vue";
 import MemberDetail from "../views/MemberDetail.vue";
-import Migration from "../views/Migration.vue";
 import Reconciliation from "../views/Reconciliation.vue";
 import Savings from "../views/Savings.vue";
 import NewTab from "../views/NewTab.vue";
@@ -60,11 +59,6 @@ export const router = createRouter({
       path: "/reconciliation",
       component: Reconciliation,
       meta: { titleKey: "sidebar.nav.reconciliation" },
-    },
-    {
-      path: "/migration",
-      component: Migration,
-      meta: { titleKey: "sidebar.nav.migration" },
     },
     {
       path: "/admin",
