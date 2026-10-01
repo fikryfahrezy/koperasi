@@ -7,9 +7,8 @@ import {
   ChevronLeft,
   CircleDollarSign,
   Coins,
-  FileSpreadsheet,
   Gauge,
-  Landmark,
+  HandCoins,
   Settings2,
   ShieldCheck,
   Users,
@@ -35,7 +34,7 @@ const mainNav = [
   },
   { to: "/members", labelKey: "sidebar.nav.members", icon: Users },
   { to: "/savings", labelKey: "sidebar.nav.savings", icon: Coins },
-  { to: "/loans", labelKey: "sidebar.nav.loans", icon: Landmark },
+  { to: "/loans", labelKey: "sidebar.nav.loans", icon: HandCoins },
   { to: "/cash-ledger", labelKey: "sidebar.nav.cashLedger", icon: BookOpen },
 ];
 const controlNav = [
@@ -44,11 +43,6 @@ const controlNav = [
     labelKey: "sidebar.nav.reconciliation",
     icon: ShieldCheck,
     badge: "6",
-  },
-  {
-    to: "/migration",
-    labelKey: "sidebar.nav.migration",
-    icon: FileSpreadsheet,
   },
   { to: "/admin", labelKey: "sidebar.nav.admin", icon: Settings2 },
 ];
