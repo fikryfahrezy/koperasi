@@ -180,16 +180,6 @@ pub(crate) struct ReverseTransactionInput {
     pub(crate) display_time: String,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct SaveParametersInput {
-    pub(crate) principal_savings: i64,
-    pub(crate) mandatory_savings: i64,
-    pub(crate) provision_rate: f64,
-    pub(crate) annual_rate: f64,
-    pub(crate) effective_date: String,
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FinancialParametersDto {
@@ -198,24 +188,6 @@ pub(crate) struct FinancialParametersDto {
     pub(crate) provision_rate: f64,
     pub(crate) annual_rate: f64,
     pub(crate) effective_date: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct AuditEventDto {
-    pub(crate) id: i64,
-    pub(crate) entity_type: String,
-    pub(crate) entity_id: String,
-    pub(crate) action: String,
-    pub(crate) actor: String,
-    pub(crate) created_at: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct AdminStateDto {
-    pub(crate) parameters: FinancialParametersDto,
-    pub(crate) audit_events: Vec<AuditEventDto>,
 }
 
 #[derive(Serialize)]

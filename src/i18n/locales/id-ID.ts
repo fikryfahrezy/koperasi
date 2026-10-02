@@ -1,11 +1,7 @@
 export default {
   common: {
     close: "Tutup",
-    cancel: "Batal",
     retry: "Coba lagi",
-    member: "Anggota",
-    active: "Aktif",
-    loading: "Memuat…",
     page: "Halaman",
   },
   workspaceTabs: {
@@ -17,11 +13,7 @@ export default {
   },
   app: {
     mainMenu: "Menu utama aplikasi",
-    desktopApp: "Aplikasi koperasi",
     errorTitle: "Terjadi kesalahan aplikasi",
-    closeMenu: "Tutup menu",
-    openMenu: "Buka menu",
-    period: "Tahun",
     loadingTitle: "Menyiapkan database koperasi…",
     loadingDescription:
       "Memuat anggota, pinjaman, simpanan, dan buku kas 2026.",
@@ -31,20 +23,11 @@ export default {
     logoAlt: "Logo koperasi",
     cooperativeName: "Koperasi Pensiunan BRI Kuningan",
     cooperativeShortName: "Bina Sejahtera",
-    operational: "Operasional",
-    controlSystem: "Kontrol & sistem",
-    expand: "Perluas sidebar",
-    collapse: "Perkecil sidebar",
     nav: {
-      dashboard: "Ringkasan",
-      transactions: "Transaksi",
       members: "Anggota",
       savings: "Simpanan",
       loans: "Pinjaman",
       cashLedger: "Buku kas",
-      reconciliation: "Rekonsiliasi",
-      migration: "Migrasi data",
-      admin: "Administrasi",
     },
   },
   modal: { close: "Tutup dialog" },
@@ -67,10 +50,6 @@ export default {
     backendUnavailable: "Backend tidak tersedia",
     backendHint:
       "Jalankan aplikasi melalui `pnpm tauri dev`, bukan server web biasa.",
-    workbookImported: "Workbook berhasil diimpor",
-    workbookImportedMessage:
-      "Anggota, pinjaman, simpanan, dan buku kas telah dimuat ke database lokal.",
-    workbookImportFailed: "Impor workbook gagal",
     memberAdded: "Anggota berhasil ditambahkan",
     memberAddedMessage:
       "{name} dan tiga rekening simpanannya tersimpan di SQLite.",
@@ -81,7 +60,6 @@ export default {
     loanDisbursed: "Pinjaman berhasil dicairkan",
     loanDisbursedMessage:
       "Kas keluar, piutang pokok, provisi, dan audit trail telah diposting atomik.",
-    loanDisbursementFailed: "Pencairan pinjaman gagal",
     movementPosted: "{movement} berhasil diposting",
     movementPostedMessage:
       "Saldo simpanan, buku kas, dan audit trail telah diperbarui.",
@@ -89,15 +67,10 @@ export default {
     paymentPosted: "Pembayaran berhasil diposting",
     paymentPostedMessage: "{amount} masuk melalui transaksi database atomik.",
     paymentFailed: "Pembayaran gagal diposting",
-    adminLoadFailed: "Administrasi gagal dimuat",
-    parametersSaved: "Versi parameter tersimpan",
-    parametersSavedMessage:
-      "Nilai baru berlaku mulai {date} dan tercatat di audit trail.",
-    parametersSaveFailed: "Parameter gagal disimpan",
+    parametersLoadFailed: "Parameter keuangan gagal dimuat",
     reversalPosted: "Reversal berhasil diposting",
     reversalPostedMessage:
       "{id} dibalik melalui transaksi baru tanpa menghapus histori asal.",
     reversalFailed: "Reversal gagal",
   },
-  dialog: { workbookPicker: "Pilih workbook Excel (.xlsm)" },
 } as const;
