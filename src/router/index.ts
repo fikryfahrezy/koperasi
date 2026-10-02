@@ -29,12 +29,12 @@ export const router = createRouter({
     {
       path: "/savings",
       component: Savings,
-      meta: { titleKey: "sidebar.nav.savings" },
+      meta: { titleKey: "sidebar.nav.savings", fitViewport: true },
     },
     {
       path: "/loans",
       component: Loans,
-      meta: { titleKey: "sidebar.nav.loans" },
+      meta: { titleKey: "sidebar.nav.loans", fitViewport: true },
     },
     {
       path: "/cash-ledger",

@@ -29,7 +29,6 @@ CREATE TABLE IF NOT EXISTS members (
   company_id TEXT NOT NULL REFERENCES companies(id),
   name TEXT NOT NULL,
   joined_at TEXT NOT NULL,
-  status TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(company_id, id)
 );
@@ -40,24 +39,27 @@ CREATE TABLE IF NOT EXISTS savings_accounts (
   company_id TEXT NOT NULL REFERENCES companies(id),
   member_id TEXT NOT NULL REFERENCES members(id),
   account_type TEXT NOT NULL,
-  status TEXT NOT NULL,
   UNIQUE(company_id, member_id, account_type)
 );
 
 -- Loan terms; principal balances are in the loan_balances view.
+-- loan_group: PINJAMAN BULANAN section (Anggota PP BRI / Non Anggota PP BRI).
+-- loan_type:  Jenis Pinjaman (Bulanan / Sementara).
+-- member_id is empty for Non Anggota borrowers.
 CREATE TABLE IF NOT EXISTS loans (
   id TEXT PRIMARY KEY,
   company_id TEXT NOT NULL REFERENCES companies(id),
+  loan_group TEXT NOT NULL,
   member_id TEXT REFERENCES members(id),
   member_name TEXT NOT NULL,
   plafond INTEGER NOT NULL DEFAULT 0 CHECK (plafond >= 0),
   rate_annual REAL NOT NULL,
   tenor INTEGER NOT NULL CHECK (tenor > 0),
   interest_type TEXT NOT NULL,
+  loan_type TEXT NOT NULL,
   guarantee TEXT NOT NULL DEFAULT '',
   realization_date TEXT NOT NULL,
   due_date TEXT NOT NULL,
-  status TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -72,7 +74,6 @@ CREATE TABLE IF NOT EXISTS transactions (
   display_time TEXT NOT NULL,
   member_id TEXT REFERENCES members(id),
   member_name TEXT NOT NULL,
-  transaction_type TEXT NOT NULL,
   channel TEXT NOT NULL,
   description TEXT NOT NULL,
   reference TEXT NOT NULL,
@@ -123,7 +124,7 @@ END;
 CREATE VIEW IF NOT EXISTS effective_transactions AS
 SELECT t.*
 FROM transactions t
-WHERE t.transaction_type != 'REVERSAL'
+WHERE t.reversed_transaction_id IS NULL
   AND NOT EXISTS (
     SELECT 1 FROM transactions r
     WHERE r.company_id = t.company_id AND r.reversed_transaction_id = t.id
@@ -175,15 +176,6 @@ CREATE TABLE IF NOT EXISTS audit_events (
   after_json TEXT,
   actor TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS periods (
-  company_id TEXT NOT NULL REFERENCES companies(id),
-  period TEXT NOT NULL,
-  status TEXT NOT NULL,
-  locked_by TEXT,
-  locked_at TEXT,
-  PRIMARY KEY(company_id, period)
 );
 
 CREATE TABLE IF NOT EXISTS parameters (

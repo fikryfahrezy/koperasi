@@ -107,8 +107,18 @@ const closingKeys = [
 ] as const;
 </script>
 <template>
-  <div class="page-stack">
-    <PageHeader title="Simpanan" :refresh="refresh" />
+  <div class="page-stack page-stack--sheet">
+    <PageHeader title="Simpanan" :refresh="refresh">
+      <template #before-actions>
+        <UiSelect
+          v-if="periodOptions.length"
+          v-model="period"
+          :options="periodOptions"
+          aria-label="Bulan"
+          variant="toolbar"
+        />
+      </template>
+    </PageHeader>
     <section
       v-if="!monthlyLedgerLoading && !monthlyLedger.periods.length"
       class="panel year-empty-state"
@@ -119,15 +129,10 @@ const closingKeys = [
     </section>
     <template v-else>
       <section class="panel table-panel">
-        <div class="toolbar">
-          <UiSelect
-            v-model="period"
-            :options="periodOptions"
-            aria-label="Bulan"
-            variant="toolbar"
-          />
-        </div>
-        <div v-if="period" class="data-table-wrap sheet-wrap">
+        <div
+          v-if="period"
+          class="data-table-wrap sheet-wrap sheet-wrap--header-controls"
+        >
           <table class="sheet-table">
             <thead>
               <tr>

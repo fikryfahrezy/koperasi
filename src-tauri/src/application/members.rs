@@ -2,13 +2,13 @@
 
 use sqlx::SqlitePool;
 
-use super::posting::{append, audit, ensure_period_open, Component, Entry, APP_ACTOR};
+use super::posting::{append, audit, Component, Entry, APP_ACTOR};
 use super::read_model::get_app_snapshot;
 use crate::{
     contracts::{AddMemberInput, AppSnapshot},
     domain::{
-        timestamp_id, AuditAction, AuditEntityType, Channel, ComponentType, MemberStatus,
-        SavingsAccountStatus, SavingsAccountType, TransactionDirection, TransactionType,
+        timestamp_id, validate_business_date, AuditAction, AuditEntityType, Channel, ComponentType,
+        SavingsAccountType, TransactionDirection,
     },
 };
 
@@ -47,8 +47,8 @@ pub(crate) async fn add_member(
         return Err("Simpanan pokok minimal Rp50.000.".into());
     }
 
+    validate_business_date(&input.business_date)?;
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
-    ensure_period_open(&mut db, company_id, &input.business_date).await?;
     let next: i64 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(CAST(SUBSTR(id, INSTR(id, '-M') + 2) AS INTEGER)), 0) + 1 FROM members WHERE company_id = ?",
     )
@@ -58,24 +58,21 @@ pub(crate) async fn add_member(
     .map_err(|error| error.to_string())?;
     let id = format!("{company_id}-M{next:03}");
     let name = input.name.trim();
-    sqlx::query(
-        "INSERT INTO members (id, company_id, name, joined_at, status) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind(&id)
-    .bind(company_id)
-    .bind(name)
-    .bind(input.joined_at.trim())
-    .bind(MemberStatus::Active.as_str())
-    .execute(&mut *db)
-    .await
-    .map_err(|error| error.to_string())?;
+    sqlx::query("INSERT INTO members (id, company_id, name, joined_at) VALUES (?, ?, ?, ?)")
+        .bind(&id)
+        .bind(company_id)
+        .bind(name)
+        .bind(input.joined_at.trim())
+        .execute(&mut *db)
+        .await
+        .map_err(|error| error.to_string())?;
     for kind in [
         SavingsAccountType::Principal,
         SavingsAccountType::Mandatory,
         SavingsAccountType::Voluntary,
     ] {
-        sqlx::query("INSERT INTO savings_accounts (id, company_id, member_id, account_type, status) VALUES (?, ?, ?, ?, ?)")
-            .bind(format!("SA-{id}-{}", kind.as_str())).bind(company_id).bind(&id).bind(kind.as_str()).bind(SavingsAccountStatus::Active.as_str()).execute(&mut *db).await.map_err(|error| error.to_string())?;
+        sqlx::query("INSERT INTO savings_accounts (id, company_id, member_id, account_type) VALUES (?, ?, ?, ?)")
+            .bind(format!("SA-{id}-{}", kind.as_str())).bind(company_id).bind(&id).bind(kind.as_str()).execute(&mut *db).await.map_err(|error| error.to_string())?;
     }
 
     let transaction_id = timestamp_id("SAV-IN");
@@ -111,7 +108,6 @@ pub(crate) async fn add_member(
             display_time: &input.display_time,
             member_id: Some(&id),
             member_name: name,
-            transaction_type: TransactionType::SavingsDeposit,
             channel,
             description,
             reference: &reference,

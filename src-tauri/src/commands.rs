@@ -10,7 +10,7 @@ use crate::{
     application,
     contracts::{
         AddMemberInput, AppSnapshot, CashBookDto, CashEntryInput, CompanyDto, CreateLoanInput,
-        FinancialParametersDto, LoanPreview, MonthlyLedgerDto, PaymentInput,
+        FinancialParametersDto, LoanPreview, MonthlyLedgerDto, PaymentInput, PreviewLoanInput,
         ReverseTransactionInput, SavingsTransactionInput,
     },
     state::AppState,
@@ -68,7 +68,7 @@ pub(crate) async fn add_member(
 
 #[tauri::command]
 pub(crate) async fn preview_loan(
-    input: CreateLoanInput,
+    input: PreviewLoanInput,
     company_id: String,
     state: State<'_, AppState>,
 ) -> Result<LoanPreview, String> {

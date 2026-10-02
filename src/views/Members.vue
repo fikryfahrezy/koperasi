@@ -70,6 +70,22 @@ async function submit() {
 <template>
   <div class="page-stack">
     <PageHeader title="Anggota" :refresh="refresh">
+      <template #title-meta>
+        <span class="page-heading__meta" aria-live="polite">
+          <strong>{{ filteredMembers.length }}</strong> dari
+          {{ totals.members.value }} anggota
+        </span>
+      </template>
+      <template #before-actions>
+        <label class="search-field">
+          <Search :size="18" />
+          <input
+            v-model="query"
+            aria-label="Cari nama anggota"
+            placeholder="Cari nama anggota..."
+          />
+        </label>
+      </template>
       <template #actions
         ><button
           class="button button--primary"
@@ -81,17 +97,6 @@ async function submit() {
       >
     </PageHeader>
     <section class="panel table-panel">
-      <div class="toolbar">
-        <label class="search-field"
-          ><Search :size="18" /><input
-            v-model="query"
-            placeholder="Cari nama anggota..."
-        /></label>
-        <div class="toolbar__meta">
-          <strong>{{ filteredMembers.length }}</strong> dari
-          {{ totals.members.value }} anggota
-        </div>
-      </div>
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>

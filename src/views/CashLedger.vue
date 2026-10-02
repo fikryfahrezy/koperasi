@@ -17,12 +17,15 @@ import RupiahInput from "../components/RupiahInput.vue";
 import UiModal from "../components/UiModal.vue";
 import UiSelect from "../components/UiSelect.vue";
 import {
+  cashCategories,
   Channel,
   formatCurrency,
   formatSheetNumber,
   InterestType,
-  LoanStatus,
+  LoanGroup,
+  LoanType,
   type CashBook,
+  type CashCategory,
   type CashBookRow,
   type LoanPreview,
   SavingsAccountType,
@@ -30,7 +33,6 @@ import {
   todayIso,
   TransactionDirection,
   TransactionStatus,
-  TransactionType,
   useKoperasiStore,
 } from "../store/koperasi";
 
@@ -85,8 +87,7 @@ const rows = computed(() => cashBook.value?.rows ?? []);
 const showDate = (index: number) =>
   index === 0 || rows.value[index - 1].date !== rows.value[index].date;
 const isExcluded = (item: CashBookRow) =>
-  item.status === TransactionStatus.Reversed ||
-  item.transactionType === TransactionType.Reversal;
+  item.status === TransactionStatus.Reversed || item.isReversal;
 
 // --- Transaction entry form ---------------------------------------------------
 const Category = {
@@ -114,13 +115,17 @@ const savingsForm = reactive({
   amount: 50_000,
 });
 const loanForm = reactive({
+  loanGroup: LoanGroup.Member as LoanGroup,
   memberId: "",
+  borrowerName: "",
   plafond: 10_000_000,
   tenor: 24,
   interestType: InterestType.Declining as InterestType,
+  loanType: LoanType.Monthly as LoanType,
 });
 const otherForm = reactive({
   direction: TransactionDirection.Out as TransactionDirection,
+  category: "" as CashCategory | "",
   description: "",
   amount: 0,
 });
@@ -140,15 +145,24 @@ const tenorOptions = [10, 12, 15, 20, 24, 36].map((tenor) => ({
 }));
 const interestTypeOptions = [
   { value: InterestType.Declining, label: "Menurun" },
-  { value: InterestType.Flat, label: "Flat" },
+  { value: InterestType.Flat, label: "Plat" },
+];
+const loanGroupOptions = [
+  { value: LoanGroup.Member, label: "Anggota PP BRI" },
+  { value: LoanGroup.NonMember, label: "Non Anggota PP BRI" },
+];
+const loanTypeOptions = [
+  { value: LoanType.Monthly, label: "Bulanan" },
+  { value: LoanType.Temporary, label: "Sementara" },
+];
+const cashCategoryOptions = [
+  { value: "", label: "Tanpa kategori" },
+  ...cashCategories,
 ];
 // The selected member's outstanding loan balance helps fill in the installment.
 const paymentLoans = computed(() =>
   loans.filter(
-    (loan) =>
-      loan.memberId === paymentForm.memberId &&
-      loan.status !== LoanStatus.Draft &&
-      loan.balance > 0,
+    (loan) => loan.memberId === paymentForm.memberId && loan.balance > 0,
   ),
 );
 const paymentLoanBalance = computed(() =>
@@ -213,13 +227,17 @@ function openModal() {
     amount: financialParameters.mandatorySavings || 50_000,
   });
   Object.assign(loanForm, {
+    loanGroup: LoanGroup.Member,
     memberId: "",
+    borrowerName: "",
     plafond: 10_000_000,
     tenor: 24,
     interestType: InterestType.Declining,
+    loanType: LoanType.Monthly,
   });
   Object.assign(otherForm, {
     direction: TransactionDirection.Out,
+    category: "",
     description: "",
     amount: 0,
   });
@@ -269,15 +287,27 @@ async function submit() {
         options,
       );
     } else if (category.value === Category.Loan) {
-      if (!loanForm.memberId || loanForm.plafond <= 0) return;
-      saved = await createLoan({ ...loanForm }, options);
+      const borrowerMissing =
+        loanForm.loanGroup === LoanGroup.Member
+          ? !loanForm.memberId
+          : !loanForm.borrowerName.trim();
+      if (borrowerMissing || loanForm.plafond <= 0) return;
+      saved = await createLoan(
+        {
+          ...loanForm,
+          memberId:
+            loanForm.loanGroup === LoanGroup.Member ? loanForm.memberId : "",
+          borrowerName: loanForm.borrowerName.trim(),
+        },
+        options,
+      );
     } else {
       if (otherForm.amount <= 0) return;
       if (!otherForm.description.trim()) return;
       saved = await postCashEntry(
         {
           direction: otherForm.direction,
-          category: otherForm.description.trim(),
+          category: otherForm.category,
           description: otherForm.description.trim(),
           amount: otherForm.amount,
           reference: "",
@@ -557,7 +587,25 @@ async function refreshPage() {
         </template>
 
         <template v-else-if="category === Category.Loan">
-          <label class="field">
+          <div class="field-row">
+            <label class="field">
+              <span>Kelompok</span>
+              <UiSelect
+                v-model="loanForm.loanGroup"
+                :options="loanGroupOptions"
+                aria-label="Kelompok pinjaman"
+              />
+            </label>
+            <label class="field">
+              <span>Jenis pinjaman</span>
+              <UiSelect
+                v-model="loanForm.loanType"
+                :options="loanTypeOptions"
+                aria-label="Jenis pinjaman"
+              />
+            </label>
+          </div>
+          <label v-if="loanForm.loanGroup === LoanGroup.Member" class="field">
             <span>Anggota</span>
             <UiSelect
               v-model="loanForm.memberId"
@@ -566,6 +614,10 @@ async function refreshPage() {
               placeholder="Pilih anggota"
               required
             />
+          </label>
+          <label v-else class="field">
+            <span>Nama peminjam</span>
+            <input v-model="loanForm.borrowerName" required />
           </label>
           <div class="field-row">
             <label class="field">
@@ -645,6 +697,14 @@ async function refreshPage() {
             </div>
           </fieldset>
           <label class="field">
+            <span>Kategori</span>
+            <UiSelect
+              v-model="otherForm.category"
+              :options="cashCategoryOptions"
+              aria-label="Kategori Buku Kas"
+            />
+          </label>
+          <label class="field">
             <span>Uraian</span>
             <input
               v-model="otherForm.description"
@@ -702,7 +762,7 @@ async function refreshPage() {
         </div>
         <div v-if="isExcluded(selected)" class="audit-note">
           {{
-            selected.transactionType === TransactionType.Reversal
+            selected.isReversal
               ? "Baris ini adalah reversal."
               : "Transaksi ini sudah dibalik."
           }}

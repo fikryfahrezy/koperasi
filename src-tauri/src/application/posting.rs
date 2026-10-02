@@ -3,10 +3,7 @@
 
 use sqlx::SqliteConnection;
 
-use crate::domain::{
-    business_period, AuditAction, AuditEntityType, Channel, ComponentType, PeriodStatus,
-    TransactionDirection, TransactionType,
-};
+use crate::domain::{AuditAction, AuditEntityType, Channel, ComponentType, TransactionDirection};
 
 pub(crate) const APP_ACTOR: &str = "Aplikasi lokal";
 
@@ -51,7 +48,6 @@ pub(crate) struct Entry<'a> {
     pub(crate) display_time: &'a str,
     pub(crate) member_id: Option<&'a str>,
     pub(crate) member_name: &'a str,
-    pub(crate) transaction_type: TransactionType,
     pub(crate) channel: Channel,
     pub(crate) description: &'a str,
     pub(crate) reference: &'a str,
@@ -59,28 +55,6 @@ pub(crate) struct Entry<'a> {
     pub(crate) actor: &'a str,
     pub(crate) reversed_transaction_id: Option<&'a str>,
     pub(crate) components: Vec<Component>,
-}
-
-/// Rejects postings to locked periods.
-pub(crate) async fn ensure_period_open(
-    db: &mut SqliteConnection,
-    company_id: &str,
-    business_date: &str,
-) -> Result<(), String> {
-    let period = business_period(business_date)?;
-    let locked: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM periods WHERE company_id = ? AND period = ? AND status = ?",
-    )
-    .bind(company_id)
-    .bind(period)
-    .bind(PeriodStatus::Locked.as_str())
-    .fetch_one(&mut *db)
-    .await
-    .map_err(|error| error.to_string())?;
-    if locked > 0 {
-        return Err("Periode transaksi sudah dikunci.".into());
-    }
-    Ok(())
 }
 
 pub(crate) async fn ensure_reference_unused(
@@ -156,7 +130,7 @@ pub(crate) async fn append(
     if amount <= 0 {
         return Err("Nominal transaksi harus lebih dari nol.".into());
     }
-    sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_id, member_name, transaction_type, channel, description, reference, direction, amount, reversed_transaction_id, actor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_id, member_name, channel, description, reference, direction, amount, reversed_transaction_id, actor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(&entry.id)
         .bind(company_id)
         .bind(entry.business_date)
@@ -164,7 +138,6 @@ pub(crate) async fn append(
         .bind(entry.display_time)
         .bind(entry.member_id)
         .bind(entry.member_name)
-        .bind(entry.transaction_type.as_str())
         .bind(entry.channel.as_str())
         .bind(entry.description)
         .bind(entry.reference)

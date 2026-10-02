@@ -3,31 +3,30 @@
 use sqlx::{Row, SqliteConnection, SqlitePool};
 
 use super::posting::{
-    append, audit, ensure_period_open, ensure_reference_unused, loan_balance, savings_balance,
-    Component, Entry, APP_ACTOR,
+    append, audit, ensure_reference_unused, loan_balance, savings_balance, Component, Entry,
+    APP_ACTOR,
 };
 use super::read_model::get_app_snapshot;
 use crate::{
     contracts::{AppSnapshot, PaymentInput, SavingsTransactionInput},
     domain::{
-        timestamp_id, AuditAction, AuditEntityType, Channel, ComponentType, LoanStatus,
-        MemberStatus, SavingsAccountType, SavingsMovement, TransactionDirection, TransactionType,
+        timestamp_id, validate_business_date, AuditAction, AuditEntityType, Channel, ComponentType,
+        SavingsAccountType, SavingsMovement, TransactionDirection,
     },
 };
 
-pub(crate) async fn active_member_name(
+pub(crate) async fn member_name(
     db: &mut SqliteConnection,
     company_id: &str,
     member_id: &str,
 ) -> Result<String, String> {
-    sqlx::query_scalar("SELECT name FROM members WHERE company_id = ? AND id = ? AND status = ?")
+    sqlx::query_scalar("SELECT name FROM members WHERE company_id = ? AND id = ?")
         .bind(company_id)
         .bind(member_id)
-        .bind(MemberStatus::Active.as_str())
         .fetch_optional(&mut *db)
         .await
         .map_err(|error| error.to_string())?
-        .ok_or_else(|| "Anggota aktif tidak ditemukan.".to_string())
+        .ok_or_else(|| "Anggota tidak ditemukan.".to_string())
 }
 
 pub(crate) async fn savings_account_id(
@@ -70,9 +69,9 @@ pub(crate) async fn post_savings_transaction(
     if movement == SavingsMovement::Withdrawal && account_type != SavingsAccountType::Voluntary {
         return Err("Hanya simpanan manasuka yang dapat ditarik pada versi ini.".into());
     }
+    validate_business_date(&input.business_date)?;
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
-    ensure_period_open(&mut db, company_id, &input.business_date).await?;
-    let member_name = active_member_name(&mut db, company_id, &input.member_id).await?;
+    let member_name = member_name(&mut db, company_id, &input.member_id).await?;
     let account_id =
         savings_account_id(&mut db, company_id, &input.member_id, account_type).await?;
     let is_deposit = movement == SavingsMovement::Deposit;
@@ -83,18 +82,10 @@ pub(crate) async fn post_savings_transaction(
     let id = timestamp_id(if is_deposit { "SAV-IN" } else { "SAV-OUT" });
     let reference = reference_or(&input.reference, format!("KBS/SAV/{id}"));
     ensure_reference_unused(&mut db, company_id, &reference).await?;
-    let (transaction_type, component_type, direction) = if is_deposit {
-        (
-            TransactionType::SavingsDeposit,
-            ComponentType::SavingsDeposit,
-            TransactionDirection::In,
-        )
+    let (component_type, direction) = if is_deposit {
+        (ComponentType::SavingsDeposit, TransactionDirection::In)
     } else {
-        (
-            TransactionType::SavingsWithdrawal,
-            ComponentType::SavingsWithdrawal,
-            TransactionDirection::Out,
-        )
+        (ComponentType::SavingsWithdrawal, TransactionDirection::Out)
     };
     // Descriptions follow the daily cash ledger, e.g. a voluntary savings withdrawal by Hj Aisyah.
     let account_label = match account_type {
@@ -117,7 +108,6 @@ pub(crate) async fn post_savings_transaction(
             display_time: &input.display_time,
             member_id: Some(&input.member_id),
             member_name: &member_name,
-            transaction_type,
             channel,
             description: &description,
             reference: &reference,
@@ -162,9 +152,9 @@ pub(crate) async fn post_payment(
         return Err("Komponen pembayaran tidak boleh negatif.".into());
     }
     let channel = Channel::try_from(input.channel.as_str())?;
+    validate_business_date(&input.business_date)?;
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
-    ensure_period_open(&mut db, company_id, &input.business_date).await?;
-    let member_name = active_member_name(&mut db, company_id, &input.member_id).await?;
+    let member_name = member_name(&mut db, company_id, &input.member_id).await?;
     let id = timestamp_id("TRX");
     let reference = reference_or(&input.reference, format!("KBS/RCPT/{id}"));
     ensure_reference_unused(&mut db, company_id, &reference).await?;
@@ -174,11 +164,10 @@ pub(crate) async fn post_payment(
     let mut remaining_principal = input.principal;
     let mut first_loan: Option<String> = None;
     let loan_ids: Vec<String> = sqlx::query(
-        "SELECT l.id FROM loans l JOIN loan_balances b ON b.company_id = l.company_id AND b.loan_id = l.id WHERE l.company_id = ? AND l.member_id = ? AND l.status != ? AND b.balance > 0 ORDER BY l.realization_date, l.id",
+        "SELECT l.id FROM loans l JOIN loan_balances b ON b.company_id = l.company_id AND b.loan_id = l.id WHERE l.company_id = ? AND l.member_id = ? AND b.balance > 0 ORDER BY l.realization_date, l.id",
     )
     .bind(company_id)
     .bind(&input.member_id)
-    .bind(LoanStatus::Draft.as_str())
     .fetch_all(&mut *db)
     .await
     .map_err(|error| error.to_string())?
@@ -240,7 +229,6 @@ pub(crate) async fn post_payment(
             display_time: &input.display_time,
             member_id: Some(&input.member_id),
             member_name: &member_name,
-            transaction_type: TransactionType::MemberPayment,
             channel,
             description: &format!("Setoran {member_name}"),
             reference: &reference,

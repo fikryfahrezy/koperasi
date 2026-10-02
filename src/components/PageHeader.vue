@@ -21,8 +21,15 @@ async function handleRefresh() {
 
 <template>
   <header class="page-heading">
-    <h1>{{ title }}</h1>
-    <div v-if="refresh || $slots.actions" class="page-heading__actions">
+    <div class="page-heading__title">
+      <h1>{{ title }}</h1>
+      <slot name="title-meta" />
+    </div>
+    <div
+      v-if="refresh || $slots['before-actions'] || $slots.actions"
+      class="page-heading__actions"
+    >
+      <slot name="before-actions" />
       <button
         v-if="refresh"
         class="button button--secondary"

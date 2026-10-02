@@ -4,40 +4,24 @@ import { DEFAULT_LOCALE, translate } from "../i18n";
 
 export const TransactionStatus = {
   Posted: "Terposting",
-  Draft: "Draf",
   Reversed: "Dibalik",
 } as const;
 export type TransactionStatus =
   (typeof TransactionStatus)[keyof typeof TransactionStatus];
 
-export const TransactionType = {
-  SavingsDeposit: "SAVINGS_DEPOSIT",
-  SavingsWithdrawal: "SAVINGS_WITHDRAWAL",
-  OpeningSavings: "OPENING_SAVINGS",
-  OpeningLoan: "OPENING_LOAN",
-  MemberPayment: "MEMBER_PAYMENT",
-  LoanDisbursement: "LOAN_DISBURSEMENT",
-  LoanProvision: "LOAN_PROVISION",
-  CashIncome: "CASH_INCOME",
-  CashExpense: "CASH_EXPENSE",
-  Reversal: "REVERSAL",
+// Sections of PINJAMAN BULANAN.
+export const LoanGroup = {
+  Member: "Anggota PP BRI",
+  NonMember: "Non Anggota PP BRI",
 } as const;
-export type TransactionType =
-  (typeof TransactionType)[keyof typeof TransactionType];
+export type LoanGroup = (typeof LoanGroup)[keyof typeof LoanGroup];
 
-export const LoanStatus = {
-  Draft: "Draf",
-  Active: "Berjalan",
-  NeedsReview: "Perlu review",
-  PaidOff: "Lunas",
+// Jenis Pinjaman column of PINJAMAN BULANAN.
+export const LoanType = {
+  Monthly: "Bulanan",
+  Temporary: "Sementara",
 } as const;
-export type LoanStatus = (typeof LoanStatus)[keyof typeof LoanStatus];
-
-export const MemberStatus = {
-  Active: "Aktif",
-  Inactive: "Nonaktif",
-} as const;
-export type MemberStatus = (typeof MemberStatus)[keyof typeof MemberStatus];
+export type LoanType = (typeof LoanType)[keyof typeof LoanType];
 
 export const TransactionDirection = {
   In: "Masuk",
@@ -68,11 +52,30 @@ export const Channel = {
 } as const;
 export type Channel = (typeof Channel)[keyof typeof Channel];
 
+// Spelled as in PINJAMAN BULANAN.
 export const InterestType = {
   Declining: "Menurun",
-  Flat: "Flat",
+  Flat: "Plat",
 } as const;
 export type InterestType = (typeof InterestType)[keyof typeof InterestType];
+
+// Category columns of Buku Kas TAHUN 2026, in sheet order.
+export const cashCategories = [
+  { value: "KAS_BUKU_TABUNGAN", label: "KAS BUKU TABUNGAN" },
+  { value: "BIAYA_PENGURUS", label: "Biaya Pengurus" },
+  { value: "BIAYA_ATK", label: "Biaya ATK" },
+  { value: "TRANSFORTASI", label: "Transfortasi" },
+  { value: "BIAYA_BUNGA", label: "Biaya Bunga" },
+  { value: "HUMAS", label: "Humas" },
+  { value: "PEMELIHARAAN_AT", label: "Pemeliharaan AT" },
+  { value: "BIAYA_RAT", label: "Biaya RAT" },
+  { value: "SEWA_KANTOR", label: "Sewa Kantor" },
+  { value: "DANSOS", label: "Dansos" },
+  { value: "LAINNYA", label: "Lainnya" },
+  { value: "DEKOPINDA", label: "Dekopinda" },
+  { value: "PARCEL", label: "Parcel" },
+] as const;
+export type CashCategory = (typeof cashCategories)[number]["value"];
 
 export interface Company {
   id: string;
@@ -83,7 +86,6 @@ export interface Member {
   id: string;
   name: string;
   joinedAt: string;
-  status: MemberStatus;
   principalSavings: number;
 }
 
@@ -95,6 +97,8 @@ export interface SavingsBalance {
 
 export interface Loan {
   id: string;
+  loanGroup: LoanGroup;
+  /** Empty for Non Anggota PP BRI. */
   memberId: string;
   memberName: string;
   plafond: number;
@@ -102,10 +106,10 @@ export interface Loan {
   rate: number;
   tenor: number;
   interestType: InterestType;
+  loanType: LoanType;
   realizationDate: string;
   dueDate: string;
   guarantee: string;
-  status: LoanStatus;
 }
 
 export interface SavingsMonth {
@@ -154,13 +158,14 @@ export interface Transaction {
   date: string;
   time: string;
   memberName: string;
-  transactionType: TransactionType;
   channel: Channel;
   description: string;
   reference: string;
   direction: TransactionDirection;
   amount: number;
   status: TransactionStatus;
+  /** The row that cancels another row (Dibalik). */
+  isReversal: boolean;
   components: { label: string; amount: number }[];
   actor: string;
 }
@@ -188,7 +193,8 @@ export interface PostingOptions {
 
 export interface CashEntryInput {
   direction: TransactionDirection;
-  category: string;
+  /** Empty when no Buku Kas category column applies. */
+  category: CashCategory | "";
   description: string;
   amount: number;
   reference: string;
@@ -220,10 +226,14 @@ interface AddMemberInput {
 }
 
 interface CreateLoanInput {
+  loanGroup: LoanGroup;
   memberId: string;
+  /** Borrower name for Non Anggota PP BRI. */
+  borrowerName: string;
   plafond: number;
   tenor: number;
   interestType: InterestType;
+  loanType: LoanType;
 }
 
 type ChannelInput = { channel: Channel };
@@ -348,7 +358,7 @@ const backend = {
     }),
   createLoan: (
     input: CreateLoanInput & {
-      disbursement?: ChannelInput & OperationalTimestamp;
+      disbursement: ChannelInput & OperationalTimestamp;
     },
   ) =>
     invoke<AppSnapshot>(command.createLoan, {
@@ -519,31 +529,24 @@ async function previewLoan(input: CreateLoanInput) {
   return backend.previewLoan(input);
 }
 
-/** With `disburse`, the loan is disbursed immediately (recorded through the cash ledger). */
-async function createLoan(input: CreateLoanInput, disburse?: PostingOptions) {
+/** Loans are recorded when they are realised (disbursed through the cash ledger). */
+async function createLoan(
+  input: CreateLoanInput,
+  disburse: PostingOptions = {},
+) {
   try {
     applySnapshot(
       await backend.createLoan({
         ...input,
-        disbursement: disburse
-          ? {
-              channel: disburse.channel ?? Channel.Cash,
-              ...operationalTimestamp(disburse.businessDate),
-            }
-          : undefined,
+        disbursement: {
+          channel: disburse.channel ?? Channel.Cash,
+          ...operationalTimestamp(disburse.businessDate),
+        },
       }),
     );
-    if (disburse) {
-      notify(
-        translate("notifications.loanDisbursed"),
-        translate("notifications.loanDisbursedMessage"),
-      );
-      return true;
-    }
     notify(
-      translate("notifications.loanDrafted"),
-      translate("notifications.loanDraftedMessage"),
-      "info",
+      translate("notifications.loanDisbursed"),
+      translate("notifications.loanDisbursedMessage"),
     );
     return true;
   } catch (error) {
@@ -660,7 +663,7 @@ async function postCashEntry(
     );
     notify(
       translate("notifications.paymentPosted"),
-      `${input.category} · ${formatCurrency(input.amount)}`,
+      `${input.description} · ${formatCurrency(input.amount)}`,
     );
     return true;
   } catch (error) {

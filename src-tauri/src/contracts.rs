@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    Channel, InterestType, LoanStatus, MemberStatus, SavingsAccountType, TransactionDirection,
-    TransactionStatus, TransactionType,
+    Channel, InterestType, LoanGroup, LoanType, SavingsAccountType, TransactionDirection,
+    TransactionStatus,
 };
 
 #[derive(Serialize)]
@@ -20,7 +20,6 @@ pub(crate) struct MemberDto {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) joined_at: String,
-    pub(crate) status: MemberStatus,
     pub(crate) principal_savings: i64,
 }
 
@@ -36,6 +35,7 @@ pub(crate) struct SavingsBalanceDto {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LoanDto {
     pub(crate) id: String,
+    pub(crate) loan_group: LoanGroup,
     pub(crate) member_id: String,
     pub(crate) member_name: String,
     pub(crate) plafond: i64,
@@ -43,10 +43,10 @@ pub(crate) struct LoanDto {
     pub(crate) rate: f64,
     pub(crate) tenor: i64,
     pub(crate) interest_type: InterestType,
+    pub(crate) loan_type: LoanType,
     pub(crate) realization_date: String,
     pub(crate) due_date: String,
     pub(crate) guarantee: String,
-    pub(crate) status: LoanStatus,
 }
 
 #[derive(Serialize)]
@@ -63,13 +63,14 @@ pub(crate) struct TransactionDto {
     pub(crate) date: String,
     pub(crate) time: String,
     pub(crate) member_name: String,
-    pub(crate) transaction_type: TransactionType,
     pub(crate) channel: Channel,
     pub(crate) description: String,
     pub(crate) reference: String,
     pub(crate) direction: TransactionDirection,
     pub(crate) amount: i64,
     pub(crate) status: TransactionStatus,
+    /// The row that cancels another row (Dibalik).
+    pub(crate) is_reversal: bool,
     pub(crate) components: Vec<ComponentDto>,
     pub(crate) actor: String,
 }
@@ -114,14 +115,28 @@ pub(crate) struct AddMemberInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct CreateLoanInput {
-    pub(crate) member_id: String,
+pub(crate) struct PreviewLoanInput {
     pub(crate) plafond: i64,
     pub(crate) tenor: i64,
     pub(crate) interest_type: String,
-    /// If provided, the loan is disbursed immediately (recorded through the cash ledger).
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CreateLoanInput {
+    pub(crate) loan_group: String,
+    /// Required for Anggota PP BRI; empty for Non Anggota PP BRI.
     #[serde(default)]
-    pub(crate) disbursement: Option<DisbursementInput>,
+    pub(crate) member_id: String,
+    /// Borrower name for Non Anggota PP BRI.
+    #[serde(default)]
+    pub(crate) borrower_name: String,
+    pub(crate) plafond: i64,
+    pub(crate) tenor: i64,
+    pub(crate) interest_type: String,
+    pub(crate) loan_type: String,
+    /// Loans are recorded when they are realised, as in PINJAMAN BULANAN.
+    pub(crate) disbursement: DisbursementInput,
 }
 
 #[derive(Deserialize)]
@@ -156,16 +171,6 @@ pub(crate) struct SavingsTransactionInput {
     pub(crate) movement: String,
     pub(crate) amount: i64,
     pub(crate) reference: String,
-    pub(crate) channel: String,
-    pub(crate) business_date: String,
-    pub(crate) display_date: String,
-    pub(crate) display_time: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct DisburseLoanInput {
-    pub(crate) loan_id: String,
     pub(crate) channel: String,
     pub(crate) business_date: String,
     pub(crate) display_date: String,
@@ -252,6 +257,8 @@ pub(crate) struct MonthlyLedgerDto {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CashEntryInput {
     pub(crate) direction: String,
+    /// A Buku Kas category column (component type), or empty for none.
+    #[serde(default)]
     pub(crate) category: String,
     pub(crate) description: String,
     pub(crate) amount: i64,
