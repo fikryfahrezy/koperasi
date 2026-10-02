@@ -3,12 +3,15 @@
 
 use sqlx::SqliteConnection;
 
-use crate::domain::{business_period, Channel, PeriodStatus, TransactionDirection};
+use crate::domain::{
+    business_period, AuditAction, AuditEntityType, Channel, ComponentType, PeriodStatus,
+    TransactionDirection, TransactionType,
+};
 
 pub(crate) const APP_ACTOR: &str = "Aplikasi lokal";
 
 pub(crate) struct Component {
-    pub(crate) component_type: &'static str,
+    pub(crate) component_type: ComponentType,
     pub(crate) label: String,
     pub(crate) amount: i64,
     pub(crate) loan_id: Option<String>,
@@ -16,7 +19,11 @@ pub(crate) struct Component {
 }
 
 impl Component {
-    pub(crate) fn new(component_type: &'static str, label: impl Into<String>, amount: i64) -> Self {
+    pub(crate) fn new(
+        component_type: ComponentType,
+        label: impl Into<String>,
+        amount: i64,
+    ) -> Self {
         Self {
             component_type,
             label: label.into(),
@@ -44,7 +51,7 @@ pub(crate) struct Entry<'a> {
     pub(crate) display_time: &'a str,
     pub(crate) member_id: Option<&'a str>,
     pub(crate) member_name: &'a str,
-    pub(crate) transaction_type: &'a str,
+    pub(crate) transaction_type: TransactionType,
     pub(crate) channel: Channel,
     pub(crate) description: &'a str,
     pub(crate) reference: &'a str,
@@ -157,7 +164,7 @@ pub(crate) async fn append(
         .bind(entry.display_time)
         .bind(entry.member_id)
         .bind(entry.member_name)
-        .bind(entry.transaction_type)
+        .bind(entry.transaction_type.as_str())
         .bind(entry.channel.as_str())
         .bind(entry.description)
         .bind(entry.reference)
@@ -172,7 +179,7 @@ pub(crate) async fn append(
         sqlx::query("INSERT INTO transaction_components (company_id, transaction_id, component_type, label, amount, loan_id, savings_account_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
             .bind(company_id)
             .bind(&entry.id)
-            .bind(component.component_type)
+            .bind(component.component_type.as_str())
             .bind(&component.label)
             .bind(component.amount)
             .bind(&component.loan_id)
@@ -187,16 +194,16 @@ pub(crate) async fn append(
 pub(crate) async fn audit(
     db: &mut SqliteConnection,
     company_id: &str,
-    entity_type: &str,
+    entity_type: AuditEntityType,
     entity_id: &str,
-    action: &str,
+    action: AuditAction,
     after: serde_json::Value,
 ) -> Result<(), String> {
     sqlx::query("INSERT INTO audit_events (company_id, entity_type, entity_id, action, after_json, actor) VALUES (?, ?, ?, ?, ?, ?)")
         .bind(company_id)
-        .bind(entity_type)
+        .bind(entity_type.as_str())
         .bind(entity_id)
-        .bind(action)
+        .bind(action.as_str())
         .bind(serde_json::to_string(&after).unwrap_or_default())
         .bind(APP_ACTOR)
         .execute(&mut *db)

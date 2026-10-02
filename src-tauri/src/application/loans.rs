@@ -10,8 +10,9 @@ use super::savings::{active_member_name, money_channel};
 use crate::{
     contracts::{AppSnapshot, CreateLoanInput, DisburseLoanInput, LoanPreview},
     domain::{
-        add_months, calculate_loan, calculate_rate_amount, timestamp_id, InterestType, LoanStatus,
-        TransactionDirection,
+        add_months, calculate_loan, calculate_rate_amount, timestamp_id, AuditAction,
+        AuditEntityType, ComponentType, InterestType, LoanStatus, ParameterKey,
+        TransactionDirection, TransactionType,
     },
 };
 
@@ -42,17 +43,17 @@ fn format_thousands(value: i64) -> String {
 async fn parameter(
     db: &mut SqliteConnection,
     company_id: &str,
-    key: &str,
+    key: ParameterKey,
     on_date: &str,
 ) -> Result<f64, String> {
     sqlx::query_scalar("SELECT value FROM parameters WHERE company_id = ? AND parameter_key = ? AND effective_date <= ? ORDER BY effective_date DESC LIMIT 1")
         .bind(company_id)
-        .bind(key)
+        .bind(key.as_str())
         .bind(on_date)
         .fetch_optional(&mut *db)
         .await
         .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("Parameter {key} belum diatur."))
+        .ok_or_else(|| format!("Parameter {} belum diatur.", key.as_str()))
 }
 
 pub(crate) async fn preview_loan(
@@ -65,9 +66,20 @@ pub(crate) async fn preview_loan(
     }
     InterestType::try_from(input.interest_type.as_str())?;
     let mut db = pool.acquire().await.map_err(|error| error.to_string())?;
-    let annual_rate = parameter(&mut db, company_id, "LOAN_ANNUAL_RATE", "9999-12-31").await?;
-    let provision_rate =
-        parameter(&mut db, company_id, "LOAN_PROVISION_RATE", "9999-12-31").await?;
+    let annual_rate = parameter(
+        &mut db,
+        company_id,
+        ParameterKey::LoanAnnualRate,
+        "9999-12-31",
+    )
+    .await?;
+    let provision_rate = parameter(
+        &mut db,
+        company_id,
+        ParameterKey::LoanProvisionRate,
+        "9999-12-31",
+    )
+    .await?;
     let calculation = calculate_loan(input.plafond, input.tenor, annual_rate, provision_rate)?;
     Ok(LoanPreview {
         principal_installment: calculation.principal_installment,
@@ -89,7 +101,13 @@ pub(crate) async fn create_loan(
     let interest_type = InterestType::try_from(input.interest_type.as_str())?;
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
     let member_name = active_member_name(&mut db, company_id, &input.member_id).await?;
-    let rate = parameter(&mut db, company_id, "LOAN_ANNUAL_RATE", "9999-12-31").await?;
+    let rate = parameter(
+        &mut db,
+        company_id,
+        ParameterKey::LoanAnnualRate,
+        "9999-12-31",
+    )
+    .await?;
     let rate_percent = rate * 100.0;
     if rate < 0.0 || !rate_percent.is_finite() {
         return Err("Suku bunga pinjaman tidak valid.".into());
@@ -100,9 +118,9 @@ pub(crate) async fn create_loan(
     audit(
         &mut db,
         company_id,
-        "LOAN",
+        AuditEntityType::Loan,
         &id,
-        "DRAFT_CREATED",
+        AuditAction::DraftCreated,
         serde_json::json!({"memberId": input.member_id, "plafond": input.plafond, "tenor": input.tenor, "interestType": input.interest_type}),
     )
     .await?;
@@ -157,8 +175,13 @@ async fn disburse(
     let plafond: i64 = loan.try_get("plafond").map_err(|error| error.to_string())?;
     let tenor: i64 = loan.try_get("tenor").map_err(|error| error.to_string())?;
     let due_date = add_months(&input.business_date, tenor)?;
-    let provision_rate =
-        parameter(db, company_id, "LOAN_PROVISION_RATE", &input.business_date).await?;
+    let provision_rate = parameter(
+        db,
+        company_id,
+        ParameterKey::LoanProvisionRate,
+        &input.business_date,
+    )
+    .await?;
     let provision = calculate_rate_amount(plafond, provision_rate)?;
 
     let disbursement_id = timestamp_id("DISB");
@@ -172,7 +195,7 @@ async fn disburse(
             display_time: &input.display_time,
             member_id: member_id.as_deref(),
             member_name: &member_name,
-            transaction_type: "LOAN_DISBURSEMENT",
+            transaction_type: TransactionType::LoanDisbursement,
             channel,
             description: &format!("Realisasi Pinjaman {member_name}"),
             reference: &format!("KBS/DISB/{}/{disbursement_id}", input.loan_id),
@@ -180,7 +203,7 @@ async fn disburse(
             actor: APP_ACTOR,
             reversed_transaction_id: None,
             components: vec![Component::new(
-                "LOAN_DISBURSEMENT",
+                ComponentType::LoanDisbursement,
                 "Pencairan pokok pinjaman",
                 plafond,
             )
@@ -200,7 +223,7 @@ async fn disburse(
                 display_time: &input.display_time,
                 member_id: member_id.as_deref(),
                 member_name: &member_name,
-                transaction_type: "LOAN_PROVISION",
+                transaction_type: TransactionType::LoanProvision,
                 channel,
                 description: &format!(
                     "Provisi {} % x Rp. {}",
@@ -211,10 +234,12 @@ async fn disburse(
                 direction: TransactionDirection::In,
                 actor: APP_ACTOR,
                 reversed_transaction_id: None,
-                components: vec![
-                    Component::new("LOAN_PROVISION", "Pendapatan provisi", provision)
-                        .for_loan(&input.loan_id),
-                ],
+                components: vec![Component::new(
+                    ComponentType::LoanProvision,
+                    "Pendapatan provisi",
+                    provision,
+                )
+                .for_loan(&input.loan_id)],
             },
         )
         .await?;
@@ -233,9 +258,9 @@ async fn disburse(
     audit(
         db,
         company_id,
-        "LOAN",
+        AuditEntityType::Loan,
         &input.loan_id,
-        "DISBURSED",
+        AuditAction::Disbursed,
         serde_json::json!({"plafond": plafond, "provision": provision, "dueDate": due_date, "channel": channel.as_str()}),
     )
     .await

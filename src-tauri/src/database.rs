@@ -7,9 +7,8 @@ use sqlx::{
     SqlitePool,
 };
 
-/// Berkas database buku besar. Versi sebelumnya (`koperasi-v2.db`) menyimpan
-/// saldo yang diubah di tempat; berkas itu dibiarkan apa adanya sebagai arsip.
-const DATABASE_FILE: &str = "koperasi-v3.db";
+/// Berkas database koperasi selama pengembangan.
+const DATABASE_FILE: &str = "koperasi.db";
 
 pub(crate) async fn initialize(app_data_dir: &Path) -> Result<SqlitePool, String> {
     std::fs::create_dir_all(app_data_dir).map_err(|error| error.to_string())?;

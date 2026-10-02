@@ -10,8 +10,8 @@ use super::read_model::get_app_snapshot;
 use crate::{
     contracts::{AppSnapshot, PaymentInput, SavingsTransactionInput},
     domain::{
-        timestamp_id, Channel, LoanStatus, MemberStatus, SavingsAccountType, SavingsMovement,
-        TransactionDirection,
+        timestamp_id, AuditAction, AuditEntityType, Channel, ComponentType, LoanStatus,
+        MemberStatus, SavingsAccountType, SavingsMovement, TransactionDirection, TransactionType,
     },
 };
 
@@ -91,10 +91,18 @@ pub(crate) async fn post_savings_transaction(
     let id = timestamp_id(if is_deposit { "SAV-IN" } else { "SAV-OUT" });
     let reference = reference_or(&input.reference, format!("KBS/SAV/{id}"));
     ensure_reference_unused(&mut db, company_id, &reference).await?;
-    let (transaction_type, direction) = if is_deposit {
-        ("SAVINGS_DEPOSIT", TransactionDirection::In)
+    let (transaction_type, component_type, direction) = if is_deposit {
+        (
+            TransactionType::SavingsDeposit,
+            ComponentType::SavingsDeposit,
+            TransactionDirection::In,
+        )
     } else {
-        ("SAVINGS_WITHDRAWAL", TransactionDirection::Out)
+        (
+            TransactionType::SavingsWithdrawal,
+            ComponentType::SavingsWithdrawal,
+            TransactionDirection::Out,
+        )
     };
     // Uraian mengikuti Buku Kas Harian, mis. "Pengambilan Manasuka Hj Aisyah".
     let account_label = match account_type {
@@ -124,17 +132,18 @@ pub(crate) async fn post_savings_transaction(
             direction,
             actor: APP_ACTOR,
             reversed_transaction_id: None,
-            components: vec![Component::new(transaction_type, &description, input.amount)
-                .for_savings(&account_id)],
+            components: vec![
+                Component::new(component_type, &description, input.amount).for_savings(&account_id)
+            ],
         },
     )
     .await?;
     audit(
         &mut db,
         company_id,
-        "TRANSACTION",
+        AuditEntityType::Transaction,
         &id,
-        "POSTED",
+        AuditAction::Posted,
         serde_json::json!({"movement": movement.as_str(), "accountType": account_type.as_str(), "amount": input.amount, "channel": channel.as_str(), "reference": reference}),
     )
     .await?;
@@ -192,8 +201,10 @@ pub(crate) async fn post_payment(
             break;
         }
         let allocated = remaining_principal.min(loan_balance(&mut db, company_id, &loan_id).await?);
-        components
-            .push(Component::new("LOAN_PRINCIPAL", "Pokok pinjaman", allocated).for_loan(&loan_id));
+        components.push(
+            Component::new(ComponentType::LoanPrincipal, "Pokok pinjaman", allocated)
+                .for_loan(&loan_id),
+        );
         remaining_principal -= allocated;
     }
     if remaining_principal > 0 {
@@ -202,7 +213,12 @@ pub(crate) async fn post_payment(
     if input.interest > 0 {
         let loan_id = first_loan.ok_or("Anggota tidak memiliki pinjaman berjalan untuk bunga.")?;
         components.push(
-            Component::new("LOAN_INTEREST", "Bunga pinjaman", input.interest).for_loan(loan_id),
+            Component::new(
+                ComponentType::LoanInterest,
+                "Bunga pinjaman",
+                input.interest,
+            )
+            .for_loan(loan_id),
         );
     }
     for (kind, label, value) in [
@@ -216,8 +232,9 @@ pub(crate) async fn post_payment(
         if value > 0 {
             let account_id =
                 savings_account_id(&mut db, company_id, &input.member_id, kind).await?;
-            components
-                .push(Component::new("SAVINGS_DEPOSIT", label, value).for_savings(account_id));
+            components.push(
+                Component::new(ComponentType::SavingsDeposit, label, value).for_savings(account_id),
+            );
         }
     }
 
@@ -231,7 +248,7 @@ pub(crate) async fn post_payment(
             display_time: &input.display_time,
             member_id: Some(&input.member_id),
             member_name: &member_name,
-            transaction_type: "MEMBER_PAYMENT",
+            transaction_type: TransactionType::MemberPayment,
             channel,
             description: &format!("Setoran {member_name}"),
             reference: &reference,
@@ -245,9 +262,9 @@ pub(crate) async fn post_payment(
     audit(
         &mut db,
         company_id,
-        "TRANSACTION",
+        AuditEntityType::Transaction,
         &id,
-        "POSTED",
+        AuditAction::Posted,
         serde_json::json!({"amount": amount, "channel": channel.as_str(), "reference": reference}),
     )
     .await?;
