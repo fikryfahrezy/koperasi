@@ -172,7 +172,7 @@ mod tests {
                 assert_eq!(parameters.effective_date, "2026-02-01");
             }
 
-            // Referensi boleh sama antar perusahaan.
+            // References may be reused across companies.
             for (company_id, member_id) in
                 [("default", "default-M001"), ("testing", "testing-M001")]
             {
@@ -224,8 +224,8 @@ mod tests {
                 .unwrap();
             assert_eq!(preview.annual_rate, 24.0);
 
-            // Pinjaman baru dari Buku Kas langsung dicairkan: pokok keluar,
-            // provisi masuk.
+            // New loans entered through the cash ledger are disbursed immediately: principal flows out,
+            // and the provision fee flows in.
             let loan_snapshot = create_loan(
                 loan_input(Some(DisbursementInput {
                     channel: "KAS".into(),
@@ -239,12 +239,12 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(loan_snapshot.loans[0].balance, 1_000_000);
-            // 50.000 pokok + 25.000 manasuka - 1.000.000 pencairan + 10.000 provisi.
+            // 50,000 principal savings + 25,000 voluntary savings - 1,000,000 disbursement + 10,000 provision fee.
             assert_eq!(loan_snapshot.totals.cash, -915_000);
 
-            // Setoran lewat potongan tidak mengubah kas.
+            // Deposits outside the cash ledger do not change cash balances.
             let paid = post_payment(
-                payment(100_000, "PAYMENT-TEST", "POTONGAN"),
+                payment(100_000, "PAYMENT-TEST", "NON_KAS"),
                 "testing",
                 &pool,
             )
@@ -260,7 +260,7 @@ mod tests {
                 .id
                 .clone();
 
-            // Reversal menambah baris baru; saldo kembali tanpa mengubah data lama.
+            // A reversal adds a new row; balances are restored without changing existing data.
             let reversed = reverse_transaction(
                 ReverseTransactionInput {
                     id: payment_id.clone(),
@@ -325,7 +325,7 @@ mod tests {
                 cash_book.rows.last().unwrap().transaction.description,
                 "Biaya pulsa karyawan"
             );
-            // Setoran POTONGAN dan reversalnya tidak masuk buku kas tunai.
+            // NON_KAS deposits and their reversals do not appear in the cash ledger.
             assert!(cash_book
                 .rows
                 .iter()

@@ -1,9 +1,9 @@
-//! Buku besar bulanan simpanan dan pinjaman, disusun seperti workbook Excel.
+//! Monthly savings and loan ledgers, arranged like an Excel workbook.
 //!
-//! Tidak ada tabel khusus: setiap bulan diturunkan dengan menjumlahkan komponen
-//! transaksi yang berlaku (view `effective_components`) per tanggal. Riwayat 2026 hasil migrasi juga
-//! tetap dibaca dari transaksi yang sudah tersimpan.
-//! Kewajiban setor dan tunggakan pinjaman dihitung dari syarat pinjaman.
+//! No dedicated tables: each month is derived by summing components of
+//! effective transactions (the `effective_components` view) by date. Migrated 2026 history is also
+//! read from previously stored transactions.
+//! Payment obligations and loan arrears are calculated from loan terms.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -49,7 +49,7 @@ fn period_of(business_date: &str) -> String {
     business_date.chars().take(7).collect()
 }
 
-/// Bulan berikutnya untuk periode `YYYY-MM`.
+/// Next month for a `YYYY-MM` period.
 fn next_period(period: &str) -> Option<String> {
     let year: i32 = period.get(0..4)?.parse().ok()?;
     let month: u32 = period.get(5..7)?.parse().ok()?;
@@ -73,8 +73,8 @@ fn period_range(first: &str, last: &str) -> Vec<String> {
     periods
 }
 
-/// Angsuran pokok dan bunga terjadwal untuk bulan dengan saldo awal `opening`,
-/// mengikuti rumus sheet: pokok = plafond / tenor dibulatkan ke atas per seribu.
+/// Scheduled principal and interest installments for a month with an `opening` balance,
+/// following the spreadsheet formula: principal = loan limit / term, rounded up to the nearest thousand.
 fn scheduled_installment(
     plafond: i64,
     tenor: i64,
@@ -114,7 +114,7 @@ pub(crate) async fn get_monthly_ledger(
     let year_prefix = format!("{year:04}-");
     let mut all_periods: BTreeSet<String> = BTreeSet::new();
 
-    // --- Simpanan -----------------------------------------------------------
+    // --- Savings -----------------------------------------------------------
     let mut savings_months: HashMap<(String, String), SavingsMonth> = HashMap::new();
     let mut member_first_period: HashMap<String, String> = HashMap::new();
     for row in sqlx::query(
@@ -165,7 +165,7 @@ pub(crate) async fn get_monthly_ledger(
         }
     }
 
-    // --- Pinjaman -----------------------------------------------------------
+    // --- Loans -----------------------------------------------------------
     let mut loan_months: HashMap<(String, String), LoanMonth> = HashMap::new();
     let mut loan_first_period: HashMap<String, String> = HashMap::new();
     for row in sqlx::query(
@@ -429,22 +429,22 @@ mod tests {
 
     #[test]
     fn schedules_installments_like_the_sheet() {
-        // L003: plafond 25 jt, 36 bulan, menurun 24%/tahun.
+        // L003: loan limit of 25 million, 36 months, declining interest at 24% per year.
         assert_eq!(
             scheduled_installment(25_000_000, 36, 24.0, InterestType::Declining, 24_305_000),
             (695_000, 486_100)
         );
-        // Bunga flat tetap menggunakan plafond, bukan saldo awal.
+        // Flat interest still uses the loan limit rather than the opening balance.
         assert_eq!(
             scheduled_installment(25_000_000, 36, 24.0, InterestType::Flat, 24_305_000),
             (695_000, 500_000)
         );
-        // Sisa saldo lebih kecil dari angsuran.
+        // The remaining balance is smaller than the installment.
         assert_eq!(
             scheduled_installment(3_200_000, 15, 24.0, InterestType::Declining, 100_000),
             (100_000, 2_000)
         );
-        // Plafond belum diisi: tidak ada jadwal.
+        // No loan limit provided: no repayment schedule.
         assert_eq!(
             scheduled_installment(0, 10, 24.0, InterestType::Declining, 5_000_000),
             (0, 0)

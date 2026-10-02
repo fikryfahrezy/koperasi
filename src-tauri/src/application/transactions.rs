@@ -7,7 +7,6 @@ use super::posting::{
     Component, Entry, APP_ACTOR,
 };
 use super::read_model::get_app_snapshot;
-use super::savings::money_channel;
 use crate::{
     contracts::{AppSnapshot, CashEntryInput, ReverseTransactionInput},
     domain::{
@@ -16,8 +15,8 @@ use crate::{
     },
 };
 
-/// Koreksi tanpa mengubah data: transaksi baru berlawanan arah yang menunjuk ke
-/// transaksi asal. Keduanya lalu tidak dihitung dalam saldo.
+/// Correction without modifying data: a new transaction in the opposite direction references
+/// the original transaction. Both are then excluded from balance calculations.
 pub(crate) async fn reverse_transaction(
     input: ReverseTransactionInput,
     company_id: &str,
@@ -56,7 +55,7 @@ pub(crate) async fn reverse_transaction(
         let amount: i64 = component.try_get("amount").map_err(|error| error.to_string())?;
         let loan_id: Option<String> = component.try_get("loan_id").map_err(|error| error.to_string())?;
         let savings_account_id: Option<String> = component.try_get("savings_account_id").map_err(|error| error.to_string())?;
-        // Membatalkan uang masuk tidak boleh membuat saldo menjadi negatif.
+        // Reversing an inflow must not make the balance negative.
         if let Some(account_id) = &savings_account_id {
             if component_type != ComponentType::SavingsWithdrawal
                 && savings_balance(&mut db, company_id, account_id).await? < amount
@@ -114,7 +113,7 @@ pub(crate) async fn reverse_transaction(
     get_app_snapshot(company_id, pool).await
 }
 
-/// Pemasukan/pengeluaran kas umum (biaya, tambahan kas, transfer ke bank, ...).
+/// General cash inflows/outflows (expenses, additional cash, bank transfers, ...).
 pub(crate) async fn post_cash_entry(
     input: CashEntryInput,
     company_id: &str,
@@ -128,7 +127,7 @@ pub(crate) async fn post_cash_entry(
         return Err("Kategori transaksi wajib diisi.".into());
     }
     let direction = TransactionDirection::try_from(input.direction.as_str())?;
-    let channel = money_channel(&input.channel)?;
+    let channel = Channel::try_from(input.channel.as_str())?;
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
     ensure_period_open(&mut db, company_id, &input.business_date).await?;
     let id = timestamp_id("CASH");

@@ -7,7 +7,7 @@ use sqlx::{
     SqlitePool,
 };
 
-/// Berkas database koperasi selama pengembangan.
+/// Cooperative database file used during development.
 const DATABASE_FILE: &str = "koperasi.db";
 
 pub(crate) async fn initialize(app_data_dir: &Path) -> Result<SqlitePool, String> {
@@ -25,7 +25,7 @@ pub(crate) async fn initialize(app_data_dir: &Path) -> Result<SqlitePool, String
     Ok(pool)
 }
 
-/// Membuat skema buku besar. Aman dijalankan berulang.
+/// Creates the ledger schema. Safe to run repeatedly.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<(), String> {
     sqlx::raw_sql(include_str!("../migrations/001_ledger.sql"))
         .execute(pool)

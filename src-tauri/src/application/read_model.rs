@@ -1,4 +1,4 @@
-//! Read model: semua saldo dihitung dari buku besar (lihat view di skema).
+//! Read model: all balances are calculated from the ledger (see the schema views).
 
 use std::collections::HashMap;
 
@@ -21,7 +21,7 @@ macro_rules! try_column {
 
 const TRANSACTION_COLUMNS: &str = "t.id, t.business_date, t.display_date, t.display_time, t.member_name, t.transaction_type, t.channel, t.description, t.reference, t.direction, t.amount, t.actor, (t.transaction_type = 'REVERSAL' OR EXISTS (SELECT 1 FROM transactions r WHERE r.company_id = t.company_id AND r.reversed_transaction_id = t.id)) AS excluded, EXISTS (SELECT 1 FROM transactions r WHERE r.company_id = t.company_id AND r.reversed_transaction_id = t.id) AS reversed";
 
-/// Status turunan: transaksi yang sudah dibalik berstatus "Dibalik".
+/// Derived status: reversed transactions are marked as reversed.
 fn transaction_dto(
     row: &SqliteRow,
     components: &mut HashMap<String, Vec<ComponentDto>>,
@@ -51,7 +51,7 @@ fn transaction_dto(
     })
 }
 
-/// Komponen untuk sekumpulan transaksi dalam satu query.
+/// Components for a set of transactions fetched in a single query.
 async fn components_for(
     company_id: &str,
     filter_sql: &str,
@@ -116,7 +116,7 @@ async fn snapshot(company_id: &str, pool: &SqlitePool) -> Result<AppSnapshot, St
     })
     .collect::<Result<Vec<_>, _>>()?;
 
-    // Lunas diturunkan dari saldo: pinjaman yang pernah bergerak dan saldonya nol.
+    // Paid-off status is derived from the balance: loans with prior movements and a zero balance.
     let loans = sqlx::query("SELECT l.id, COALESCE(l.member_id, '') member_id, l.member_name, l.plafond, b.balance, b.movements, l.rate_annual, l.tenor, l.interest_type, l.realization_date, l.due_date, l.guarantee, l.status FROM loans l JOIN loan_balances b ON b.company_id = l.company_id AND b.loan_id = l.id WHERE l.company_id = ? ORDER BY l.id")
         .bind(company_id)
         .fetch_all(pool)
@@ -151,13 +151,10 @@ async fn snapshot(company_id: &str, pool: &SqlitePool) -> Result<AppSnapshot, St
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    // Daftar transaksi terbaru hanya memuat transaksi dengan pergerakan dana.
-    let recent_filter = "t.channel != ?";
     let transaction_rows = sqlx::query(&format!(
-        "SELECT {TRANSACTION_COLUMNS} FROM transactions t WHERE t.company_id = ? AND {recent_filter} ORDER BY t.business_date DESC, t.created_at DESC, t.id DESC LIMIT 120"
+        "SELECT {TRANSACTION_COLUMNS} FROM transactions t WHERE t.company_id = ? ORDER BY t.business_date DESC, t.created_at DESC, t.id DESC LIMIT 120"
     ))
     .bind(company_id)
-    .bind(Channel::NonCash.as_str())
     .fetch_all(pool)
     .await
     .map_err(|error| error.to_string())?;
@@ -229,9 +226,9 @@ pub(crate) async fn get_app_snapshot(
     snapshot(company_id, pool).await
 }
 
-/// Buku kas per channel untuk satu tahun, dengan saldo berjalan seperti Buku
-/// Kas Harian. Transaksi yang dibalik dan reversalnya tetap tampil tetapi
-/// tidak mengubah saldo.
+/// Cash ledger by channel for one year, with running balances matching the daily
+/// cash ledger. Reversed transactions and their reversals remain visible but
+/// do not affect balances.
 pub(crate) async fn get_cash_book(
     company_id: &str,
     year: i32,
@@ -306,12 +303,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recent_activity_excludes_non_cash_transactions() {
+    fn cash_book_only_lists_kas_transactions() {
         tauri::async_runtime::block_on(async {
             let pool = crate::database::memory_pool().await;
             for (id, transaction_type, channel) in [
-                ("savings", "SAVINGS_DEPOSIT", "POTONGAN"),
-                ("loan", "LOAN_DISBURSEMENT", "BANK"),
+                ("savings", "SAVINGS_DEPOSIT", "NON_KAS"),
                 ("cash", "SAVINGS_DEPOSIT", "KAS"),
                 ("opening", "OPENING_SAVINGS", "NON_KAS"),
             ] {
@@ -319,13 +315,6 @@ mod tests {
                     .bind(id).bind(transaction_type).bind(channel).bind(id)
                     .execute(&pool).await.unwrap();
             }
-            let snapshot = get_app_snapshot("default", &pool).await.unwrap();
-            let ids: Vec<_> = snapshot
-                .transactions
-                .iter()
-                .map(|t| t.id.as_str())
-                .collect();
-            assert_eq!(ids, vec!["savings", "loan", "cash"]);
             let book = get_cash_book("default", 2026, "KAS", &pool).await.unwrap();
             assert_eq!(book.rows.len(), 1);
             assert_eq!(book.rows[0].transaction.id, "cash");
@@ -333,7 +322,7 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-            assert_eq!(count, 4);
+            assert_eq!(count, 3);
         });
     }
 }
