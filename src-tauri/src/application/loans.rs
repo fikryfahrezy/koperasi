@@ -124,17 +124,6 @@ pub(crate) async fn create_loan(
     get_app_snapshot(company_id, pool).await
 }
 
-pub(crate) async fn disburse_loan(
-    input: DisburseLoanInput,
-    company_id: &str,
-    pool: &SqlitePool,
-) -> Result<AppSnapshot, String> {
-    let mut db = pool.begin().await.map_err(|error| error.to_string())?;
-    disburse(&mut db, company_id, input).await?;
-    db.commit().await.map_err(|error| error.to_string())?;
-    get_app_snapshot(company_id, pool).await
-}
-
 /// Pencairan: uang pokok keluar dan provisi masuk dicatat sebagai dua baris,
 /// sama seperti di Buku Kas Harian.
 async fn disburse(

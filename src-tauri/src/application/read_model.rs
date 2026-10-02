@@ -8,7 +8,9 @@ use crate::contracts::*;
 use crate::domain::{
     Channel, LoanStatus, MemberStatus, SavingsAccountType, TransactionDirection, TransactionStatus,
 };
-use crate::importer::{MIGRATED_LOAN, MIGRATED_SAVINGS};
+// Keep recognizing transaction types already stored by older workbook imports.
+const MIGRATED_SAVINGS: &str = "MIGRATED_SAVINGS";
+const MIGRATED_LOAN: &str = "MIGRATED_LOAN";
 
 macro_rules! try_column {
     ($row:expr, $column:literal, $ty:ty) => {
@@ -302,4 +304,37 @@ pub(crate) async fn get_cash_book(
         closing_balance: balance,
         rows: cash_rows,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retains_legacy_transactions_without_showing_monthly_imports_as_recent_activity() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+            for (id, transaction_type, channel) in [
+                ("legacy-savings", "MIGRATED_SAVINGS", "POTONGAN"),
+                ("legacy-loan", "MIGRATED_LOAN", "POTONGAN"),
+                ("legacy-cash", "MIGRATED_CASH", "KAS"),
+                ("legacy-opening", "OPENING_SAVINGS", "NON_KAS"),
+            ] {
+                sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, transaction_type, channel, description, reference, direction, amount, actor) VALUES (?, 'default', '2026-09-01', '01 Sep 2026', '00:00', '-', ?, ?, 'Existing import', ?, 'Masuk', 1000, 'Import Excel 2026')")
+                    .bind(id).bind(transaction_type).bind(channel).bind(id)
+                    .execute(&pool).await.unwrap();
+            }
+            let snapshot = get_app_snapshot("default", &pool).await.unwrap();
+            assert_eq!(snapshot.transactions.len(), 1);
+            assert_eq!(snapshot.transactions[0].id, "legacy-cash");
+            let book = get_cash_book("default", 2026, "KAS", &pool).await.unwrap();
+            assert_eq!(book.rows.len(), 1);
+            assert_eq!(book.rows[0].transaction.id, "legacy-cash");
+            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transactions")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(count, 4);
+        });
+    }
 }

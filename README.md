@@ -1,8 +1,9 @@
 # Koperasi Bina Sejahtera
 
 Aplikasi operasional desktop berbasis Vue 3 + Tauri untuk mengelola anggota,
-simpanan, pinjaman, pembayaran anggota, buku kas, rekonsiliasi, migrasi Excel, dan
-parameter administrasi.
+simpanan, pinjaman, pembayaran anggota, dan buku kas. Menu utama menyediakan
+empat halaman: Buku kas, Simpanan, Pinjaman, dan Anggota, dengan detail anggota
+yang dapat dibuka dari daftar anggota.
 
 ## Target desktop
 
@@ -46,9 +47,10 @@ di `%APPDATA%\com.fikryfahrezy.koperasi\koperasi-v2.db`.
   reversal memakai database transaction agar seluruh posting commit atau
   rollback bersama-sama.
 
-Aplikasi langsung membuka dashboard operasional dan tidak memerlukan
-proses login. Seluruh mutasi operasional disimpan oleh backend Rust ke database
+Aplikasi membuka tab baru untuk memilih modul dari menu utama dan tidak
+memerlukan proses login. Seluruh mutasi operasional disimpan oleh backend Rust ke database
 SQLite lokal di direktori data aplikasi; frontend Vue hanya memanggil command
 Tauri dan menampilkan snapshot ledger. Posting pembayaran dan reversal dijalankan
-secara atomik serta direkam pada audit trail. Data awal dan angka rekonsiliasi
-mengacu pada workbook 2026 di folder `docs/`.
+secara atomik serta direkam pada audit trail. Entrypoint backend hanya melayani modul aktif. Impor workbook dan perubahan
+parameter administrasi telah dihapus; data hasil impor yang sudah tersimpan
+tetap dibaca dari ledger, dan parameter keuangan tetap tersedia untuk Buku kas.

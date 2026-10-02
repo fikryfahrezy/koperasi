@@ -13,36 +13,24 @@ pub(crate) fn run() {
             app.manage(AppState { db: pool });
             Ok(())
         })
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_log::Builder::new().build())
-        .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
-        .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_upload::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
-        .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_persisted_scope::init())
-        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             crate::commands::list_companies,
             crate::commands::get_app_snapshot,
             crate::commands::get_monthly_ledger,
             crate::commands::get_cash_book,
             crate::commands::post_cash_entry,
-            crate::commands::import_workbook,
             crate::commands::add_member,
             crate::commands::preview_loan,
             crate::commands::create_loan,
-            crate::commands::disburse_loan,
             crate::commands::post_savings_transaction,
             crate::commands::post_payment,
             crate::commands::reverse_transaction,
-            crate::commands::get_admin_state,
-            crate::commands::save_financial_parameters
+            crate::commands::get_financial_parameters
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

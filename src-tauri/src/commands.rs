@@ -9,11 +9,10 @@ use tauri::State;
 use crate::{
     application,
     contracts::{
-        AddMemberInput, AdminStateDto, AppSnapshot, CashBookDto, CashEntryInput, CompanyDto,
-        CreateLoanInput, DisburseLoanInput, LoanPreview, MonthlyLedgerDto, PaymentInput,
-        ReverseTransactionInput, SaveParametersInput, SavingsTransactionInput,
+        AddMemberInput, AppSnapshot, CashBookDto, CashEntryInput, CompanyDto, CreateLoanInput,
+        FinancialParametersDto, LoanPreview, MonthlyLedgerDto, PaymentInput,
+        ReverseTransactionInput, SavingsTransactionInput,
     },
-    importer,
     state::AppState,
 };
 
@@ -59,15 +58,6 @@ pub(crate) async fn post_cash_entry(
 }
 
 #[tauri::command]
-pub(crate) async fn import_workbook(
-    path: String,
-    company_id: String,
-    state: State<'_, AppState>,
-) -> Result<AppSnapshot, String> {
-    importer::import_workbook(path, &company_id, &state.db).await
-}
-
-#[tauri::command]
 pub(crate) async fn add_member(
     input: AddMemberInput,
     company_id: String,
@@ -92,15 +82,6 @@ pub(crate) async fn create_loan(
     state: State<'_, AppState>,
 ) -> Result<AppSnapshot, String> {
     application::create_loan(input, &company_id, &state.db).await
-}
-
-#[tauri::command]
-pub(crate) async fn disburse_loan(
-    input: DisburseLoanInput,
-    company_id: String,
-    state: State<'_, AppState>,
-) -> Result<AppSnapshot, String> {
-    application::disburse_loan(input, &company_id, &state.db).await
 }
 
 #[tauri::command]
@@ -131,18 +112,9 @@ pub(crate) async fn reverse_transaction(
 }
 
 #[tauri::command]
-pub(crate) async fn get_admin_state(
+pub(crate) async fn get_financial_parameters(
     company_id: String,
     state: State<'_, AppState>,
-) -> Result<AdminStateDto, String> {
-    application::get_admin_state(&company_id, &state.db).await
-}
-
-#[tauri::command]
-pub(crate) async fn save_financial_parameters(
-    input: SaveParametersInput,
-    company_id: String,
-    state: State<'_, AppState>,
-) -> Result<AdminStateDto, String> {
-    application::save_financial_parameters(input, &company_id, &state.db).await
+) -> Result<FinancialParametersDto, String> {
+    application::get_financial_parameters(&company_id, &state.db).await
 }

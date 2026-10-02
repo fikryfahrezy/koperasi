@@ -2,7 +2,7 @@
 //!
 //! Tidak ada tabel khusus: setiap bulan diturunkan dengan menjumlahkan komponen
 //! transaksi yang berlaku (view `effective_components`) per tanggal. Riwayat 2026 hasil migrasi juga
-//! tersimpan sebagai transaksi (lihat `importer::seed_history_transactions`).
+//! tetap dibaca dari transaksi yang sudah tersimpan.
 //! Kewajiban setor dan tunggakan pinjaman dihitung dari syarat pinjaman.
 
 use std::collections::{BTreeSet, HashMap};

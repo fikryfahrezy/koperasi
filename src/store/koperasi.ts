@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
 import { computed, effectScope, reactive, ref, watch } from "vue";
 import { DEFAULT_LOCALE, translate } from "../i18n";
 
@@ -243,20 +242,6 @@ interface PaymentInput {
 
 type OperationalTimestamp = ReturnType<typeof operationalTimestamp>;
 
-export interface AuditEvent {
-  id: number;
-  entityType: string;
-  entityId: string;
-  action: string;
-  actor: string;
-  createdAt: string;
-}
-
-interface AdminState {
-  parameters: FinancialParameters;
-  auditEvents: AuditEvent[];
-}
-
 interface AppSnapshot {
   members: Member[];
   savingsBalances: SavingsBalance[];
@@ -278,7 +263,6 @@ export interface ToastMessage {
 }
 
 const members = reactive<Member[]>([]);
-const savingsBalances = reactive<SavingsBalance[]>([]);
 const loans = reactive<Loan[]>([]);
 const transactions = reactive<Transaction[]>([]);
 const totals = {
@@ -290,15 +274,12 @@ const totals = {
 const loading = ref(true);
 const refreshing = ref(false);
 const backendError = ref<string | null>(null);
-const admin = reactive<AdminState>({
-  parameters: {
-    principalSavings: 0,
-    mandatorySavings: 0,
-    provisionRate: 0,
-    annualRate: 0,
-    effectiveDate: "",
-  },
-  auditEvents: [],
+const financialParameters = reactive<FinancialParameters>({
+  principalSavings: 0,
+  mandatorySavings: 0,
+  provisionRate: 0,
+  annualRate: 0,
+  effectiveDate: "",
 });
 const toasts = ref<ToastMessage[]>([]);
 const snapshotVersion = ref(0);
@@ -317,16 +298,13 @@ const command = {
   getMonthlyLedger: "get_monthly_ledger",
   getCashBook: "get_cash_book",
   postCashEntry: "post_cash_entry",
-  importWorkbook: "import_workbook",
   addMember: "add_member",
   previewLoan: "preview_loan",
   createLoan: "create_loan",
-  disburseLoan: "disburse_loan",
   postSavingsTransaction: "post_savings_transaction",
   postPayment: "post_payment",
   reverseTransaction: "reverse_transaction",
-  getAdminState: "get_admin_state",
-  saveFinancialParameters: "save_financial_parameters",
+  getFinancialParameters: "get_financial_parameters",
 } as const;
 
 const backend = {
@@ -353,11 +331,6 @@ const backend = {
       input,
       companyId: selectedCompanyId.value,
     }),
-  importWorkbook: (path: string) =>
-    invoke<AppSnapshot>(command.importWorkbook, {
-      path,
-      companyId: selectedCompanyId.value,
-    }),
   addMember: (input: AddMemberInput & ChannelInput & OperationalTimestamp) =>
     invoke<AppSnapshot>(command.addMember, {
       input,
@@ -374,13 +347,6 @@ const backend = {
     },
   ) =>
     invoke<AppSnapshot>(command.createLoan, {
-      input,
-      companyId: selectedCompanyId.value,
-    }),
-  disburseLoan: (
-    input: { loanId: string } & ChannelInput & OperationalTimestamp,
-  ) =>
-    invoke<AppSnapshot>(command.disburseLoan, {
       input,
       companyId: selectedCompanyId.value,
     }),
@@ -401,13 +367,8 @@ const backend = {
       input,
       companyId: selectedCompanyId.value,
     }),
-  getAdminState: () =>
-    invoke<AdminState>(command.getAdminState, {
-      companyId: selectedCompanyId.value,
-    }),
-  saveFinancialParameters: (input: FinancialParameters) =>
-    invoke<AdminState>(command.saveFinancialParameters, {
-      input,
+  getFinancialParameters: () =>
+    invoke<FinancialParameters>(command.getFinancialParameters, {
       companyId: selectedCompanyId.value,
     }),
 };
@@ -429,51 +390,6 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function yearFrom(value: string) {
-  const match = value.match(/(?:19|20)\d{2}/);
-  return match ? Number(match[0]) : null;
-}
-
-const yearTransactions = computed(() =>
-  transactions.filter(
-    (transaction) => yearFrom(transaction.date) === selectedYear.value,
-  ),
-);
-// Pinjaman yang direalisasi pada tahun terpilih, ditambah pinjaman lama yang
-// masih berjalan, agar outstanding sama dengan saldo di workbook.
-const yearLoans = computed(() =>
-  loans.filter((loan) => {
-    const year = yearFrom(loan.realizationDate);
-    if (year === null) return selectedYear.value === currentYear;
-    return (
-      year === selectedYear.value ||
-      (year < selectedYear.value && loan.status !== LoanStatus.PaidOff)
-    );
-  }),
-);
-const yearHasData = computed(
-  () => yearTransactions.value.length > 0 || yearLoans.value.length > 0,
-);
-const yearMembers = computed(() => (yearHasData.value ? members : []));
-const yearTotals = computed(() => ({
-  // Saldo kas tunai dari buku besar (seluruh transaksi channel Kas).
-  cash: totals.cash.value,
-  savings: yearMembers.value.reduce(
-    (sum, member) => sum + memberSavings(member, savingsBalances),
-    0,
-  ),
-  loanPortfolio: yearLoans.value
-    .filter(
-      (loan) =>
-        loan.status === LoanStatus.Active ||
-        loan.status === LoanStatus.NeedsReview,
-    )
-    .reduce((sum, loan) => sum + loan.balance, 0),
-  members: yearMembers.value.filter(
-    (member) => member.status === MemberStatus.Active,
-  ).length,
-}));
-
 function notify(
   title: string,
   message: string,
@@ -488,11 +404,6 @@ function notify(
 
 function applySnapshot(snapshot: AppSnapshot) {
   members.splice(0, members.length, ...snapshot.members);
-  savingsBalances.splice(
-    0,
-    savingsBalances.length,
-    ...snapshot.savingsBalances,
-  );
   loans.splice(0, loans.length, ...snapshot.loans);
   transactions.splice(0, transactions.length, ...snapshot.transactions);
   totals.cash.value = snapshot.totals.cash;
@@ -560,7 +471,7 @@ async function selectCompany(companyId: string) {
   loading.value = true;
   try {
     applySnapshot(await backend.getAppSnapshot());
-    await loadAdminState();
+    await loadFinancialParameters();
     return true;
   } catch (error) {
     backendError.value = errorMessage(error);
@@ -572,30 +483,6 @@ async function selectCompany(companyId: string) {
     return false;
   } finally {
     loading.value = false;
-  }
-}
-
-async function importWorkbook() {
-  const path = await open({
-    title: translate("dialog.workbookPicker"),
-    multiple: false,
-    filters: [{ name: "Excel Macro Workbook", extensions: ["xlsm", "xlsx"] }],
-  });
-  if (!path || Array.isArray(path)) return false;
-  try {
-    applySnapshot(await backend.importWorkbook(path));
-    notify(
-      translate("notifications.workbookImported"),
-      translate("notifications.workbookImportedMessage"),
-    );
-    return true;
-  } catch (error) {
-    notify(
-      translate("notifications.workbookImportFailed"),
-      errorMessage(error),
-      "warning",
-    );
-    return false;
   }
 }
 
@@ -686,30 +573,6 @@ function operationalTimestamp(businessDate = todayIso()) {
   };
 }
 
-async function disburseLoan(loanId: string, options: PostingOptions = {}) {
-  try {
-    applySnapshot(
-      await backend.disburseLoan({
-        loanId,
-        channel: options.channel ?? Channel.Cash,
-        ...operationalTimestamp(options.businessDate),
-      }),
-    );
-    notify(
-      translate("notifications.loanDisbursed"),
-      translate("notifications.loanDisbursedMessage"),
-    );
-    return true;
-  } catch (error) {
-    notify(
-      translate("notifications.loanDisbursementFailed"),
-      errorMessage(error),
-      "warning",
-    );
-    return false;
-  }
-}
-
 async function postSavingsTransaction(
   input: SavingsTransactionInput,
   options: PostingOptions = {},
@@ -764,37 +627,13 @@ async function postPayment(input: PaymentInput, options: PostingOptions = {}) {
   }
 }
 
-async function loadAdminState() {
+async function loadFinancialParameters() {
   try {
-    const state = await backend.getAdminState();
-    Object.assign(admin.parameters, state.parameters);
-    admin.auditEvents.splice(0, admin.auditEvents.length, ...state.auditEvents);
+    Object.assign(financialParameters, await backend.getFinancialParameters());
     return true;
   } catch (error) {
     notify(
-      translate("notifications.adminLoadFailed"),
-      errorMessage(error),
-      "warning",
-    );
-    return false;
-  }
-}
-
-async function saveFinancialParameters(input: FinancialParameters) {
-  try {
-    const state = await backend.saveFinancialParameters(input);
-    Object.assign(admin.parameters, state.parameters);
-    admin.auditEvents.splice(0, admin.auditEvents.length, ...state.auditEvents);
-    notify(
-      translate("notifications.parametersSaved"),
-      translate("notifications.parametersSavedMessage", {
-        date: input.effectiveDate,
-      }),
-    );
-    return true;
-  } catch (error) {
-    notify(
-      translate("notifications.parametersSaveFailed"),
+      translate("notifications.parametersLoadFailed"),
       errorMessage(error),
       "warning",
     );
@@ -949,76 +788,32 @@ export function formatCurrency(value: number, compact = false) {
   }).format(value);
 }
 
-export function savingsBalance(
-  memberId: string,
-  accountType: SavingsAccountType,
-  balances: SavingsBalance[],
-) {
-  return (
-    balances.find(
-      (balance) =>
-        balance.memberId === memberId && balance.accountType === accountType,
-    )?.balance ?? 0
-  );
-}
-
-export function memberSavings(member: Member, balances: SavingsBalance[]) {
-  return (
-    member.principalSavings +
-    savingsBalance(member.id, SavingsAccountType.Mandatory, balances) +
-    savingsBalance(member.id, SavingsAccountType.Voluntary, balances)
-  );
-}
-
-export function memberLoanBalance(memberId: string, memberLoans: Loan[]) {
-  return memberLoans
-    .filter(
-      (loan) =>
-        loan.memberId === memberId &&
-        (loan.status === LoanStatus.Active ||
-          loan.status === LoanStatus.NeedsReview),
-    )
-    .reduce((sum, loan) => sum + loan.balance, 0);
-}
-
 export const useKoperasiStore = () => ({
   members,
-  savingsBalances,
   loans,
   transactions,
   totals,
   loading,
   refreshing,
   backendError,
-  admin,
+  financialParameters,
   toasts,
   companies,
   selectedCompanyId,
   selectedYear,
   yearOptions,
-  yearTransactions,
-  yearLoans,
-  yearMembers,
-  yearTotals,
-  yearHasData,
   initialize,
   selectCompany,
   refresh,
   notify,
-  importWorkbook,
   addMember,
   previewLoan,
   createLoan,
-  disburseLoan,
   postSavingsTransaction,
   postPayment,
   reverseTransaction,
   postCashEntry,
   getCashBook,
   snapshotVersion,
-  loadAdminState,
-  saveFinancialParameters,
-  activeLoans: computed(() =>
-    loans.filter((loan) => loan.status === LoanStatus.Active),
-  ),
+  loadFinancialParameters,
 });

@@ -133,14 +133,6 @@ pub(crate) fn timestamp_id(prefix: &str) -> String {
     format!("{prefix}-{millis}-{sequence}")
 }
 
-pub(crate) fn normalize_name(value: &str) -> String {
-    value
-        .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric())
-        .flat_map(char::to_uppercase)
-        .collect()
-}
-
 fn date_parts(value: &str) -> Result<(i64, i64, i64), String> {
     let bytes = value.as_bytes();
     if bytes.len() != 10

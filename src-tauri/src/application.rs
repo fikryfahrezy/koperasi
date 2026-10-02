@@ -1,18 +1,18 @@
 //! Framework-independent application-service facade.
 
-mod admin;
 mod ledger;
 mod loans;
 mod members;
+mod parameters;
 pub(crate) mod posting;
 mod read_model;
 mod savings;
 mod transactions;
 
-pub(crate) use admin::{get_admin_state, save_financial_parameters};
 pub(crate) use ledger::get_monthly_ledger;
-pub(crate) use loans::{create_loan, disburse_loan, preview_loan};
+pub(crate) use loans::{create_loan, preview_loan};
 pub(crate) use members::add_member;
+pub(crate) use parameters::get_financial_parameters;
 pub(crate) use read_model::{get_app_snapshot, get_cash_book};
 pub(crate) use savings::{post_payment, post_savings_transaction};
 pub(crate) use transactions::{post_cash_entry, reverse_transaction};
@@ -42,7 +42,7 @@ mod tests {
     use super::*;
     use crate::contracts::{
         AddMemberInput, CashEntryInput, CreateLoanInput, DisbursementInput, OpeningSavingsInput,
-        PaymentInput, ReverseTransactionInput, SaveParametersInput, SavingsTransactionInput,
+        PaymentInput, ReverseTransactionInput, SavingsTransactionInput,
     };
     use crate::domain::{InterestType, SavingsAccountType, TransactionStatus};
 
@@ -146,19 +146,21 @@ mod tests {
             assert!(invalid_account_type.is_err());
 
             for company_id in ["default", "testing"] {
-                save_financial_parameters(
-                    SaveParametersInput {
-                        principal_savings: 50_000,
-                        mandatory_savings: 50_000,
-                        provision_rate: 1.0,
-                        annual_rate: 24.0,
-                        effective_date: "2026-02-01".into(),
-                    },
-                    company_id,
-                    &pool,
-                )
-                .await
-                .unwrap();
+                for (key, value) in [
+                    ("SAVINGS_PRINCIPAL", 50_000.0),
+                    ("SAVINGS_MONTHLY", 50_000.0),
+                    ("LOAN_PROVISION_RATE", 0.01),
+                    ("LOAN_ANNUAL_RATE", 0.24),
+                ] {
+                    sqlx::query("INSERT INTO parameters (company_id, parameter_key, value, effective_date, created_by) VALUES (?, ?, ?, '2026-02-01', 'Test fixture')")
+                        .bind(company_id).bind(key).bind(value)
+                        .execute(&pool).await.unwrap();
+                }
+                let parameters = get_financial_parameters(company_id, &pool).await.unwrap();
+                assert_eq!(parameters.mandatory_savings, 50_000);
+                assert_eq!(parameters.annual_rate, 24.0);
+                assert_eq!(parameters.provision_rate, 1.0);
+                assert_eq!(parameters.effective_date, "2026-02-01");
             }
 
             // Referensi boleh sama antar perusahaan.
