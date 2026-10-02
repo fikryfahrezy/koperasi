@@ -1,6 +1,6 @@
 //! Financial parameters needed by operational forms.
 
-use crate::contracts::FinancialParametersDto;
+use crate::{contracts::FinancialParametersDto, domain::ParameterKey};
 use sqlx::{Row, SqlitePool};
 use std::collections::HashMap;
 
@@ -17,8 +17,11 @@ pub(crate) async fn get_financial_parameters(
     let mut effective_date = String::new();
     for row in parameter_rows {
         values.insert(
-            row.try_get::<String, _>("parameter_key")
-                .map_err(|error| error.to_string())?,
+            ParameterKey::try_from(
+                row.try_get::<String, _>("parameter_key")
+                    .map_err(|error| error.to_string())?
+                    .as_str(),
+            )?,
             row.try_get::<f64, _>("value")
                 .map_err(|error| error.to_string())?,
         );
@@ -27,10 +30,24 @@ pub(crate) async fn get_financial_parameters(
             .map_err(|error| error.to_string())?;
     }
     Ok(FinancialParametersDto {
-        principal_savings: values.get("SAVINGS_PRINCIPAL").copied().unwrap_or(0.0) as i64,
-        mandatory_savings: values.get("SAVINGS_MONTHLY").copied().unwrap_or(0.0) as i64,
-        provision_rate: values.get("LOAN_PROVISION_RATE").copied().unwrap_or(0.0) * 100.0,
-        annual_rate: values.get("LOAN_ANNUAL_RATE").copied().unwrap_or(0.0) * 100.0,
+        principal_savings: values
+            .get(&ParameterKey::PrincipalSavings)
+            .copied()
+            .unwrap_or(0.0) as i64,
+        mandatory_savings: values
+            .get(&ParameterKey::MandatorySavings)
+            .copied()
+            .unwrap_or(0.0) as i64,
+        provision_rate: values
+            .get(&ParameterKey::LoanProvisionRate)
+            .copied()
+            .unwrap_or(0.0)
+            * 100.0,
+        annual_rate: values
+            .get(&ParameterKey::LoanAnnualRate)
+            .copied()
+            .unwrap_or(0.0)
+            * 100.0,
         effective_date,
     })
 }

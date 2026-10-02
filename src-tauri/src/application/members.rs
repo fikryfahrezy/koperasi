@@ -8,7 +8,8 @@ use super::savings::money_channel;
 use crate::{
     contracts::{AddMemberInput, AppSnapshot},
     domain::{
-        timestamp_id, MemberStatus, SavingsAccountStatus, SavingsAccountType, TransactionDirection,
+        timestamp_id, AuditAction, AuditEntityType, ComponentType, MemberStatus,
+        SavingsAccountStatus, SavingsAccountType, TransactionDirection, TransactionType,
     },
 };
 
@@ -94,7 +95,7 @@ pub(crate) async fn add_member(
         .iter()
         .map(|(kind, amount)| {
             Component::new(
-                "SAVINGS_DEPOSIT",
+                ComponentType::SavingsDeposit,
                 format!("Setoran simpanan {}", kind.as_str().to_lowercase()),
                 *amount,
             )
@@ -111,7 +112,7 @@ pub(crate) async fn add_member(
             display_time: &input.display_time,
             member_id: Some(&id),
             member_name: name,
-            transaction_type: "SAVINGS_DEPOSIT",
+            transaction_type: TransactionType::SavingsDeposit,
             channel,
             description,
             reference: &reference,
@@ -125,18 +126,18 @@ pub(crate) async fn add_member(
     audit(
         &mut db,
         company_id,
-        "TRANSACTION",
+        AuditEntityType::Transaction,
         &transaction_id,
-        "POSTED",
+        AuditAction::Posted,
         serde_json::json!({"openingSavings": opening_savings.iter().map(|(kind, amount)| (kind.as_str(), amount)).collect::<Vec<_>>(), "amount": amount, "reference": reference}),
     )
     .await?;
     audit(
         &mut db,
         company_id,
-        "MEMBER",
+        AuditEntityType::Member,
         &id,
-        "CREATED",
+        AuditAction::Created,
         serde_json::json!({"name": name}),
     )
     .await?;

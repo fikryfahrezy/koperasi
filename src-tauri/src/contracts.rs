@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    InterestType, LoanStatus, MemberStatus, TransactionDirection, TransactionStatus,
+    Channel, InterestType, LoanStatus, MemberStatus, SavingsAccountType, TransactionDirection,
+    TransactionStatus, TransactionType,
 };
 
 #[derive(Serialize)]
@@ -27,7 +28,7 @@ pub(crate) struct MemberDto {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SavingsBalanceDto {
     pub(crate) member_id: String,
-    pub(crate) account_type: String,
+    pub(crate) account_type: SavingsAccountType,
     pub(crate) balance: i64,
 }
 
@@ -62,8 +63,8 @@ pub(crate) struct TransactionDto {
     pub(crate) date: String,
     pub(crate) time: String,
     pub(crate) member_name: String,
-    pub(crate) transaction_type: String,
-    pub(crate) channel: String,
+    pub(crate) transaction_type: TransactionType,
+    pub(crate) channel: Channel,
     pub(crate) description: String,
     pub(crate) reference: String,
     pub(crate) direction: TransactionDirection,
@@ -274,7 +275,7 @@ pub(crate) struct CashBookRowDto {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CashBookDto {
-    pub(crate) channel: String,
+    pub(crate) channel: Channel,
     pub(crate) year: i32,
     pub(crate) opening_balance: i64,
     pub(crate) total_in: i64,

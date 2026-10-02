@@ -30,6 +30,7 @@ import {
   todayIso,
   TransactionDirection,
   TransactionStatus,
+  TransactionType,
   useKoperasiStore,
 } from "../store/koperasi";
 
@@ -85,13 +86,19 @@ const showDate = (index: number) =>
   index === 0 || rows.value[index - 1].date !== rows.value[index].date;
 const isExcluded = (item: CashBookRow) =>
   item.status === TransactionStatus.Reversed ||
-  item.transactionType === "REVERSAL";
+  item.transactionType === TransactionType.Reversal;
 
 // --- Form catat transaksi ---------------------------------------------------
-type Category = "payment" | "savings" | "loan" | "other";
+const Category = {
+  Payment: "payment",
+  Savings: "savings",
+  Loan: "loan",
+  Other: "other",
+} as const;
+type Category = (typeof Category)[keyof typeof Category];
 const modalOpen = ref(false);
 const submitting = ref(false);
-const category = ref<Category>("payment");
+const category = ref<Category>(Category.Payment);
 const posting = reactive({ businessDate: todayIso() });
 const paymentForm = reactive({
   memberId: "",
@@ -190,7 +197,7 @@ watch(
 );
 
 function openModal() {
-  category.value = "payment";
+  category.value = Category.Payment;
   posting.businessDate = todayIso();
   Object.assign(paymentForm, {
     memberId: "",
@@ -227,12 +234,14 @@ function setSavingsMovementDefaults() {
 
 const submitLabel = computed(
   () =>
-    ({
-      payment: `Catat setoran ${formatCurrency(paymentTotal.value)}`,
-      savings: `Catat ${savingsForm.movement.toLowerCase()}`,
-      loan: "Catat pencairan",
-      other: "Catat",
-    })[category.value],
+    (
+      ({
+        [Category.Payment]: `Catat setoran ${formatCurrency(paymentTotal.value)}`,
+        [Category.Savings]: `Catat ${savingsForm.movement.toLowerCase()}`,
+        [Category.Loan]: "Catat pencairan",
+        [Category.Other]: "Catat",
+      }) satisfies Record<Category, string>
+    )[category.value],
 );
 
 async function submit() {
@@ -240,7 +249,7 @@ async function submit() {
   submitting.value = true;
   try {
     let saved = false;
-    if (category.value === "payment") {
+    if (category.value === Category.Payment) {
       if (!paymentForm.memberId || paymentTotal.value <= 0) return;
       saved = await postPayment(
         {
@@ -253,13 +262,13 @@ async function submit() {
         },
         options,
       );
-    } else if (category.value === "savings") {
+    } else if (category.value === Category.Savings) {
       if (!savingsForm.memberId || savingsForm.amount <= 0) return;
       saved = await postSavingsTransaction(
         { ...savingsForm, reference: "" },
         options,
       );
-    } else if (category.value === "loan") {
+    } else if (category.value === Category.Loan) {
       if (!loanForm.memberId || loanForm.plafond <= 0) return;
       saved = await createLoan({ ...loanForm }, options);
     } else {
@@ -397,22 +406,30 @@ async function refreshPage() {
           <legend>Jenis transaksi</legend>
           <div class="movement-options movement-options--four">
             <label class="movement-option">
-              <input v-model="category" type="radio" value="payment" />
+              <input
+                v-model="category"
+                type="radio"
+                :value="Category.Payment"
+              />
               <ReceiptText :size="18" />
               <span>Setoran anggota</span>
             </label>
             <label class="movement-option">
-              <input v-model="category" type="radio" value="savings" />
+              <input
+                v-model="category"
+                type="radio"
+                :value="Category.Savings"
+              />
               <Coins :size="18" />
               <span>Simpanan</span>
             </label>
             <label class="movement-option">
-              <input v-model="category" type="radio" value="loan" />
+              <input v-model="category" type="radio" :value="Category.Loan" />
               <HandCoins :size="18" />
               <span>Pencairan pinjaman</span>
             </label>
             <label class="movement-option">
-              <input v-model="category" type="radio" value="other" />
+              <input v-model="category" type="radio" :value="Category.Other" />
               <Wallet :size="18" />
               <span>Kas lainnya</span>
             </label>
@@ -424,7 +441,7 @@ async function refreshPage() {
           <input v-model="posting.businessDate" type="date" required />
         </label>
 
-        <template v-if="category === 'payment'">
+        <template v-if="category === Category.Payment">
           <label class="field">
             <span>Anggota</span>
             <UiSelect
@@ -480,7 +497,7 @@ async function refreshPage() {
           </div>
         </template>
 
-        <template v-else-if="category === 'savings'">
+        <template v-else-if="category === Category.Savings">
           <fieldset class="movement-field">
             <legend>Arah</legend>
             <div class="movement-options">
@@ -539,7 +556,7 @@ async function refreshPage() {
           </div>
         </template>
 
-        <template v-else-if="category === 'loan'">
+        <template v-else-if="category === Category.Loan">
           <label class="field">
             <span>Anggota</span>
             <UiSelect
@@ -685,7 +702,7 @@ async function refreshPage() {
         </div>
         <div v-if="isExcluded(selected)" class="audit-note">
           {{
-            selected.transactionType === "REVERSAL"
+            selected.transactionType === TransactionType.Reversal
               ? "Baris ini adalah reversal."
               : "Transaksi ini sudah dibalik."
           }}

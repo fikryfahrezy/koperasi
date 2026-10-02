@@ -10,7 +10,10 @@ use super::read_model::get_app_snapshot;
 use super::savings::money_channel;
 use crate::{
     contracts::{AppSnapshot, CashEntryInput, ReverseTransactionInput},
-    domain::{timestamp_id, Channel, TransactionDirection},
+    domain::{
+        timestamp_id, AuditAction, AuditEntityType, Channel, ComponentType, TransactionDirection,
+        TransactionType,
+    },
 };
 
 /// Koreksi tanpa mengubah data: transaksi baru berlawanan arah yang menunjuk ke
@@ -48,26 +51,27 @@ pub(crate) async fn reverse_transaction(
         .map_err(|error| error.to_string())?
     {
         let component_type: String = component.try_get("component_type").map_err(|error| error.to_string())?;
+        let component_type = ComponentType::try_from(component_type.as_str())?;
         let label: String = component.try_get("label").map_err(|error| error.to_string())?;
         let amount: i64 = component.try_get("amount").map_err(|error| error.to_string())?;
         let loan_id: Option<String> = component.try_get("loan_id").map_err(|error| error.to_string())?;
         let savings_account_id: Option<String> = component.try_get("savings_account_id").map_err(|error| error.to_string())?;
         // Membatalkan uang masuk tidak boleh membuat saldo menjadi negatif.
         if let Some(account_id) = &savings_account_id {
-            if component_type != "SAVINGS_WITHDRAWAL"
+            if component_type != ComponentType::SavingsWithdrawal
                 && savings_balance(&mut db, company_id, account_id).await? < amount
             {
                 return Err("Reversal ditolak karena saldo simpanan tidak mencukupi.".into());
             }
         }
         if let Some(loan_id) = &loan_id {
-            if matches!(component_type.as_str(), "LOAN_DISBURSEMENT" | "LOAN_OPENING")
+            if matches!(component_type, ComponentType::LoanDisbursement | ComponentType::LoanOpening)
                 && loan_balance(&mut db, company_id, loan_id).await? < amount
             {
                 return Err("Reversal ditolak karena pinjaman sudah memiliki angsuran.".into());
             }
         }
-        let mut reversal = Component::new("REVERSAL", format!("Reversal · {label}"), amount);
+        let mut reversal = Component::new(ComponentType::Reversal, format!("Reversal · {label}"), amount);
         reversal.loan_id = loan_id;
         reversal.savings_account_id = savings_account_id;
         components.push(reversal);
@@ -86,7 +90,7 @@ pub(crate) async fn reverse_transaction(
             display_time: &input.display_time,
             member_id: member_id.as_deref(),
             member_name: &get("member_name")?,
-            transaction_type: "REVERSAL",
+            transaction_type: TransactionType::Reversal,
             channel,
             description: &description,
             reference: &reference,
@@ -100,9 +104,9 @@ pub(crate) async fn reverse_transaction(
     audit(
         &mut db,
         company_id,
-        "TRANSACTION",
+        AuditEntityType::Transaction,
         id,
-        "REVERSED",
+        AuditAction::Reversed,
         serde_json::json!({"reversalId": reversal_id}),
     )
     .await?;
@@ -140,9 +144,9 @@ pub(crate) async fn post_cash_entry(
         input.description.trim().to_string()
     };
     let transaction_type = if direction == TransactionDirection::In {
-        "CASH_INCOME"
+        TransactionType::CashIncome
     } else {
-        "CASH_EXPENSE"
+        TransactionType::CashExpense
     };
     append(
         &mut db,
@@ -161,16 +165,20 @@ pub(crate) async fn post_cash_entry(
             direction,
             actor: APP_ACTOR,
             reversed_transaction_id: None,
-            components: vec![Component::new("CASH_OTHER", category, input.amount)],
+            components: vec![Component::new(
+                ComponentType::CashOther,
+                category,
+                input.amount,
+            )],
         },
     )
     .await?;
     audit(
         &mut db,
         company_id,
-        "TRANSACTION",
+        AuditEntityType::Transaction,
         &id,
-        "POSTED",
+        AuditAction::Posted,
         serde_json::json!({"category": category, "amount": input.amount, "channel": channel.as_str()}),
     )
     .await?;
