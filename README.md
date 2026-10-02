@@ -35,7 +35,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked --offline
 ```
 
 Database lokal dibuat otomatis pada startup pertama. Di Windows lokasinya berada
-di `%APPDATA%\com.fikryfahrezy.koperasi\koperasi-v2.db`.
+di `%APPDATA%\com.fikryfahrezy.koperasi\koperasi.db`.
 
 ## Arsitektur transaksi
 

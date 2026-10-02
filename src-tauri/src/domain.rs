@@ -7,7 +7,7 @@ use std::{
 
 macro_rules! string_enum {
     ($name:ident { $($variant:ident => $value:literal),+ $(,)? }) => {
-        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
         pub(crate) enum $name {
             $($variant),+
         }
@@ -105,6 +105,72 @@ string_enum!(TransactionStatus {
 string_enum!(PeriodStatus {
     Open => "OPEN",
     Locked => "LOCKED",
+});
+
+string_enum!(ComponentType {
+    SavingsOpening => "SAVINGS_OPENING",
+    SavingsDeposit => "SAVINGS_DEPOSIT",
+    SavingsWithdrawal => "SAVINGS_WITHDRAWAL",
+    SavingsShu => "SAVINGS_SHU",
+    LoanOpening => "LOAN_OPENING",
+    LoanOpeningArrearsPrincipal => "LOAN_OPENING_ARREARS_PRINCIPAL",
+    LoanOpeningPrepaidPrincipal => "LOAN_OPENING_PREPAID_PRINCIPAL",
+    LoanOpeningArrearsInterest => "LOAN_OPENING_ARREARS_INTEREST",
+    LoanOpeningPrepaidInterest => "LOAN_OPENING_PREPAID_INTEREST",
+    LoanDisbursement => "LOAN_DISBURSEMENT",
+    LoanPrincipal => "LOAN_PRINCIPAL",
+    LoanInterest => "LOAN_INTEREST",
+    LoanProvision => "LOAN_PROVISION",
+    CashOther => "CASH_OTHER",
+    Reversal => "REVERSAL",
+});
+
+impl ComponentType {
+    pub(crate) const fn is_opening(self) -> bool {
+        matches!(
+            self,
+            Self::SavingsOpening
+                | Self::LoanOpening
+                | Self::LoanOpeningArrearsPrincipal
+                | Self::LoanOpeningPrepaidPrincipal
+                | Self::LoanOpeningArrearsInterest
+                | Self::LoanOpeningPrepaidInterest
+        )
+    }
+}
+
+string_enum!(TransactionType {
+    SavingsDeposit => "SAVINGS_DEPOSIT",
+    SavingsWithdrawal => "SAVINGS_WITHDRAWAL",
+    OpeningSavings => "OPENING_SAVINGS",
+    OpeningLoan => "OPENING_LOAN",
+    MemberPayment => "MEMBER_PAYMENT",
+    LoanDisbursement => "LOAN_DISBURSEMENT",
+    LoanProvision => "LOAN_PROVISION",
+    CashIncome => "CASH_INCOME",
+    CashExpense => "CASH_EXPENSE",
+    Reversal => "REVERSAL",
+});
+
+string_enum!(ParameterKey {
+    PrincipalSavings => "SAVINGS_PRINCIPAL",
+    MandatorySavings => "SAVINGS_MONTHLY",
+    LoanProvisionRate => "LOAN_PROVISION_RATE",
+    LoanAnnualRate => "LOAN_ANNUAL_RATE",
+});
+
+string_enum!(AuditEntityType {
+    Transaction => "TRANSACTION",
+    Member => "MEMBER",
+    Loan => "LOAN",
+});
+
+string_enum!(AuditAction {
+    Posted => "POSTED",
+    Created => "CREATED",
+    DraftCreated => "DRAFT_CREATED",
+    Disbursed => "DISBURSED",
+    Reversed => "REVERSED",
 });
 
 pub(crate) struct LoanCalculation {

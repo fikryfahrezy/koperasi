@@ -44,7 +44,7 @@ mod tests {
         AddMemberInput, CashEntryInput, CreateLoanInput, DisbursementInput, OpeningSavingsInput,
         PaymentInput, ReverseTransactionInput, SavingsTransactionInput,
     };
-    use crate::domain::{InterestType, SavingsAccountType, TransactionStatus};
+    use crate::domain::{Channel, InterestType, SavingsAccountType, TransactionStatus};
 
     const DATE: &str = "2026-09-13";
 
@@ -100,6 +100,15 @@ mod tests {
             assert_eq!(snapshot.savings_balances.len(), 2);
             assert_eq!(snapshot.totals.cash, 150_000);
             assert_eq!(snapshot.totals.savings, 150_000);
+
+            let json = serde_json::to_value(&snapshot).unwrap();
+            assert_eq!(
+                json["transactions"][0]["transactionType"],
+                "SAVINGS_DEPOSIT"
+            );
+            assert_eq!(json["transactions"][0]["channel"], "KAS");
+            assert_eq!(json["savingsBalances"][0]["accountType"], "MANASUKA");
+            assert_eq!(json["savingsBalances"][1]["accountType"], "WAJIB");
 
             let ledger = get_monthly_ledger("default", 2026, &pool).await.unwrap();
             assert_eq!(ledger.periods, vec!["2026-09".to_string()]);
@@ -320,7 +329,7 @@ mod tests {
             assert!(cash_book
                 .rows
                 .iter()
-                .all(|row| row.transaction.channel == "KAS"));
+                .all(|row| row.transaction.channel == Channel::Cash));
 
             assert!(sqlx::query("UPDATE transactions SET amount = 1")
                 .execute(&pool)

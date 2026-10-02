@@ -10,6 +10,21 @@ export const TransactionStatus = {
 export type TransactionStatus =
   (typeof TransactionStatus)[keyof typeof TransactionStatus];
 
+export const TransactionType = {
+  SavingsDeposit: "SAVINGS_DEPOSIT",
+  SavingsWithdrawal: "SAVINGS_WITHDRAWAL",
+  OpeningSavings: "OPENING_SAVINGS",
+  OpeningLoan: "OPENING_LOAN",
+  MemberPayment: "MEMBER_PAYMENT",
+  LoanDisbursement: "LOAN_DISBURSEMENT",
+  LoanProvision: "LOAN_PROVISION",
+  CashIncome: "CASH_INCOME",
+  CashExpense: "CASH_EXPENSE",
+  Reversal: "REVERSAL",
+} as const;
+export type TransactionType =
+  (typeof TransactionType)[keyof typeof TransactionType];
+
 export const LoanStatus = {
   Draft: "Draf",
   Active: "Berjalan",
@@ -57,10 +72,10 @@ export type Channel = (typeof Channel)[keyof typeof Channel];
 export type MoneyChannel = Exclude<Channel, typeof Channel.NonCash>;
 
 export const channelLabels: Record<Channel, string> = {
-  KAS: "Kas",
-  BANK: "Bank",
-  POTONGAN: "Potongan pensiun",
-  NON_KAS: "Saldo awal",
+  [Channel.Cash]: "Kas",
+  [Channel.Bank]: "Bank",
+  [Channel.Deduction]: "Potongan pensiun",
+  [Channel.NonCash]: "Saldo awal",
 };
 
 export const InterestType = {
@@ -149,7 +164,7 @@ export interface Transaction {
   date: string;
   time: string;
   memberName: string;
-  transactionType: string;
+  transactionType: TransactionType;
   channel: Channel;
   description: string;
   reference: string;

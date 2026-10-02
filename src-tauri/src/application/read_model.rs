@@ -7,11 +7,8 @@ use sqlx::{sqlite::SqliteRow, Row, SqlitePool};
 use crate::contracts::*;
 use crate::domain::{
     Channel, LoanStatus, MemberStatus, SavingsAccountType, TransactionDirection, TransactionStatus,
+    TransactionType,
 };
-// Keep recognizing transaction types already stored by older workbook imports.
-const MIGRATED_SAVINGS: &str = "MIGRATED_SAVINGS";
-const MIGRATED_LOAN: &str = "MIGRATED_LOAN";
-
 macro_rules! try_column {
     ($row:expr, $column:literal, $ty:ty) => {
         $row.try_get::<$ty, _>($column)
@@ -37,8 +34,10 @@ fn transaction_dto(
         date: try_column!(row, "display_date"),
         time: try_column!(row, "display_time"),
         member_name: try_column!(row, "member_name"),
-        transaction_type: try_column!(row, "transaction_type"),
-        channel: try_column!(row, "channel"),
+        transaction_type: TransactionType::try_from(
+            try_column!(row, "transaction_type", String).as_str(),
+        )?,
+        channel: Channel::try_from(try_column!(row, "channel", String).as_str())?,
         description: try_column!(row, "description"),
         reference: try_column!(row, "reference"),
         direction: TransactionDirection::try_from(try_column!(row, "direction", String).as_str())?,
@@ -111,7 +110,7 @@ async fn snapshot(company_id: &str, pool: &SqlitePool) -> Result<AppSnapshot, St
     .map(|row| -> Result<SavingsBalanceDto, String> {
         Ok(SavingsBalanceDto {
             member_id: try_column!(row, "member_id"),
-            account_type: try_column!(row, "account_type"),
+            account_type: SavingsAccountType::try_from(try_column!(row, "account_type", String).as_str())?,
             balance: try_column!(row, "balance"),
         })
     })
@@ -152,17 +151,13 @@ async fn snapshot(company_id: &str, pool: &SqlitePool) -> Result<AppSnapshot, St
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    // Riwayat migrasi per anggota sangat banyak; daftar transaksi terbaru hanya
-    // memuat transaksi operasional.
-    let recent_filter = "t.transaction_type NOT IN (?, ?) AND t.channel != ?";
-    let recent_binds = [MIGRATED_SAVINGS, MIGRATED_LOAN, Channel::NonCash.as_str()];
+    // Daftar transaksi terbaru hanya memuat transaksi dengan pergerakan dana.
+    let recent_filter = "t.channel != ?";
     let transaction_rows = sqlx::query(&format!(
         "SELECT {TRANSACTION_COLUMNS} FROM transactions t WHERE t.company_id = ? AND {recent_filter} ORDER BY t.business_date DESC, t.created_at DESC, t.id DESC LIMIT 120"
     ))
     .bind(company_id)
-    .bind(recent_binds[0])
-    .bind(recent_binds[1])
-    .bind(recent_binds[2])
+    .bind(Channel::NonCash.as_str())
     .fetch_all(pool)
     .await
     .map_err(|error| error.to_string())?;
@@ -296,7 +291,7 @@ pub(crate) async fn get_cash_book(
         });
     }
     Ok(CashBookDto {
-        channel: channel.as_str().to_string(),
+        channel,
         year,
         opening_balance,
         total_in,
@@ -311,25 +306,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn retains_legacy_transactions_without_showing_monthly_imports_as_recent_activity() {
+    fn recent_activity_excludes_non_cash_transactions() {
         tauri::async_runtime::block_on(async {
             let pool = crate::database::memory_pool().await;
             for (id, transaction_type, channel) in [
-                ("legacy-savings", "MIGRATED_SAVINGS", "POTONGAN"),
-                ("legacy-loan", "MIGRATED_LOAN", "POTONGAN"),
-                ("legacy-cash", "MIGRATED_CASH", "KAS"),
-                ("legacy-opening", "OPENING_SAVINGS", "NON_KAS"),
+                ("savings", "SAVINGS_DEPOSIT", "POTONGAN"),
+                ("loan", "LOAN_DISBURSEMENT", "BANK"),
+                ("cash", "SAVINGS_DEPOSIT", "KAS"),
+                ("opening", "OPENING_SAVINGS", "NON_KAS"),
             ] {
                 sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, transaction_type, channel, description, reference, direction, amount, actor) VALUES (?, 'default', '2026-09-01', '01 Sep 2026', '00:00', '-', ?, ?, 'Existing import', ?, 'Masuk', 1000, 'Import Excel 2026')")
                     .bind(id).bind(transaction_type).bind(channel).bind(id)
                     .execute(&pool).await.unwrap();
             }
             let snapshot = get_app_snapshot("default", &pool).await.unwrap();
-            assert_eq!(snapshot.transactions.len(), 1);
-            assert_eq!(snapshot.transactions[0].id, "legacy-cash");
+            let ids: Vec<_> = snapshot
+                .transactions
+                .iter()
+                .map(|t| t.id.as_str())
+                .collect();
+            assert_eq!(ids, vec!["savings", "loan", "cash"]);
             let book = get_cash_book("default", 2026, "KAS", &pool).await.unwrap();
             assert_eq!(book.rows.len(), 1);
-            assert_eq!(book.rows[0].transaction.id, "legacy-cash");
+            assert_eq!(book.rows[0].transaction.id, "cash");
             let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transactions")
                 .fetch_one(&pool)
                 .await
