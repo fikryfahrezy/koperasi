@@ -39,10 +39,10 @@ const {
   selectedYear,
   selectedCompanyId,
   snapshotVersion,
-  admin,
+  financialParameters,
   createLoan,
   getCashBook,
-  loadAdminState,
+  loadFinancialParameters,
   notify,
   postCashEntry,
   postPayment,
@@ -76,7 +76,7 @@ async function loadCashBook() {
 watch([selectedYear, selectedCompanyId, snapshotVersion], loadCashBook);
 onMounted(() => {
   void loadCashBook();
-  void loadAdminState();
+  void loadFinancialParameters();
 });
 
 const rows = computed(() => cashBook.value?.rows ?? []);
@@ -196,14 +196,14 @@ function openModal() {
     memberId: "",
     principal: 0,
     interest: 0,
-    wajib: admin.parameters.mandatorySavings || 50_000,
+    wajib: financialParameters.mandatorySavings || 50_000,
     voluntary: 0,
   });
   Object.assign(savingsForm, {
     memberId: "",
     accountType: SavingsAccountType.Mandatory,
     movement: SavingsMovement.Deposit,
-    amount: admin.parameters.mandatorySavings || 50_000,
+    amount: financialParameters.mandatorySavings || 50_000,
   });
   Object.assign(loanForm, {
     memberId: "",
@@ -288,7 +288,7 @@ async function reverseSelected() {
   if (reversed) selected.value = null;
 }
 async function refreshPage() {
-  await Promise.all([refresh(), loadAdminState()]);
+  await Promise.all([refresh(), loadFinancialParameters()]);
 }
 </script>
 
