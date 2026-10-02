@@ -35,7 +35,7 @@ const memberNames = computed(
   () => new Map(members.map((member) => [member.id, member.name])),
 );
 
-// Urutan sheet mengikuti nomor anggota (M001, M002, ...).
+// Spreadsheet rows follow member numbers (M001, M002, ...).
 const monthRows = computed(() =>
   monthlyLedger.savings
     .filter((row) => row.period === period.value)
@@ -84,8 +84,8 @@ const openingKeys = [
   "mandatoryOpening",
   "voluntaryOpening",
 ] as const;
-// Debet = keluar, Kredit = masuk, sama seperti sheet. Kolom SHU hanya ada
-// di blok Januari (SHU Tahun Buku tahun sebelumnya).
+// Debit = outflow, Credit = inflow, as in the spreadsheet. The profit-sharing column appears only
+// in the January block (profit sharing for the previous fiscal year).
 const hasShu = computed(() => period.value.endsWith("-01"));
 const movementKeys = computed(() =>
   (

@@ -119,7 +119,7 @@ pub(crate) struct CreateLoanInput {
     pub(crate) plafond: i64,
     pub(crate) tenor: i64,
     pub(crate) interest_type: String,
-    /// Bila diisi, pinjaman langsung dicairkan (dicatat dari Buku Kas).
+    /// If provided, the loan is disbursed immediately (recorded through the cash ledger).
     #[serde(default)]
     pub(crate) disbursement: Option<DisbursementInput>,
 }
@@ -268,7 +268,7 @@ pub(crate) struct CashBookRowDto {
     #[serde(flatten)]
     pub(crate) transaction: TransactionDto,
     pub(crate) business_date: String,
-    /// Saldo berjalan setelah baris ini; hanya transaksi yang berlaku dihitung.
+    /// Running balance after this row; only effective transactions are counted.
     pub(crate) balance: i64,
 }
 

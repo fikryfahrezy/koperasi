@@ -4,11 +4,10 @@ use sqlx::SqlitePool;
 
 use super::posting::{append, audit, ensure_period_open, Component, Entry, APP_ACTOR};
 use super::read_model::get_app_snapshot;
-use super::savings::money_channel;
 use crate::{
     contracts::{AddMemberInput, AppSnapshot},
     domain::{
-        timestamp_id, AuditAction, AuditEntityType, ComponentType, MemberStatus,
+        timestamp_id, AuditAction, AuditEntityType, Channel, ComponentType, MemberStatus,
         SavingsAccountStatus, SavingsAccountType, TransactionDirection, TransactionType,
     },
 };
@@ -21,7 +20,7 @@ pub(crate) async fn add_member(
     if input.name.trim().is_empty() {
         return Err("Nama anggota wajib diisi.".into());
     }
-    let channel = money_channel(&input.channel)?;
+    let channel = Channel::try_from(input.channel.as_str())?;
 
     let mut opening_savings = Vec::with_capacity(input.opening_savings.len());
     for opening in &input.opening_savings {

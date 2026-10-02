@@ -742,7 +742,7 @@ strong {
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
-/* Tabel bergaya sheet Excel (Simpanan, Pinjaman). */
+/* Excel-style tables (Savings, Loans). */
 .sheet-wrap {
   max-height: calc(100vh - 300px);
   min-height: 320px;

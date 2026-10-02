@@ -1,9 +1,9 @@
--- Skema buku besar (ledger) koperasi.
+-- Cooperative ledger schema.
 --
--- Prinsip: uang tidak pernah diubah di tempat. Setiap perpindahan uang dicatat
--- sebagai transaksi baru beserta komponennya; saldo kas, simpanan, dan
--- pinjaman dihitung dari transaksi tersebut. Koreksi dilakukan dengan
--- transaksi reversal, bukan dengan mengedit atau menghapus baris.
+-- Principle: monetary records are never updated in place. Each money movement is recorded
+-- as a new transaction with its components; cash, savings, and
+-- loan balances are calculated from those transactions. Corrections use
+-- reversal transactions rather than editing or deleting rows.
 
 PRAGMA foreign_keys = ON;
 
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS members (
   UNIQUE(company_id, id)
 );
 
--- Rekening simpanan hanya identitas; saldonya ada di view savings_balances.
+-- Savings accounts store only identity information; balances are in the savings_balances view.
 CREATE TABLE IF NOT EXISTS savings_accounts (
   id TEXT PRIMARY KEY,
   company_id TEXT NOT NULL REFERENCES companies(id),
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS savings_accounts (
   UNIQUE(company_id, member_id, account_type)
 );
 
--- Syarat pinjaman; saldo pokok ada di view loan_balances.
+-- Loan terms; principal balances are in the loan_balances view.
 CREATE TABLE IF NOT EXISTS loans (
   id TEXT PRIMARY KEY,
   company_id TEXT NOT NULL REFERENCES companies(id),
@@ -61,11 +61,9 @@ CREATE TABLE IF NOT EXISTS loans (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- channel: dari/ke mana uangnya bergerak.
---   KAS      uang tunai di kas koperasi (Buku Kas Harian)
---   BANK     rekening bank koperasi
---   POTONGAN potongan pensiun/gaji yang disetor lewat bank
---   NON_KAS  saldo awal migrasi, tidak ada uang yang berpindah
+-- channel:
+--   KAS      recorded in the daily cash ledger and changes cash balances
+--   NON_KAS  excluded from the cash ledger; only changes savings/loans
 CREATE TABLE IF NOT EXISTS transactions (
   id TEXT PRIMARY KEY,
   company_id TEXT NOT NULL REFERENCES companies(id),
@@ -121,7 +119,7 @@ BEGIN
   SELECT RAISE(ABORT, 'Komponen transaksi tidak dapat dihapus.');
 END;
 
--- Transaksi yang berlaku: bukan reversal dan belum dibalik.
+-- Effective transactions: neither reversals nor already reversed.
 CREATE VIEW IF NOT EXISTS effective_transactions AS
 SELECT t.*
 FROM transactions t

@@ -33,9 +33,9 @@ watch(
 
 const loanById = computed(() => new Map(loans.map((loan) => [loan.id, loan])));
 
-// Urutan sheet mengikuti nomor pinjaman (L001, L002, ...). Kolom turunan:
-// tunggakan awal bulan = tunggakan akhir - kewajiban bulan ini + dibayar;
-// kewajiban setor s/d bulan ini = tunggakan awal + kewajiban bulan ini.
+// Spreadsheet rows follow loan numbers (L001, L002, ...). Derived columns:
+// opening arrears = closing arrears - this month's payment obligation + amount paid;
+// payment obligation through this month = opening arrears + this month's payment obligation.
 const monthRows = computed(() =>
   monthlyLedger.loans
     .filter((row) => row.period === period.value)
@@ -69,7 +69,7 @@ const monthRows = computed(() =>
 );
 type MonthRow = (typeof monthRows.value)[number];
 
-// Kolom angka setelah Jangka Waktu, berurutan seperti di sheet.
+// Numeric columns after the loan term, in spreadsheet order.
 const beforeMutation = [
   "openingBalance",
   "scheduledPrincipal",

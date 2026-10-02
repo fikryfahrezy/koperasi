@@ -61,22 +61,12 @@ export const SavingsMovement = {
 export type SavingsMovement =
   (typeof SavingsMovement)[keyof typeof SavingsMovement];
 
-// Dari/ke mana uang bergerak. Buku Kas Harian = channel Kas.
+// KAS = recorded in the daily cash ledger; NON_KAS = savings/loans only.
 export const Channel = {
   Cash: "KAS",
-  Bank: "BANK",
-  Deduction: "POTONGAN",
   NonCash: "NON_KAS",
 } as const;
 export type Channel = (typeof Channel)[keyof typeof Channel];
-export type MoneyChannel = Exclude<Channel, typeof Channel.NonCash>;
-
-export const channelLabels: Record<Channel, string> = {
-  [Channel.Cash]: "Kas",
-  [Channel.Bank]: "Bank",
-  [Channel.Deduction]: "Potongan pensiun",
-  [Channel.NonCash]: "Saldo awal",
-};
 
 export const InterestType = {
   Declining: "Menurun",
@@ -190,9 +180,9 @@ export interface CashBook {
   rows: CashBookRow[];
 }
 
-/** Tanggal dan channel opsional untuk setiap posting dari Buku Kas. */
+/** Optional date and channel for each cash ledger posting. */
 export interface PostingOptions {
-  channel?: MoneyChannel;
+  channel?: Channel;
   businessDate?: string;
 }
 
@@ -236,7 +226,7 @@ interface CreateLoanInput {
   interestType: InterestType;
 }
 
-type ChannelInput = { channel: MoneyChannel };
+type ChannelInput = { channel: Channel };
 
 interface SavingsTransactionInput {
   memberId: string;
@@ -529,7 +519,7 @@ async function previewLoan(input: CreateLoanInput) {
   return backend.previewLoan(input);
 }
 
-/** Dengan `disburse`, pinjaman langsung dicairkan (pencatatan dari Buku Kas). */
+/** With `disburse`, the loan is disbursed immediately (recorded through the cash ledger). */
 async function createLoan(input: CreateLoanInput, disburse?: PostingOptions) {
   try {
     applySnapshot(
@@ -566,7 +556,7 @@ async function createLoan(input: CreateLoanInput, disburse?: PostingOptions) {
   }
 }
 
-/** Tanggal hari ini (zona waktu lokal) dalam format YYYY-MM-DD. */
+/** Today's date (local time zone) in YYYY-MM-DD format. */
 export function todayIso() {
   const now = new Date();
   const pad = (value: number) => String(value).padStart(2, "0");
@@ -734,11 +724,11 @@ async function loadMonthlyLedger() {
 }
 
 let monthlyLedgerWatching = false;
-/** Memuat buku besar bulanan dan memperbaruinya saat tahun, perusahaan, atau data berubah. */
+/** Loads the monthly ledger and refreshes it when the year, company, or data changes. */
 export function useMonthlyLedger() {
   if (!monthlyLedgerWatching) {
     monthlyLedgerWatching = true;
-    // Scope terpisah agar watcher tetap hidup setelah halaman pertama ditutup.
+    // A separate scope keeps the watcher alive after the first page is closed.
     effectScope(true).run(() =>
       watch(
         [selectedYear, selectedCompanyId, snapshotVersion],
@@ -771,7 +761,7 @@ export function formatPeriod(period: string) {
   return `${monthNames[month - 1] ?? period} ${year}`;
 }
 
-/** Bulan sebelum periode, mis. "2026-01" -> "Desember 2025". */
+/** Month before the period, e.g. "2026-01" -> "December 2025" (localized). */
 export function formatPreviousPeriod(period: string) {
   const [year, month] = period.split("-").map(Number);
   return month === 1
@@ -779,13 +769,13 @@ export function formatPreviousPeriod(period: string) {
     : `${monthNames[month - 2]} ${year}`;
 }
 
-/** "2026-09-02" -> "02-09-2026"; kosong menjadi "". */
+/** "2026-09-02" -> "02-09-2026"; empty input becomes "". */
 export function formatSheetDate(value: string) {
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   return match ? `${match[3]}-${match[2]}-${match[1]}` : value;
 }
 
-/** Angka gaya sheet: titik ribuan, kurung untuk negatif, "-" untuk nol. */
+/** Spreadsheet-style numbers: periods for thousands, parentheses for negatives, "-" for zero. */
 export function formatSheetNumber(value: number) {
   if (!value) return "-";
   const formatted = new Intl.NumberFormat(DEFAULT_LOCALE, {

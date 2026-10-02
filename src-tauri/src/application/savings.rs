@@ -56,14 +56,6 @@ fn reference_or(input: &str, fallback: String) -> String {
     }
 }
 
-/// Channel uang yang boleh dipilih pengguna (saldo awal migrasi tidak).
-pub(crate) fn money_channel(value: &str) -> Result<Channel, String> {
-    match Channel::try_from(value)? {
-        Channel::NonCash => Err("Pilih asal dana: Kas, Bank, atau Potongan.".into()),
-        channel => Ok(channel),
-    }
-}
-
 pub(crate) async fn post_savings_transaction(
     input: SavingsTransactionInput,
     company_id: &str,
@@ -74,7 +66,7 @@ pub(crate) async fn post_savings_transaction(
     }
     let account_type = SavingsAccountType::try_from(input.account_type.as_str())?;
     let movement = SavingsMovement::try_from(input.movement.as_str())?;
-    let channel = money_channel(&input.channel)?;
+    let channel = Channel::try_from(input.channel.as_str())?;
     if movement == SavingsMovement::Withdrawal && account_type != SavingsAccountType::Voluntary {
         return Err("Hanya simpanan manasuka yang dapat ditarik pada versi ini.".into());
     }
@@ -104,7 +96,7 @@ pub(crate) async fn post_savings_transaction(
             TransactionDirection::Out,
         )
     };
-    // Uraian mengikuti Buku Kas Harian, mis. "Pengambilan Manasuka Hj Aisyah".
+    // Descriptions follow the daily cash ledger, e.g. a voluntary savings withdrawal by Hj Aisyah.
     let account_label = match account_type {
         SavingsAccountType::Principal => "Simpanan Pokok",
         SavingsAccountType::Mandatory => "Simpanan Wajib",
@@ -151,8 +143,8 @@ pub(crate) async fn post_savings_transaction(
     get_app_snapshot(company_id, pool).await
 }
 
-/// Setoran bulanan anggota: angsuran pokok + bunga dan simpanan wajib/manasuka
-/// dalam satu transaksi.
+/// Monthly member payment: principal installment + interest and mandatory/voluntary savings
+/// in a single transaction.
 pub(crate) async fn post_payment(
     input: PaymentInput,
     company_id: &str,
@@ -169,7 +161,7 @@ pub(crate) async fn post_payment(
     {
         return Err("Komponen pembayaran tidak boleh negatif.".into());
     }
-    let channel = money_channel(&input.channel)?;
+    let channel = Channel::try_from(input.channel.as_str())?;
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
     ensure_period_open(&mut db, company_id, &input.business_date).await?;
     let member_name = active_member_name(&mut db, company_id, &input.member_id).await?;
@@ -177,7 +169,7 @@ pub(crate) async fn post_payment(
     let reference = reference_or(&input.reference, format!("KBS/RCPT/{id}"));
     ensure_reference_unused(&mut db, company_id, &reference).await?;
 
-    // Pokok dialokasikan ke pinjaman berjalan tertua lebih dulu.
+    // Principal is allocated to the oldest outstanding loan first.
     let mut components = Vec::new();
     let mut remaining_principal = input.principal;
     let mut first_loan: Option<String> = None;

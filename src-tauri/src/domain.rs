@@ -88,11 +88,11 @@ impl TransactionDirection {
     }
 }
 
-// Dari/ke mana uang bergerak. Buku Kas Harian hanya berisi channel Kas.
+// KAS: recorded in the daily cash ledger and changes cash balances.
+// NON_KAS: excluded from the cash ledger; only changes savings/loans
+// (monthly member movements and December 2025 opening balances).
 string_enum!(Channel {
     Cash => "KAS",
-    Bank => "BANK",
-    Deduction => "POTONGAN",
     NonCash => "NON_KAS",
 });
 

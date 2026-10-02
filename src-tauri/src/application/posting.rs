@@ -1,5 +1,5 @@
-//! Penulisan ke buku besar. Semua perpindahan uang masuk lewat sini sebagai
-//! transaksi baru beserta komponennya; tidak ada saldo yang diubah di tempat.
+//! Ledger writes. All money movements pass through here as
+//! new transactions with their components; balances are never updated in place.
 
 use sqlx::SqliteConnection;
 
@@ -61,7 +61,7 @@ pub(crate) struct Entry<'a> {
     pub(crate) components: Vec<Component>,
 }
 
-/// Menolak posting pada periode yang sudah dikunci.
+/// Rejects postings to locked periods.
 pub(crate) async fn ensure_period_open(
     db: &mut SqliteConnection,
     company_id: &str,
@@ -132,8 +132,8 @@ pub(crate) async fn loan_balance(
         .ok_or_else(|| "Pinjaman tidak ditemukan.".to_string())
 }
 
-/// Menulis satu transaksi. Komponen bernilai nol dilewati; jumlah transaksi
-/// adalah total komponennya.
+/// Writes a single transaction. Zero-value components are skipped; the transaction amount
+/// is the sum of its components.
 pub(crate) async fn append(
     db: &mut SqliteConnection,
     company_id: &str,
