@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
-import { RouterView } from "vue-router";
+import { RouterView, useRoute } from "vue-router";
 import { Building2, CalendarDays } from "lucide-vue-next";
 import logo from "./assets/logo.png";
 import AppMenu from "./components/AppMenu.vue";
@@ -32,12 +32,16 @@ const companyOptions = computed(() =>
 const reportYearOptions = computed(() =>
   yearOptions.value.map((year) => ({ value: year, label: String(year) })),
 );
+const route = useRoute();
 
 onMounted(initialize);
 </script>
 
 <template>
-  <div class="app-frame">
+  <div
+    class="app-frame"
+    :class="{ 'app-frame--sheet': route.meta.fitViewport }"
+  >
     <section v-if="runtimeError" class="runtime-banner" role="alert">
       <div>
         <strong>{{ $t("app.errorTitle") }}</strong>
