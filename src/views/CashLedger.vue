@@ -53,7 +53,7 @@ const {
   refresh,
 } = useKoperasiStore();
 
-// --- Buku kas (mengikuti sheet BUKU KAS HARIAN) ----------------------------
+// --- Cash ledger (following the daily cash ledger spreadsheet) ----------------------------
 const cashBook = ref<CashBook | null>(null);
 const loadingBook = ref(false);
 const selected = ref<CashBookRow | null>(null);
@@ -81,14 +81,14 @@ onMounted(() => {
 });
 
 const rows = computed(() => cashBook.value?.rows ?? []);
-// Seperti di sheet, tanggal hanya ditulis pada baris pertama tiap hari.
+// As in the spreadsheet, the date appears only on the first row of each day.
 const showDate = (index: number) =>
   index === 0 || rows.value[index - 1].date !== rows.value[index].date;
 const isExcluded = (item: CashBookRow) =>
   item.status === TransactionStatus.Reversed ||
   item.transactionType === TransactionType.Reversal;
 
-// --- Form catat transaksi ---------------------------------------------------
+// --- Transaction entry form ---------------------------------------------------
 const Category = {
   Payment: "payment",
   Savings: "savings",
@@ -142,7 +142,7 @@ const interestTypeOptions = [
   { value: InterestType.Declining, label: "Menurun" },
   { value: InterestType.Flat, label: "Flat" },
 ];
-// Saldo pinjaman berjalan anggota terpilih untuk membantu mengisi angsuran.
+// The selected member's outstanding loan balance helps fill in the installment.
 const paymentLoans = computed(() =>
   loans.filter(
     (loan) =>

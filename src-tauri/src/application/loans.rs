@@ -6,12 +6,12 @@ use super::posting::{
     append, audit, ensure_period_open, loan_balance, Component, Entry, APP_ACTOR,
 };
 use super::read_model::get_app_snapshot;
-use super::savings::{active_member_name, money_channel};
+use super::savings::active_member_name;
 use crate::{
     contracts::{AppSnapshot, CreateLoanInput, DisburseLoanInput, LoanPreview},
     domain::{
         add_months, calculate_loan, calculate_rate_amount, timestamp_id, AuditAction,
-        AuditEntityType, ComponentType, InterestType, LoanStatus, ParameterKey,
+        AuditEntityType, Channel, ComponentType, InterestType, LoanStatus, ParameterKey,
         TransactionDirection, TransactionType,
     },
 };
@@ -23,7 +23,7 @@ fn format_rate(value: f64) -> String {
     text.replace('.', ",")
 }
 
-/// 2500000 -> "2.500.000", seperti uraian provisi di Buku Kas Harian.
+/// 2500000 -> "2.500.000", as in provision fee descriptions in the daily cash ledger.
 fn format_thousands(value: i64) -> String {
     let digits = value.abs().to_string();
     let mut out = String::new();
@@ -142,14 +142,14 @@ pub(crate) async fn create_loan(
     get_app_snapshot(company_id, pool).await
 }
 
-/// Pencairan: uang pokok keluar dan provisi masuk dicatat sebagai dua baris,
-/// sama seperti di Buku Kas Harian.
+/// Disbursement: principal outflow and provision fee inflow are recorded as two rows,
+/// as in the daily cash ledger.
 async fn disburse(
     db: &mut SqliteConnection,
     company_id: &str,
     input: DisburseLoanInput,
 ) -> Result<(), String> {
-    let channel = money_channel(&input.channel)?;
+    let channel = Channel::try_from(input.channel.as_str())?;
     ensure_period_open(db, company_id, &input.business_date).await?;
     let loan = sqlx::query(
         "SELECT member_id, member_name, plafond, tenor, status FROM loans WHERE company_id = ? AND id = ?",
@@ -245,7 +245,7 @@ async fn disburse(
         .await?;
     }
 
-    // Syarat pinjaman (bukan saldo) ikut ditetapkan saat pencairan.
+    // Loan terms (rather than balances) are also set at disbursement.
     sqlx::query("UPDATE loans SET realization_date = ?, due_date = ?, status = ? WHERE company_id = ? AND id = ?")
         .bind(&input.business_date)
         .bind(&due_date)
