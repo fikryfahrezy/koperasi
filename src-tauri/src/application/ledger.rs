@@ -146,17 +146,7 @@ pub(crate) async fn get_monthly_ledger(
             ComponentType::SavingsWithdrawal => month.outgoing[slot] += amount,
             ComponentType::SavingsShu => month.shu += amount,
             ComponentType::SavingsDeposit => month.incoming[slot] += amount,
-            other @ (ComponentType::LoanOpening
-            | ComponentType::LoanOpeningArrearsPrincipal
-            | ComponentType::LoanOpeningPrepaidPrincipal
-            | ComponentType::LoanOpeningArrearsInterest
-            | ComponentType::LoanOpeningPrepaidInterest
-            | ComponentType::LoanDisbursement
-            | ComponentType::LoanPrincipal
-            | ComponentType::LoanInterest
-            | ComponentType::LoanProvision
-            | ComponentType::CashOther
-            | ComponentType::Reversal) => {
+            other => {
                 return Err(format!("Komponen simpanan tidak valid: {}", other.as_str()));
             }
         }
@@ -196,12 +186,7 @@ pub(crate) async fn get_monthly_ledger(
             ComponentType::LoanPrincipal => month.principal_paid += amount,
             ComponentType::LoanInterest => month.interest_paid += amount,
             ComponentType::LoanProvision => month.provision += amount,
-            other @ (ComponentType::SavingsOpening
-            | ComponentType::SavingsDeposit
-            | ComponentType::SavingsWithdrawal
-            | ComponentType::SavingsShu
-            | ComponentType::CashOther
-            | ComponentType::Reversal) => {
+            other => {
                 return Err(format!("Komponen pinjaman tidak valid: {}", other.as_str()));
             }
         }
@@ -341,15 +326,14 @@ mod tests {
     fn reads_imported_loan_components_and_rejects_unknown_types() {
         tauri::async_runtime::block_on(async {
             let pool = crate::database::memory_pool().await;
-            sqlx::query("INSERT INTO loans (id, company_id, member_name, plafond, rate_annual, tenor, interest_type, realization_date, due_date, status) VALUES ('imported', 'default', 'Imported member', 1000000, 24, 10, 'Menurun', '2026-01-01', '2026-11-01', 'Berjalan')")
+            sqlx::query("INSERT INTO loans (id, company_id, loan_group, member_name, plafond, rate_annual, tenor, interest_type, loan_type, realization_date, due_date) VALUES ('imported', 'default', 'Anggota PP BRI', 'Imported member', 1000000, 24, 10, 'Menurun', 'Bulanan', '2026-01-01', '2026-11-01')")
                 .execute(&pool).await.unwrap();
 
             // Literal persisted values exercise compatibility with imported data.
-            for (id, date, transaction_type, components) in [
+            for (id, date, components) in [
                 (
                     "opening",
                     "2026-01-01",
-                    "OPENING_LOAN",
                     vec![
                         ("LOAN_OPENING", 1_000_000),
                         ("LOAN_OPENING_ARREARS_PRINCIPAL", 50_000),
@@ -361,7 +345,6 @@ mod tests {
                 (
                     "payment",
                     "2026-02-10",
-                    "MEMBER_PAYMENT",
                     vec![
                         ("LOAN_DISBURSEMENT", 200_000),
                         ("LOAN_PRINCIPAL", 100_000),
@@ -371,8 +354,8 @@ mod tests {
                 ),
             ] {
                 let amount: i64 = components.iter().map(|(_, amount)| amount).sum();
-                sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, transaction_type, channel, description, reference, direction, amount, actor) VALUES (?, 'default', ?, ?, '00:00', 'Imported member', ?, 'NON_KAS', 'Imported', ?, 'Masuk', ?, 'Import')")
-                    .bind(id).bind(date).bind(date).bind(transaction_type).bind(id).bind(amount)
+                sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, channel, description, reference, direction, amount, actor) VALUES (?, 'default', ?, ?, '00:00', 'Imported member', 'NON_KAS', 'Imported', ?, 'Masuk', ?, 'Import')")
+                    .bind(id).bind(date).bind(date).bind(id).bind(amount)
                     .execute(&pool).await.unwrap();
                 for (component_type, amount) in components {
                     sqlx::query("INSERT INTO transaction_components (company_id, transaction_id, component_type, label, amount, loan_id) VALUES ('default', ?, ?, 'Imported', ?, 'imported')")

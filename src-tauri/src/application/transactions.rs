@@ -3,15 +3,15 @@
 use sqlx::{Row, SqlitePool};
 
 use super::posting::{
-    append, audit, ensure_period_open, ensure_reference_unused, loan_balance, savings_balance,
-    Component, Entry, APP_ACTOR,
+    append, audit, ensure_reference_unused, loan_balance, savings_balance, Component, Entry,
+    APP_ACTOR,
 };
 use super::read_model::get_app_snapshot;
 use crate::{
     contracts::{AppSnapshot, CashEntryInput, ReverseTransactionInput},
     domain::{
-        timestamp_id, AuditAction, AuditEntityType, Channel, ComponentType, TransactionDirection,
-        TransactionType,
+        timestamp_id, validate_business_date, AuditAction, AuditEntityType, Channel, ComponentType,
+        TransactionDirection, CASH_CATEGORIES,
     },
 };
 
@@ -22,10 +22,10 @@ pub(crate) async fn reverse_transaction(
     company_id: &str,
     pool: &SqlitePool,
 ) -> Result<AppSnapshot, String> {
+    validate_business_date(&input.business_date)?;
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
-    ensure_period_open(&mut db, company_id, &input.business_date).await?;
     let id = &input.id;
-    let original = sqlx::query("SELECT member_id, member_name, transaction_type, channel, description, reference, direction FROM effective_transactions WHERE company_id = ? AND id = ?")
+    let original = sqlx::query("SELECT member_id, member_name, channel, description, reference, direction FROM effective_transactions WHERE company_id = ? AND id = ?")
         .bind(company_id)
         .bind(id)
         .fetch_optional(&mut *db)
@@ -89,7 +89,6 @@ pub(crate) async fn reverse_transaction(
             display_time: &input.display_time,
             member_id: member_id.as_deref(),
             member_name: &get("member_name")?,
-            transaction_type: TransactionType::Reversal,
             channel,
             description: &description,
             reference: &reference,
@@ -122,14 +121,22 @@ pub(crate) async fn post_cash_entry(
     if input.amount <= 0 {
         return Err("Nominal transaksi harus lebih dari nol.".into());
     }
-    let category = input.category.trim();
-    if category.is_empty() {
-        return Err("Kategori transaksi wajib diisi.".into());
-    }
+    // Optional Buku Kas category column; rows without one are plain cash movements.
+    let (component_type, label) = match input.category.trim() {
+        "" => (ComponentType::Cash, "Mutasi kas"),
+        code => {
+            let component_type = ComponentType::try_from(code)?;
+            CASH_CATEGORIES
+                .iter()
+                .find(|(category, _)| *category == component_type)
+                .copied()
+                .ok_or("Kategori Buku Kas tidak valid.")?
+        }
+    };
     let direction = TransactionDirection::try_from(input.direction.as_str())?;
     let channel = Channel::try_from(input.channel.as_str())?;
+    validate_business_date(&input.business_date)?;
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
-    ensure_period_open(&mut db, company_id, &input.business_date).await?;
     let id = timestamp_id("CASH");
     let reference = if input.reference.trim().is_empty() {
         format!("KBS/CASH/{id}")
@@ -137,16 +144,10 @@ pub(crate) async fn post_cash_entry(
         input.reference.trim().to_string()
     };
     ensure_reference_unused(&mut db, company_id, &reference).await?;
-    let description = if input.description.trim().is_empty() {
-        category.to_string()
-    } else {
-        input.description.trim().to_string()
-    };
-    let transaction_type = if direction == TransactionDirection::In {
-        TransactionType::CashIncome
-    } else {
-        TransactionType::CashExpense
-    };
+    let description = input.description.trim();
+    if description.is_empty() {
+        return Err("Uraian wajib diisi.".into());
+    }
     append(
         &mut db,
         company_id,
@@ -157,18 +158,13 @@ pub(crate) async fn post_cash_entry(
             display_time: &input.display_time,
             member_id: None,
             member_name: "Koperasi",
-            transaction_type,
             channel,
-            description: &description,
+            description,
             reference: &reference,
             direction,
             actor: APP_ACTOR,
             reversed_transaction_id: None,
-            components: vec![Component::new(
-                ComponentType::CashOther,
-                category,
-                input.amount,
-            )],
+            components: vec![Component::new(component_type, label, input.amount)],
         },
     )
     .await?;
@@ -178,7 +174,7 @@ pub(crate) async fn post_cash_entry(
         AuditEntityType::Transaction,
         &id,
         AuditAction::Posted,
-        serde_json::json!({"category": category, "amount": input.amount, "channel": channel.as_str()}),
+        serde_json::json!({"category": label, "amount": input.amount, "channel": channel.as_str()}),
     )
     .await?;
     db.commit().await.map_err(|error| error.to_string())?;

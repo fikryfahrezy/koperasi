@@ -42,9 +42,11 @@ mod tests {
     use super::*;
     use crate::contracts::{
         AddMemberInput, CashEntryInput, CreateLoanInput, DisbursementInput, OpeningSavingsInput,
-        PaymentInput, ReverseTransactionInput, SavingsTransactionInput,
+        PaymentInput, PreviewLoanInput, ReverseTransactionInput, SavingsTransactionInput,
     };
-    use crate::domain::{Channel, InterestType, SavingsAccountType, TransactionStatus};
+    use crate::domain::{
+        Channel, InterestType, LoanGroup, LoanType, SavingsAccountType, TransactionStatus,
+    };
 
     const DATE: &str = "2026-09-13";
 
@@ -102,10 +104,7 @@ mod tests {
             assert_eq!(snapshot.totals.savings, 150_000);
 
             let json = serde_json::to_value(&snapshot).unwrap();
-            assert_eq!(
-                json["transactions"][0]["transactionType"],
-                "SAVINGS_DEPOSIT"
-            );
+            assert_eq!(json["transactions"][0]["isReversal"], false);
             assert_eq!(json["transactions"][0]["channel"], "KAS");
             assert_eq!(json["savingsBalances"][0]["accountType"], "MANASUKA");
             assert_eq!(json["savingsBalances"][1]["accountType"], "WAJIB");
@@ -212,27 +211,37 @@ mod tests {
             .await;
             assert_eq!(overdraw.err().unwrap(), "Saldo manasuka tidak mencukupi.");
 
-            let loan_input = |disbursement| CreateLoanInput {
-                member_id: "testing-M001".into(),
-                plafond: 1_000_000,
-                tenor: 10,
-                interest_type: InterestType::Declining.as_str().into(),
-                disbursement,
-            };
-            let preview = preview_loan(loan_input(None), "testing", &pool)
-                .await
-                .unwrap();
+            let preview = preview_loan(
+                PreviewLoanInput {
+                    plafond: 1_000_000,
+                    tenor: 10,
+                    interest_type: InterestType::Declining.as_str().into(),
+                },
+                "testing",
+                &pool,
+            )
+            .await
+            .unwrap();
             assert_eq!(preview.annual_rate, 24.0);
 
             // New loans entered through the cash ledger are disbursed immediately: principal flows out,
             // and the provision fee flows in.
             let loan_snapshot = create_loan(
-                loan_input(Some(DisbursementInput {
-                    channel: "KAS".into(),
-                    business_date: DATE.into(),
-                    display_date: "13 Sep 2026".into(),
-                    display_time: "10:10".into(),
-                })),
+                CreateLoanInput {
+                    loan_group: LoanGroup::Member.as_str().into(),
+                    member_id: "testing-M001".into(),
+                    borrower_name: String::new(),
+                    plafond: 1_000_000,
+                    tenor: 10,
+                    interest_type: InterestType::Declining.as_str().into(),
+                    loan_type: LoanType::Monthly.as_str().into(),
+                    disbursement: DisbursementInput {
+                        channel: "KAS".into(),
+                        business_date: DATE.into(),
+                        display_date: "13 Sep 2026".into(),
+                        display_time: "10:10".into(),
+                    },
+                },
                 "testing",
                 &pool,
             )
@@ -303,7 +312,7 @@ mod tests {
             let expense = post_cash_entry(
                 CashEntryInput {
                     direction: "Keluar".into(),
-                    category: "Biaya operasional".into(),
+                    category: "BIAYA_PENGURUS".into(),
                     description: "Biaya pulsa karyawan".into(),
                     amount: 15_000,
                     channel: "KAS".into(),

@@ -124,8 +124,18 @@ const totalColumns = (key: string) =>
 </script>
 
 <template>
-  <div class="page-stack">
-    <PageHeader title="Pinjaman" :refresh="refresh" />
+  <div class="page-stack page-stack--sheet">
+    <PageHeader title="Pinjaman" :refresh="refresh">
+      <template #before-actions>
+        <UiSelect
+          v-if="periodOptions.length"
+          v-model="period"
+          :options="periodOptions"
+          aria-label="Bulan"
+          variant="toolbar"
+        />
+      </template>
+    </PageHeader>
     <section
       v-if="!monthlyLedgerLoading && !monthlyLedger.periods.length"
       class="panel year-empty-state"
@@ -135,15 +145,10 @@ const totalColumns = (key: string) =>
       <p>Pilih tahun lain.</p>
     </section>
     <section v-else class="panel table-panel">
-      <div class="toolbar">
-        <UiSelect
-          v-model="period"
-          :options="periodOptions"
-          aria-label="Bulan"
-          variant="toolbar"
-        />
-      </div>
-      <div v-if="period" class="data-table-wrap sheet-wrap">
+      <div
+        v-if="period"
+        class="data-table-wrap sheet-wrap sheet-wrap--header-controls"
+      >
         <table class="sheet-table">
           <thead>
             <tr>
@@ -212,7 +217,7 @@ const totalColumns = (key: string) =>
               <td class="num-cell">{{ monthlyRate(row.loan) }}</td>
               <td>{{ row.loan.interestType.toLowerCase() }}</td>
               <td>{{ row.loan.guarantee }}</td>
-              <td>Bulanan</td>
+              <td>{{ row.loan.loanType }}</td>
               <td>{{ row.loan.realizationDate }}</td>
               <td>{{ row.loan.dueDate }}</td>
               <td class="num-cell">{{ row.loan.tenor }}</td>

@@ -54,8 +54,6 @@ export default {
     memberAddedMessage:
       "{name} dan tiga rekening simpanannya tersimpan di SQLite.",
     memberSaveFailed: "Anggota gagal disimpan",
-    loanDrafted: "Pinjaman disimpan sebagai draf",
-    loanDraftedMessage: "Kontrak menunggu persetujuan sebelum pencairan.",
     loanSaveFailed: "Pinjaman gagal disimpan",
     loanDisbursed: "Pinjaman berhasil dicairkan",
     loanDisbursedMessage:

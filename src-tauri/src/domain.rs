@@ -42,19 +42,10 @@ macro_rules! string_enum {
     };
 }
 
-string_enum!(MemberStatus {
-    Active => "Aktif",
-    Inactive => "Nonaktif",
-});
-
 string_enum!(SavingsAccountType {
     Principal => "POKOK",
     Mandatory => "WAJIB",
     Voluntary => "MANASUKA",
-});
-
-string_enum!(SavingsAccountStatus {
-    Active => "ACTIVE",
 });
 
 string_enum!(SavingsMovement {
@@ -62,16 +53,22 @@ string_enum!(SavingsMovement {
     Withdrawal => "Penarikan",
 });
 
-string_enum!(LoanStatus {
-    Draft => "Draf",
-    Active => "Berjalan",
-    NeedsReview => "Perlu review",
-    PaidOff => "Lunas",
+// Sections of PINJAMAN BULANAN.
+string_enum!(LoanGroup {
+    Member => "Anggota PP BRI",
+    NonMember => "Non Anggota PP BRI",
 });
 
+// Jenis Pinjaman column of PINJAMAN BULANAN.
+string_enum!(LoanType {
+    Monthly => "Bulanan",
+    Temporary => "Sementara",
+});
+
+// Spelled as in PINJAMAN BULANAN.
 string_enum!(InterestType {
     Declining => "Menurun",
-    Flat => "Flat",
+    Flat => "Plat",
 });
 
 string_enum!(TransactionDirection {
@@ -98,13 +95,7 @@ string_enum!(Channel {
 
 string_enum!(TransactionStatus {
     Posted => "Terposting",
-    Draft => "Draf",
     Reversed => "Dibalik",
-});
-
-string_enum!(PeriodStatus {
-    Open => "OPEN",
-    Locked => "LOCKED",
 });
 
 string_enum!(ComponentType {
@@ -121,9 +112,41 @@ string_enum!(ComponentType {
     LoanPrincipal => "LOAN_PRINCIPAL",
     LoanInterest => "LOAN_INTEREST",
     LoanProvision => "LOAN_PROVISION",
-    CashOther => "CASH_OTHER",
+    // A Buku Kas row with no category column filled in.
+    Cash => "CASH",
+    // Category columns of Buku Kas TAHUN 2026.
+    CashSavingsBook => "KAS_BUKU_TABUNGAN",
+    BoardExpense => "BIAYA_PENGURUS",
+    StationeryExpense => "BIAYA_ATK",
+    Transport => "TRANSFORTASI",
+    InterestExpense => "BIAYA_BUNGA",
+    PublicRelations => "HUMAS",
+    AssetMaintenance => "PEMELIHARAAN_AT",
+    AnnualMeetingExpense => "BIAYA_RAT",
+    OfficeRent => "SEWA_KANTOR",
+    SocialFund => "DANSOS",
+    Other => "LAINNYA",
+    Dekopinda => "DEKOPINDA",
+    Parcel => "PARCEL",
     Reversal => "REVERSAL",
 });
+
+/// Buku Kas category columns, in sheet order, with their column headers.
+pub(crate) const CASH_CATEGORIES: [(ComponentType, &str); 13] = [
+    (ComponentType::CashSavingsBook, "KAS BUKU TABUNGAN"),
+    (ComponentType::BoardExpense, "Biaya Pengurus"),
+    (ComponentType::StationeryExpense, "Biaya ATK"),
+    (ComponentType::Transport, "Transfortasi"),
+    (ComponentType::InterestExpense, "Biaya Bunga"),
+    (ComponentType::PublicRelations, "Humas"),
+    (ComponentType::AssetMaintenance, "Pemeliharaan AT"),
+    (ComponentType::AnnualMeetingExpense, "Biaya RAT"),
+    (ComponentType::OfficeRent, "Sewa Kantor"),
+    (ComponentType::SocialFund, "Dansos"),
+    (ComponentType::Other, "Lainnya"),
+    (ComponentType::Dekopinda, "Dekopinda"),
+    (ComponentType::Parcel, "Parcel"),
+];
 
 impl ComponentType {
     pub(crate) const fn is_opening(self) -> bool {
@@ -138,19 +161,6 @@ impl ComponentType {
         )
     }
 }
-
-string_enum!(TransactionType {
-    SavingsDeposit => "SAVINGS_DEPOSIT",
-    SavingsWithdrawal => "SAVINGS_WITHDRAWAL",
-    OpeningSavings => "OPENING_SAVINGS",
-    OpeningLoan => "OPENING_LOAN",
-    MemberPayment => "MEMBER_PAYMENT",
-    LoanDisbursement => "LOAN_DISBURSEMENT",
-    LoanProvision => "LOAN_PROVISION",
-    CashIncome => "CASH_INCOME",
-    CashExpense => "CASH_EXPENSE",
-    Reversal => "REVERSAL",
-});
 
 string_enum!(ParameterKey {
     PrincipalSavings => "SAVINGS_PRINCIPAL",
@@ -168,7 +178,6 @@ string_enum!(AuditEntityType {
 string_enum!(AuditAction {
     Posted => "POSTED",
     Created => "CREATED",
-    DraftCreated => "DRAFT_CREATED",
     Disbursed => "DISBURSED",
     Reversed => "REVERSED",
 });
@@ -236,9 +245,8 @@ fn date_parts(value: &str) -> Result<(i64, i64, i64), String> {
     Ok((year, month, day))
 }
 
-pub(crate) fn business_period(value: &str) -> Result<&str, String> {
-    date_parts(value)?;
-    Ok(&value[..7])
+pub(crate) fn validate_business_date(value: &str) -> Result<(), String> {
+    date_parts(value).map(|_| ())
 }
 
 pub(crate) fn add_months(value: &str, months: i64) -> Result<String, String> {
@@ -311,9 +319,9 @@ mod tests {
     fn converts_and_advances_business_dates() {
         assert_eq!(add_months("2026-01-31", 1).unwrap(), "2026-02-28");
         assert_eq!(add_months("2024-01-31", 1).unwrap(), "2024-02-29");
-        assert!(business_period("2026-02-29").is_err());
-        assert!(business_period("2026-9-13").is_err());
-        assert!(business_period("not-a-date").is_err());
+        assert!(validate_business_date("2026-02-29").is_err());
+        assert!(validate_business_date("2026-9-13").is_err());
+        assert!(validate_business_date("not-a-date").is_err());
     }
 
     #[test]

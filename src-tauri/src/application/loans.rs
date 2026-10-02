@@ -1,18 +1,16 @@
 //! Application use cases for loans.
 
-use sqlx::{Row, SqliteConnection, SqlitePool};
+use sqlx::{SqliteConnection, SqlitePool};
 
-use super::posting::{
-    append, audit, ensure_period_open, loan_balance, Component, Entry, APP_ACTOR,
-};
+use super::posting::{append, audit, Component, Entry, APP_ACTOR};
 use super::read_model::get_app_snapshot;
-use super::savings::active_member_name;
+use super::savings::member_name;
 use crate::{
-    contracts::{AppSnapshot, CreateLoanInput, DisburseLoanInput, LoanPreview},
+    contracts::{AppSnapshot, CreateLoanInput, LoanPreview, PreviewLoanInput},
     domain::{
-        add_months, calculate_loan, calculate_rate_amount, timestamp_id, AuditAction,
-        AuditEntityType, Channel, ComponentType, InterestType, LoanStatus, ParameterKey,
-        TransactionDirection, TransactionType,
+        add_months, calculate_loan, calculate_rate_amount, timestamp_id, validate_business_date,
+        AuditAction, AuditEntityType, Channel, ComponentType, InterestType, LoanGroup, LoanType,
+        ParameterKey, TransactionDirection,
     },
 };
 
@@ -57,7 +55,7 @@ async fn parameter(
 }
 
 pub(crate) async fn preview_loan(
-    input: CreateLoanInput,
+    input: PreviewLoanInput,
     company_id: &str,
     pool: &SqlitePool,
 ) -> Result<LoanPreview, String> {
@@ -90,6 +88,8 @@ pub(crate) async fn preview_loan(
     })
 }
 
+/// A loan is recorded when it is realised, as in PINJAMAN BULANAN: the principal outflow
+/// and provision fee inflow are written as two rows, as in the daily cash ledger.
 pub(crate) async fn create_loan(
     input: CreateLoanInput,
     company_id: &str,
@@ -98,9 +98,26 @@ pub(crate) async fn create_loan(
     if input.plafond <= 0 || input.tenor <= 0 {
         return Err("Data pinjaman tidak valid.".into());
     }
+    let loan_group = LoanGroup::try_from(input.loan_group.as_str())?;
+    let loan_type = LoanType::try_from(input.loan_type.as_str())?;
     let interest_type = InterestType::try_from(input.interest_type.as_str())?;
+    let disbursement = input.disbursement;
+    let channel = Channel::try_from(disbursement.channel.as_str())?;
+    validate_business_date(&disbursement.business_date)?;
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
-    let member_name = active_member_name(&mut db, company_id, &input.member_id).await?;
+    let (member_id, borrower_name) = match loan_group {
+        LoanGroup::Member => (
+            Some(input.member_id.as_str()),
+            member_name(&mut db, company_id, &input.member_id).await?,
+        ),
+        LoanGroup::NonMember => {
+            let name = input.borrower_name.trim();
+            if name.is_empty() {
+                return Err("Nama peminjam wajib diisi.".into());
+            }
+            (None, name.to_string())
+        }
+    };
     let rate = parameter(
         &mut db,
         company_id,
@@ -112,125 +129,65 @@ pub(crate) async fn create_loan(
     if rate < 0.0 || !rate_percent.is_finite() {
         return Err("Suku bunga pinjaman tidak valid.".into());
     }
-    let id = timestamp_id("LOAN");
-    sqlx::query("INSERT INTO loans (id, company_id, member_id, member_name, plafond, rate_annual, tenor, interest_type, realization_date, due_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '-', '-', ?)")
-        .bind(&id).bind(company_id).bind(&input.member_id).bind(&member_name).bind(input.plafond).bind(rate_percent).bind(input.tenor).bind(interest_type.as_str()).bind(LoanStatus::Draft.as_str()).execute(&mut *db).await.map_err(|error| error.to_string())?;
-    audit(
+    let provision_rate = parameter(
         &mut db,
         company_id,
-        AuditEntityType::Loan,
-        &id,
-        AuditAction::DraftCreated,
-        serde_json::json!({"memberId": input.member_id, "plafond": input.plafond, "tenor": input.tenor, "interestType": input.interest_type}),
-    )
-    .await?;
-    if let Some(disbursement) = input.disbursement {
-        disburse(
-            &mut db,
-            company_id,
-            DisburseLoanInput {
-                loan_id: id,
-                channel: disbursement.channel,
-                business_date: disbursement.business_date,
-                display_date: disbursement.display_date,
-                display_time: disbursement.display_time,
-            },
-        )
-        .await?;
-    }
-    db.commit().await.map_err(|error| error.to_string())?;
-    get_app_snapshot(company_id, pool).await
-}
-
-/// Disbursement: principal outflow and provision fee inflow are recorded as two rows,
-/// as in the daily cash ledger.
-async fn disburse(
-    db: &mut SqliteConnection,
-    company_id: &str,
-    input: DisburseLoanInput,
-) -> Result<(), String> {
-    let channel = Channel::try_from(input.channel.as_str())?;
-    ensure_period_open(db, company_id, &input.business_date).await?;
-    let loan = sqlx::query(
-        "SELECT member_id, member_name, plafond, tenor, status FROM loans WHERE company_id = ? AND id = ?",
-    )
-    .bind(company_id)
-    .bind(&input.loan_id)
-    .fetch_optional(&mut *db)
-    .await
-    .map_err(|error| error.to_string())?
-    .ok_or("Pinjaman tidak ditemukan.")?;
-    let status: String = loan.try_get("status").map_err(|error| error.to_string())?;
-    if LoanStatus::try_from(status.as_str())? != LoanStatus::Draft
-        || loan_balance(db, company_id, &input.loan_id).await? != 0
-    {
-        return Err("Hanya pinjaman draf dengan saldo nol yang dapat dicairkan.".into());
-    }
-    let member_id: Option<String> = loan
-        .try_get("member_id")
-        .map_err(|error| error.to_string())?;
-    let member_name: String = loan
-        .try_get("member_name")
-        .map_err(|error| error.to_string())?;
-    let plafond: i64 = loan.try_get("plafond").map_err(|error| error.to_string())?;
-    let tenor: i64 = loan.try_get("tenor").map_err(|error| error.to_string())?;
-    let due_date = add_months(&input.business_date, tenor)?;
-    let provision_rate = parameter(
-        db,
-        company_id,
         ParameterKey::LoanProvisionRate,
-        &input.business_date,
+        &disbursement.business_date,
     )
     .await?;
-    let provision = calculate_rate_amount(plafond, provision_rate)?;
+    let provision = calculate_rate_amount(input.plafond, provision_rate)?;
+    let due_date = add_months(&disbursement.business_date, input.tenor)?;
+
+    let id = timestamp_id("LOAN");
+    sqlx::query("INSERT INTO loans (id, company_id, loan_group, member_id, member_name, plafond, rate_annual, tenor, interest_type, loan_type, realization_date, due_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(&id).bind(company_id).bind(loan_group.as_str()).bind(member_id).bind(&borrower_name).bind(input.plafond).bind(rate_percent).bind(input.tenor).bind(interest_type.as_str()).bind(loan_type.as_str()).bind(&disbursement.business_date).bind(&due_date).execute(&mut *db).await.map_err(|error| error.to_string())?;
 
     let disbursement_id = timestamp_id("DISB");
     append(
-        db,
+        &mut db,
         company_id,
         Entry {
             id: disbursement_id.clone(),
-            business_date: &input.business_date,
-            display_date: &input.display_date,
-            display_time: &input.display_time,
-            member_id: member_id.as_deref(),
-            member_name: &member_name,
-            transaction_type: TransactionType::LoanDisbursement,
+            business_date: &disbursement.business_date,
+            display_date: &disbursement.display_date,
+            display_time: &disbursement.display_time,
+            member_id,
+            member_name: &borrower_name,
             channel,
-            description: &format!("Realisasi Pinjaman {member_name}"),
-            reference: &format!("KBS/DISB/{}/{disbursement_id}", input.loan_id),
+            description: &format!("Realisasi Pinjaman {borrower_name}"),
+            reference: &format!("KBS/DISB/{id}/{disbursement_id}"),
             direction: TransactionDirection::Out,
             actor: APP_ACTOR,
             reversed_transaction_id: None,
             components: vec![Component::new(
                 ComponentType::LoanDisbursement,
                 "Pencairan pokok pinjaman",
-                plafond,
+                input.plafond,
             )
-            .for_loan(&input.loan_id)],
+            .for_loan(&id)],
         },
     )
     .await?;
     if provision > 0 {
         let provision_id = timestamp_id("PROV");
         append(
-            db,
+            &mut db,
             company_id,
             Entry {
                 id: provision_id.clone(),
-                business_date: &input.business_date,
-                display_date: &input.display_date,
-                display_time: &input.display_time,
-                member_id: member_id.as_deref(),
-                member_name: &member_name,
-                transaction_type: TransactionType::LoanProvision,
+                business_date: &disbursement.business_date,
+                display_date: &disbursement.display_date,
+                display_time: &disbursement.display_time,
+                member_id,
+                member_name: &borrower_name,
                 channel,
                 description: &format!(
                     "Provisi {} % x Rp. {}",
                     format_rate(provision_rate * 100.0),
-                    format_thousands(plafond)
+                    format_thousands(input.plafond)
                 ),
-                reference: &format!("KBS/PROV/{}/{provision_id}", input.loan_id),
+                reference: &format!("KBS/PROV/{id}/{provision_id}"),
                 direction: TransactionDirection::In,
                 actor: APP_ACTOR,
                 reversed_transaction_id: None,
@@ -239,31 +196,22 @@ async fn disburse(
                     "Pendapatan provisi",
                     provision,
                 )
-                .for_loan(&input.loan_id)],
+                .for_loan(&id)],
             },
         )
         .await?;
     }
-
-    // Loan terms (rather than balances) are also set at disbursement.
-    sqlx::query("UPDATE loans SET realization_date = ?, due_date = ?, status = ? WHERE company_id = ? AND id = ?")
-        .bind(&input.business_date)
-        .bind(&due_date)
-        .bind(LoanStatus::Active.as_str())
-        .bind(company_id)
-        .bind(&input.loan_id)
-        .execute(&mut *db)
-        .await
-        .map_err(|error| error.to_string())?;
     audit(
-        db,
+        &mut db,
         company_id,
         AuditEntityType::Loan,
-        &input.loan_id,
+        &id,
         AuditAction::Disbursed,
-        serde_json::json!({"plafond": plafond, "provision": provision, "dueDate": due_date, "channel": channel.as_str()}),
+        serde_json::json!({"loanGroup": loan_group.as_str(), "memberId": member_id, "plafond": input.plafond, "tenor": input.tenor, "interestType": interest_type.as_str(), "loanType": loan_type.as_str(), "provision": provision, "dueDate": due_date, "channel": channel.as_str()}),
     )
-    .await
+    .await?;
+    db.commit().await.map_err(|error| error.to_string())?;
+    get_app_snapshot(company_id, pool).await
 }
 
 #[cfg(test)]

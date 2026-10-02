@@ -13,8 +13,6 @@ import PageHeader from "../components/PageHeader.vue";
 import StatusPill from "../components/StatusPill.vue";
 import {
   formatCurrency,
-  LoanStatus,
-  MemberStatus,
   TransactionDirection,
   useKoperasiStore,
 } from "../store/koperasi";
@@ -56,12 +54,6 @@ const memberTransactions = computed(() => {
           <h3>{{ member.name }}</h3>
           <div class="member-detail__meta">
             <span><CalendarDays :size="14" /> {{ member.joinedAt }}</span>
-            <StatusPill
-              :label="member.status"
-              :tone="
-                member.status === MemberStatus.Active ? 'success' : 'neutral'
-              "
-            />
           </div>
         </div>
       </section>
@@ -88,22 +80,14 @@ const memberTransactions = computed(() => {
           <div v-for="loan in memberLoans" :key="loan.id">
             <div>
               <strong>{{ loan.id }}</strong>
-              <small>{{ loan.interestType }} · {{ loan.tenor }} bulan</small>
+              <small
+                >{{ loan.loanType }} · {{ loan.interestType }} ·
+                {{ loan.tenor }} bulan</small
+              >
             </div>
             <div class="member-detail__list-value">
               <strong>{{ formatCurrency(loan.balance) }}</strong>
-              <StatusPill
-                :label="loan.status"
-                :tone="
-                  loan.status === LoanStatus.Active
-                    ? 'success'
-                    : loan.status === LoanStatus.NeedsReview
-                      ? 'warning'
-                      : loan.status === LoanStatus.Draft
-                        ? 'info'
-                        : 'neutral'
-                "
-              />
+              <StatusPill v-if="loan.balance <= 0" label="Lunas" />
             </div>
           </div>
         </div>
