@@ -85,7 +85,7 @@ export const config = {
           "--features",
           "e2e",
           "--config",
-          join(root, "e2e", "tauri.conf.json"),
+          join(root, "e2e", "tauri.e2e.conf.json"),
         ],
         {
           cwd: root,
