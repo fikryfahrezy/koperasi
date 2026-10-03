@@ -9,10 +9,12 @@ import {
   HandCoins,
   Plus,
   ReceiptText,
+  Search,
   Undo2,
   Wallet,
 } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
+import DateInput from "../components/DateInput.vue";
 import RupiahInput from "../components/RupiahInput.vue";
 import UiModal from "../components/UiModal.vue";
 import UiSelect from "../components/UiSelect.vue";
@@ -24,7 +26,6 @@ import {
   InterestType,
   LoanGroup,
   LoanType,
-  type CashBook,
   type CashCategory,
   type CashBookRow,
   type LoanPreview,
@@ -34,17 +35,14 @@ import {
   TransactionDirection,
   TransactionStatus,
   useKoperasiStore,
+  useCashBook,
 } from "../store/koperasi";
 
 const {
   members,
   loans,
-  selectedYear,
-  selectedCompanyId,
-  snapshotVersion,
   financialParameters,
   createLoan,
-  getCashBook,
   loadFinancialParameters,
   notify,
   postCashEntry,
@@ -56,36 +54,25 @@ const {
 } = useKoperasiStore();
 
 // --- Cash ledger (following the daily cash ledger spreadsheet) ----------------------------
-const cashBook = ref<CashBook | null>(null);
-const loadingBook = ref(false);
+const { cashBook, loadingBook } = useCashBook(Channel.Cash);
 const selected = ref<CashBookRow | null>(null);
 
-let bookRequest = 0;
-async function loadCashBook() {
-  const request = ++bookRequest;
-  loadingBook.value = true;
-  try {
-    const book = await getCashBook(selectedYear.value, Channel.Cash);
-    if (request === bookRequest) cashBook.value = book;
-  } catch (error) {
-    if (request === bookRequest) {
-      cashBook.value = null;
-      notify("Buku kas gagal dimuat", String(error), "warning");
-    }
-  } finally {
-    if (request === bookRequest) loadingBook.value = false;
-  }
-}
-watch([selectedYear, selectedCompanyId, snapshotVersion], loadCashBook);
 onMounted(() => {
-  void loadCashBook();
   void loadFinancialParameters();
 });
 
 const rows = computed(() => cashBook.value?.rows ?? []);
+const query = ref("");
+const filteredRows = computed(() => {
+  const search = query.value.trim().toLowerCase();
+  return rows.value.filter((row) =>
+    row.description.toLowerCase().includes(search),
+  );
+});
 // As in the spreadsheet, the date appears only on the first row of each day.
 const showDate = (index: number) =>
-  index === 0 || rows.value[index - 1].date !== rows.value[index].date;
+  index === 0 ||
+  filteredRows.value[index - 1].date !== filteredRows.value[index].date;
 const isExcluded = (item: CashBookRow) =>
   item.status === TransactionStatus.Reversed || item.isReversal;
 
@@ -327,13 +314,25 @@ async function reverseSelected() {
   if (reversed) selected.value = null;
 }
 async function refreshPage() {
-  await Promise.all([refresh(), loadFinancialParameters()]);
+  await refresh();
+  await loadFinancialParameters();
 }
 </script>
 
 <template>
   <div class="page-stack page-stack--sheet">
     <PageHeader title="Buku kas harian" :refresh="refreshPage">
+      <template #before-actions>
+        <label class="search-field">
+          <Search :size="18" />
+          <input
+            v-model="query"
+            type="search"
+            aria-label="Cari uraian transaksi"
+            placeholder="Cari uraian..."
+          />
+        </label>
+      </template>
       <template #actions>
         <button class="button button--primary" type="button" @click="openModal">
           <Plus :size="18" /> Catat transaksi
@@ -351,7 +350,7 @@ async function refreshPage() {
         <p>Catat transaksi baru dengan tombol Catat transaksi.</p>
       </div>
       <div v-else class="data-table-wrap sheet-wrap">
-        <table class="sheet-table cash-book-table">
+        <table v-table-navigation class="sheet-table cash-book-table">
           <thead>
             <tr>
               <th rowspan="2">Tanggal</th>
@@ -379,7 +378,7 @@ async function refreshPage() {
               </td>
             </tr>
             <tr
-              v-for="(item, index) in rows"
+              v-for="(item, index) in filteredRows"
               :key="item.id"
               class="cash-book-table__row"
               :class="{ 'is-excluded': isExcluded(item) }"
@@ -405,10 +404,17 @@ async function refreshPage() {
                 {{ formatSheetNumber(item.balance) }}
               </td>
             </tr>
+            <tr v-if="!loadingBook && query.trim() && !filteredRows.length">
+              <td colspan="5">
+                Tidak ada transaksi yang cocok dengan pencarian.
+              </td>
+            </tr>
           </tbody>
           <tfoot>
             <tr>
-              <td colspan="2">JUMLAH</td>
+              <td colspan="2">
+                {{ query.trim() ? "JUMLAH TAHUNAN" : "JUMLAH" }}
+              </td>
               <td class="num-cell">
                 {{ formatSheetNumber(cashBook?.totalOut ?? 0) }}
               </td>
@@ -428,7 +434,6 @@ async function refreshPage() {
       :open="modalOpen"
       size="lg"
       title="Catat transaksi"
-      description="Transaksi tidak dapat diedit; koreksi dilakukan dengan reversal."
       @close="modalOpen = false"
     >
       <form class="form-stack" @submit.prevent="submit">
@@ -466,10 +471,10 @@ async function refreshPage() {
           </div>
         </fieldset>
 
-        <label class="field">
+        <div class="field">
           <span>Tanggal</span>
-          <input v-model="posting.businessDate" type="date" required />
-        </label>
+          <DateInput v-model="posting.businessDate" required />
+        </div>
 
         <template v-if="category === Category.Payment">
           <label class="field">
