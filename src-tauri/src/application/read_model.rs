@@ -132,7 +132,9 @@ async fn snapshot(company_id: &str, pool: &SqlitePool) -> Result<AppSnapshot, St
                 interest_type: InterestType::try_from(
                     try_column!(row, "interest_type", String).as_str(),
                 )?,
-                loan_type: LoanType::try_from(try_column!(row, "loan_type", String).as_str())?,
+                loan_type: try_column!(row, "loan_type", Option<String>)
+                    .map(|value| LoanType::try_from(value.as_str()))
+                    .transpose()?,
                 realization_date: try_column!(row, "realization_date"),
                 due_date: try_column!(row, "due_date"),
                 guarantee: try_column!(row, "guarantee"),
