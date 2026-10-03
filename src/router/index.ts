@@ -18,7 +18,7 @@ export const router = createRouter({
     {
       path: "/members",
       component: Members,
-      meta: { titleKey: "sidebar.nav.members" },
+      meta: { titleKey: "sidebar.nav.members", fitViewport: true },
     },
     {
       path: "/members/:id",
@@ -39,7 +39,7 @@ export const router = createRouter({
     {
       path: "/cash-ledger",
       component: CashLedger,
-      meta: { titleKey: "sidebar.nav.cashLedger" },
+      meta: { titleKey: "sidebar.nav.cashLedger", fitViewport: true },
     },
     { path: "/:pathMatch(.*)*", redirect: "/new-tab" },
   ],

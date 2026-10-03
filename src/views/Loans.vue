@@ -181,10 +181,7 @@ const totalColumns = (key: string) =>
       <p>Pilih tahun lain.</p>
     </section>
     <section v-else class="panel table-panel">
-      <div
-        v-if="period"
-        class="data-table-wrap sheet-wrap sheet-wrap--header-controls"
-      >
+      <div v-if="period" class="data-table-wrap sheet-wrap">
         <table class="sheet-table">
           <thead>
             <tr>

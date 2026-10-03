@@ -332,7 +332,7 @@ async function refreshPage() {
 </script>
 
 <template>
-  <div class="page-stack">
+  <div class="page-stack page-stack--sheet">
     <PageHeader title="Buku kas harian" :refresh="refreshPage">
       <template #actions>
         <button class="button button--primary" type="button" @click="openModal">
