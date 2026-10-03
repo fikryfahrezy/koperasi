@@ -72,8 +72,7 @@ async function submit() {
     <PageHeader title="Anggota" :refresh="refresh">
       <template #title-meta>
         <span class="page-heading__meta" aria-live="polite">
-          <strong>{{ filteredMembers.length }}</strong> dari
-          {{ totals.members.value }} anggota
+          <strong>{{ totals.members.value }}</strong> anggota
         </span>
       </template>
       <template #before-actions>
@@ -98,7 +97,7 @@ async function submit() {
     </PageHeader>
     <section class="panel table-panel">
       <div class="data-table-wrap">
-        <table class="data-table">
+        <table v-table-navigation class="data-table">
           <thead>
             <tr>
               <th>Anggota</th>
