@@ -26,7 +26,7 @@ const { t } = useI18n();
 
 onMounted(async () => {
   currentVersion.value = await getVersion();
-  checkForUpdate(true);
+  if (import.meta.env.VITE_E2E !== "true") checkForUpdate(true);
 });
 
 async function checkForUpdate(silent = false) {
