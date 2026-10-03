@@ -306,7 +306,8 @@ const monthlyLedger = reactive<MonthlyLedger>({
 });
 const monthlyLedgerLoading = ref(false);
 const companies = ref<Company[]>([]);
-const selectedCompanyId = ref("default");
+const configuredCompanyId = import.meta.env.VITE_COMPANY_ID?.trim() || "";
+const selectedCompanyId = ref(configuredCompanyId || "default");
 
 const command = {
   listCompanies: "list_companies",
@@ -437,6 +438,14 @@ async function initialize() {
     try {
       companies.value = await backend.listCompanies();
       if (
+        configuredCompanyId &&
+        !companies.value.some((company) => company.id === configuredCompanyId)
+      ) {
+        throw new Error(
+          `VITE_COMPANY_ID "${configuredCompanyId}" tidak ditemukan dalam daftar perusahaan.`,
+        );
+      }
+      if (
         !companies.value.some(
           (company) => company.id === selectedCompanyId.value,
         )
@@ -482,6 +491,7 @@ async function refresh() {
 }
 
 async function selectCompany(companyId: string) {
+  if (configuredCompanyId && companyId !== configuredCompanyId) return false;
   if (companyId === selectedCompanyId.value) return true;
   selectedCompanyId.value = companyId;
   loading.value = true;
@@ -808,6 +818,7 @@ export const useKoperasiStore = () => ({
   financialParameters,
   toasts,
   companies,
+  configuredCompanyId,
   selectedCompanyId,
   selectedYear,
   yearOptions,
