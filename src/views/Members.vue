@@ -68,7 +68,7 @@ async function submit() {
 </script>
 
 <template>
-  <div class="page-stack">
+  <div class="page-stack page-stack--sheet">
     <PageHeader title="Anggota" :refresh="refresh">
       <template #title-meta>
         <span class="page-heading__meta" aria-live="polite">

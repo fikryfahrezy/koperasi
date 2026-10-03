@@ -73,66 +73,56 @@ strong {
 }
 
 .app-frame {
-  min-height: 100vh;
+  /* Chromium 88 (Windows 7) ignores dvh, so keep vh as the fallback. */
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 .app-shell {
-  min-height: 100vh;
+  height: 100%;
 }
 .app-shell__body {
   min-width: 0;
-  min-height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
 .app-shell__chrome {
-  position: sticky;
-  top: 0;
+  flex-shrink: 0;
   z-index: 20;
   background: #fff;
 }
 .app-content {
-  flex: 1;
+  flex: 1 1 0%;
+  min-height: 0;
   width: 100%;
   padding: 12px var(--shell-gutter) 24px;
+  overflow: auto;
 }
 
-/* Ledger pages reserve the remaining window height for their table scroller. */
-.app-frame--sheet {
-  height: 100dvh;
-  min-height: 0;
-  overflow: hidden;
-}
-.app-frame--sheet .app-shell,
-.app-frame--sheet .app-shell__body {
-  height: 100%;
-  min-height: 0;
-}
-.app-frame--sheet .app-shell__chrome,
-.app-frame--sheet .app-menu {
-  flex-shrink: 0;
-}
+/* Table pages reserve the remaining window height for their table scroller. */
 .app-frame--sheet .app-content {
-  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 .page-stack--sheet {
-  flex: 1;
+  flex: 1 1 0%;
   min-height: 0;
 }
 .page-stack--sheet > .page-heading {
   flex-shrink: 0;
 }
 .page-stack--sheet > .table-panel {
-  flex: 1;
+  flex: 1 1 0%;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
-.page-stack--sheet .sheet-wrap {
-  flex: 1;
+.page-stack--sheet .data-table-wrap {
+  flex: 1 1 0%;
   min-height: 0;
-  max-height: none;
+  overflow: auto;
 }
 
 .sidebar {
@@ -194,8 +184,7 @@ strong {
   font-size: 9.5px;
 }
 .app-menu {
-  position: sticky;
-  bottom: 0;
+  flex-shrink: 0;
   z-index: 18;
   height: 45px;
   border-top: 1px solid var(--line-strong);
@@ -475,7 +464,7 @@ strong {
   background: #e4ebe7;
 }
 .new-tab-page {
-  min-height: calc(100vh - 155px);
+  min-height: 100%;
   display: grid;
   align-content: center;
   justify-items: center;
@@ -795,15 +784,9 @@ strong {
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
-/* Excel-style tables (Savings, Loans). */
+/* Excel-style tables (Savings, Loans, Cash ledger). */
 .sheet-wrap {
-  max-height: calc(100vh - 300px);
-  min-height: 320px;
   overflow: auto;
-}
-.sheet-wrap--header-controls {
-  /* Use the 66px freed by moving the toolbar into the page heading. */
-  max-height: calc(100vh - 234px);
 }
 .sheet-table {
   min-width: 100%;
