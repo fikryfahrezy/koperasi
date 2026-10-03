@@ -43,7 +43,8 @@ pub(crate) struct LoanDto {
     pub(crate) rate: f64,
     pub(crate) tenor: i64,
     pub(crate) interest_type: InterestType,
-    pub(crate) loan_type: LoanType,
+    /// Empty where the sheet leaves Jenis Pinjaman blank.
+    pub(crate) loan_type: Option<LoanType>,
     pub(crate) realization_date: String,
     pub(crate) due_date: String,
     pub(crate) guarantee: String,
