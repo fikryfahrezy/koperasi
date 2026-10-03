@@ -142,6 +142,7 @@ async function submit() {
           ><span>Nama lengkap</span
           ><input
             v-model="form.name"
+            aria-label="Nama lengkap"
             required
             placeholder="Contoh: Nani Suryani"
         /></label>

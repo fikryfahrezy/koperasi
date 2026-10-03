@@ -34,6 +34,10 @@ pnpm run build
 cargo test --manifest-path src-tauri/Cargo.toml --locked --offline
 ```
 
+Test E2E aplikasi desktop menggunakan WebdriverIO tersedia melalui
+`pnpm test:e2e` pada Linux/Windows dan workflow **E2E** di GitHub Actions.
+Lihat [panduan E2E](e2e/README.md) untuk instalasi driver dan batasan macOS.
+
 Database lokal dibuat otomatis pada startup pertama. Di Windows lokasinya berada
 di `%APPDATA%\com.fikryfahrezy.koperasi\koperasi.db`.
 
