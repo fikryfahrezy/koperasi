@@ -106,7 +106,8 @@ export interface Loan {
   rate: number;
   tenor: number;
   interestType: InterestType;
-  loanType: LoanType;
+  /** Empty where the sheet leaves Jenis Pinjaman blank. */
+  loanType: LoanType | null;
   realizationDate: string;
   dueDate: string;
   guarantee: string;

@@ -81,8 +81,8 @@ const memberTransactions = computed(() => {
             <div>
               <strong>{{ loan.id }}</strong>
               <small
-                >{{ loan.loanType }} · {{ loan.interestType }} ·
-                {{ loan.tenor }} bulan</small
+                >{{ loan.loanType ? `${loan.loanType} · ` : ""
+                }}{{ loan.interestType }} · {{ loan.tenor }} bulan</small
               >
             </div>
             <div class="member-detail__list-value">

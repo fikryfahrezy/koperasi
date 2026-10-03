@@ -9,6 +9,7 @@ import {
   formatSheetDate,
   formatSheetNumber,
   type Loan,
+  LoanGroup,
   useKoperasiStore,
   useMonthlyLedger,
 } from "../store/koperasi";
@@ -17,6 +18,12 @@ const { loans, selectedYear, refresh } = useKoperasiStore();
 const { monthlyLedger, monthlyLedgerLoading } = useMonthlyLedger();
 
 const period = ref("");
+const groupFilter = ref<LoanGroup | "">("");
+const groupOptions = [
+  { value: "", label: "Semua" },
+  { value: LoanGroup.Member, label: "Anggota PP BRI" },
+  { value: LoanGroup.NonMember, label: "Non Anggota PP BRI" },
+];
 const periodOptions = computed(() =>
   [...monthlyLedger.periods]
     .reverse()
@@ -42,14 +49,13 @@ const monthRows = computed(() =>
     .map((row) => ({ ...row, loan: loanById.value.get(row.loanId) }))
     .filter((row): row is typeof row & { loan: Loan } => Boolean(row.loan))
     .sort((a, b) => a.loanId.localeCompare(b.loanId))
-    .map((row, index) => {
+    .map((row) => {
       const priorArrearsPrincipal =
         row.arrearsPrincipal - row.scheduledPrincipal + row.principalPaid;
       const priorArrearsInterest =
         row.arrearsInterest - row.scheduledInterest + row.interestPaid;
       return {
         ...row,
-        no: index + 1,
         plafond: row.loan.plafond,
         scheduledTotal: row.scheduledPrincipal + row.scheduledInterest,
         priorArrearsPrincipal,
@@ -100,7 +106,7 @@ type TotalKey =
   | (typeof beforeMutation)[number]
   | (typeof mutation)[number]
   | (typeof afterMutation)[number];
-const totals = computed(() => {
+function sumRows(rows: MonthRow[]) {
   const keys: TotalKey[] = [
     "plafond",
     ...beforeMutation,
@@ -111,14 +117,37 @@ const totals = computed(() => {
     TotalKey,
     number
   >;
-  for (const row of monthRows.value as MonthRow[]) {
+  for (const row of rows) {
     for (const key of keys) sum[key] += row[key];
   }
   return sum;
-});
+}
+// Sections of PINJAMAN BULANAN; numbering restarts in each section, as in the sheet.
+const sections = computed(() =>
+  [
+    { group: LoanGroup.Member, title: "PINJAMAN ANGGOTA PP BRI" },
+    { group: LoanGroup.NonMember, title: "PINJAMAN NON ANGGOTA PP BRI" },
+  ]
+    .filter(
+      (section) => !groupFilter.value || section.group === groupFilter.value,
+    )
+    .map((section) => {
+      const rows = (monthRows.value as MonthRow[])
+        .filter((row) => row.loan.loanGroup === section.group)
+        .map((row, index) => ({ ...row, no: index + 1 }));
+      return { ...section, rows, totals: sumRows(rows) };
+    }),
+);
+const totals = computed(() =>
+  sumRows(sections.value.flatMap((section) => section.rows)),
+);
 
 const monthlyRate = (loan: Loan) =>
   `${(loan.rate / 12).toLocaleString("id-ID", { maximumFractionDigits: 2 })}%`;
+// No, Nama, Plafond, Bunga (2), PG/TN, Jenis, Realisasi, Jatuh Tempo, Jangka Waktu,
+// the numeric blocks and the mutation date.
+const totalColumnCount =
+  10 + beforeMutation.length + 1 + mutation.length + afterMutation.length;
 const totalColumns = (key: string) =>
   key === "openingBalance" || key === "closingBalance";
 </script>
@@ -132,6 +161,13 @@ const totalColumns = (key: string) =>
           v-model="period"
           :options="periodOptions"
           aria-label="Bulan"
+          variant="toolbar"
+        />
+        <UiSelect
+          v-if="periodOptions.length"
+          v-model="groupFilter"
+          :options="groupOptions"
+          aria-label="Kelompok pinjaman"
           variant="toolbar"
         />
       </template>
@@ -205,8 +241,15 @@ const totalColumns = (key: string) =>
               <th>Jumlah</th>
             </tr>
           </thead>
-          <tbody>
-            <tr v-for="row in monthRows" :key="row.loanId">
+          <tbody v-for="section in sections" :key="section.group">
+            <tr>
+              <td class="sheet-sticky sheet-no"></td>
+              <td class="sheet-sticky sheet-name">
+                <strong>{{ section.title }}</strong>
+              </td>
+              <td :colspan="totalColumnCount - 2"></td>
+            </tr>
+            <tr v-for="row in section.rows" :key="row.loanId">
               <td class="sheet-sticky sheet-no">{{ row.no }}</td>
               <td class="sheet-sticky sheet-name">
                 <strong>{{ row.loan.memberName }}</strong>
@@ -217,7 +260,7 @@ const totalColumns = (key: string) =>
               <td class="num-cell">{{ monthlyRate(row.loan) }}</td>
               <td>{{ row.loan.interestType.toLowerCase() }}</td>
               <td>{{ row.loan.guarantee }}</td>
-              <td>{{ row.loan.loanType }}</td>
+              <td>{{ row.loan.loanType ?? "" }}</td>
               <td>{{ row.loan.realizationDate }}</td>
               <td>{{ row.loan.dueDate }}</td>
               <td class="num-cell">{{ row.loan.tenor }}</td>
@@ -242,11 +285,39 @@ const totalColumns = (key: string) =>
                 {{ formatSheetNumber(row[key]) }}
               </td>
             </tr>
+            <tr>
+              <td class="sheet-sticky sheet-no"></td>
+              <td class="sheet-sticky sheet-name">SUB JUMLAH</td>
+              <td class="num-cell">
+                {{ formatSheetNumber(section.totals.plafond) }}
+              </td>
+              <td colspan="7"></td>
+              <td
+                v-for="key in beforeMutation"
+                :key="key"
+                class="num-cell"
+                :class="{ 'sheet-total': totalColumns(key) }"
+              >
+                {{ formatSheetNumber(section.totals[key]) }}
+              </td>
+              <td></td>
+              <td v-for="key in mutation" :key="key" class="num-cell">
+                {{ formatSheetNumber(section.totals[key]) }}
+              </td>
+              <td
+                v-for="key in afterMutation"
+                :key="key"
+                class="num-cell"
+                :class="{ 'sheet-total': totalColumns(key) }"
+              >
+                {{ formatSheetNumber(section.totals[key]) }}
+              </td>
+            </tr>
           </tbody>
           <tfoot>
             <tr>
               <td class="sheet-sticky sheet-no"></td>
-              <td class="sheet-sticky sheet-name">JUMLAH</td>
+              <td class="sheet-sticky sheet-name">JUMLAH TOTAL</td>
               <td class="num-cell">{{ formatSheetNumber(totals.plafond) }}</td>
               <td colspan="7"></td>
               <td

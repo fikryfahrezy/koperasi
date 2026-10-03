@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS savings_accounts (
 
 -- Loan terms; principal balances are in the loan_balances view.
 -- loan_group: PINJAMAN BULANAN section (Anggota PP BRI / Non Anggota PP BRI).
--- loan_type:  Jenis Pinjaman (Bulanan / Sementara).
+-- loan_type:  Jenis Pinjaman (Bulanan / Sementara); empty where the sheet leaves it blank
+--             (the Non Anggota section).
 -- member_id is empty for Non Anggota borrowers.
 CREATE TABLE IF NOT EXISTS loans (
   id TEXT PRIMARY KEY,
@@ -56,7 +57,7 @@ CREATE TABLE IF NOT EXISTS loans (
   rate_annual REAL NOT NULL,
   tenor INTEGER NOT NULL CHECK (tenor > 0),
   interest_type TEXT NOT NULL,
-  loan_type TEXT NOT NULL,
+  loan_type TEXT,
   guarantee TEXT NOT NULL DEFAULT '',
   realization_date TEXT NOT NULL,
   due_date TEXT NOT NULL,
