@@ -26,5 +26,5 @@ dist-ssr
 src-tauri/Microsoft.WebView2.FixedVersionRuntime.*/
 Microsoft.WebView2.FixedVersionRuntime.*.cab
 
-# Private cooperative member/financial documents. Never commit these.
-docs/
+# Notes on broken source-sheet data (contains real names)
+data-issues/

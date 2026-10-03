@@ -10,7 +10,7 @@ use std::collections::{BTreeSet, HashMap};
 use sqlx::{Row, SqlitePool};
 
 use crate::contracts::{LoanMonthDto, MonthlyLedgerDto, SavingsMonthDto};
-use crate::domain::{ComponentType, InterestType, SavingsAccountType};
+use crate::domain::{ComponentType, InterestType, LoanType, SavingsAccountType};
 
 macro_rules! col {
     ($row:expr, $column:literal) => {
@@ -73,19 +73,54 @@ fn period_range(first: &str, last: &str) -> Vec<String> {
     periods
 }
 
+/// `YYYY-MM` of a stored date: `2026-04-05` or `05-Apr-2026` (as in the sheet).
+fn date_period(value: &str) -> Option<String> {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let bytes = value.as_bytes();
+    if value.len() == 10 && bytes[4] == b'-' && bytes[7] == b'-' {
+        return Some(value[..7].to_string());
+    }
+    let mut parts = value.split('-');
+    let (_day, month, year) = (parts.next()?, parts.next()?, parts.next()?);
+    let month = MONTHS.iter().position(|name| *name == month)? + 1;
+    (year.len() == 4 && year.chars().all(|ch| ch.is_ascii_digit()))
+        .then(|| format!("{year}-{month:02}"))
+}
+
 /// Scheduled principal and interest installments for a month with an `opening` balance,
-/// following the spreadsheet formula: principal = loan limit / term, rounded up to the nearest thousand.
+/// following PINJAMAN BULANAN:
+/// - Bulanan: principal = loan limit / term, rounded up to the nearest thousand.
+/// - Sementara: no principal installments; the whole balance falls due in the
+///   jatuh tempo month.
+/// - After the jatuh tempo month nothing new falls due; what is unpaid stays in arrears.
+#[allow(clippy::too_many_arguments)]
 fn scheduled_installment(
     plafond: i64,
     tenor: i64,
     annual_rate: f64,
     interest_type: InterestType,
+    loan_type: Option<LoanType>,
+    due_period: Option<&str>,
+    period: &str,
     opening: i64,
 ) -> (i64, i64) {
     if opening <= 0 || plafond <= 0 || tenor <= 0 {
         return (0, 0);
     }
-    let principal = ((plafond + tenor * 1_000 - 1) / (tenor * 1_000)) * 1_000;
+    if due_period.is_some_and(|due| period > due) {
+        return (0, 0);
+    }
+    let principal = if loan_type == Some(LoanType::Temporary) {
+        if due_period == Some(period) {
+            opening
+        } else {
+            0
+        }
+    } else {
+        ((plafond + tenor * 1_000 - 1) / (tenor * 1_000)) * 1_000
+    };
     let interest_base = if interest_type == InterestType::Flat {
         plafond
     } else {
@@ -261,7 +296,7 @@ pub(crate) async fn get_monthly_ledger(
 
     let mut loans = Vec::new();
     for row in sqlx::query(
-        "SELECT id, plafond, rate_annual, tenor, interest_type FROM loans WHERE company_id = ?",
+        "SELECT id, plafond, rate_annual, tenor, interest_type, loan_type, due_date FROM loans WHERE company_id = ?",
     )
     .bind(company_id)
     .fetch_all(pool)
@@ -274,6 +309,12 @@ pub(crate) async fn get_monthly_ledger(
         let tenor: i64 = col!(row, "tenor");
         let interest_type: String = col!(row, "interest_type");
         let interest_type = InterestType::try_from(interest_type.as_str())?;
+        let loan_type: Option<String> = col!(row, "loan_type");
+        let loan_type = loan_type
+            .map(|value| LoanType::try_from(value.as_str()))
+            .transpose()?;
+        let due_date: String = col!(row, "due_date");
+        let due_period = date_period(&due_date);
         let Some(first_period) = loan_first_period.get(&loan_id) else {
             continue;
         };
@@ -284,13 +325,23 @@ pub(crate) async fn get_monthly_ledger(
                 .cloned()
                 .unwrap_or_default();
             let opening = balance + month.opening;
-            let (scheduled_principal, scheduled_interest) =
-                scheduled_installment(plafond, tenor, rate, interest_type, opening);
+            let (scheduled_principal, scheduled_interest) = scheduled_installment(
+                plafond,
+                tenor,
+                rate,
+                interest_type,
+                loan_type,
+                due_period.as_deref(),
+                period,
+                opening,
+            );
             arrears_principal +=
                 month.opening_arrears_principal + scheduled_principal - month.principal_paid;
             arrears_interest +=
                 month.opening_arrears_interest + scheduled_interest - month.interest_paid;
             balance = opening + month.disbursed - month.principal_paid;
+            // Arrears never exceed what is still owed, as in the sheet.
+            arrears_principal = arrears_principal.min(balance.max(0));
             if period.starts_with(&year_prefix) {
                 loans.push(LoanMonthDto {
                     loan_id: loan_id.clone(),
@@ -321,6 +372,54 @@ pub(crate) async fn get_monthly_ledger(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn schedules_installments_like_the_loan_sheet() {
+        assert_eq!(date_period("05-Apr-2026").as_deref(), Some("2026-04"));
+        assert_eq!(date_period("2026-04-05").as_deref(), Some("2026-04"));
+        assert_eq!(date_period("-"), None);
+        let monthly = |period, opening| {
+            scheduled_installment(
+                20_000_000,
+                24,
+                24.0,
+                InterestType::Declining,
+                Some(LoanType::Monthly),
+                Some("2027-11"),
+                period,
+                opening,
+            )
+        };
+        assert_eq!(monthly("2026-01", 19_166_600), (834_000, 383_332));
+        // Past jatuh tempo nothing new falls due.
+        let overdue = scheduled_installment(
+            35_000_000,
+            20,
+            18.0,
+            InterestType::Flat,
+            Some(LoanType::Monthly),
+            Some("2016-11"),
+            "2026-01",
+            20_000_000,
+        );
+        assert_eq!(overdue, (0, 0));
+        // Sementara: interest monthly, the whole balance in the jatuh tempo month.
+        let temporary = |period| {
+            scheduled_installment(
+                5_000_000,
+                3,
+                24.0,
+                InterestType::Flat,
+                Some(LoanType::Temporary),
+                Some("2026-04"),
+                period,
+                5_000_000,
+            )
+        };
+        assert_eq!(temporary("2026-02"), (0, 100_000));
+        assert_eq!(temporary("2026-04"), (5_000_000, 100_000));
+        assert_eq!(temporary("2026-05"), (0, 0));
+    }
 
     #[test]
     fn reads_imported_loan_components_and_rejects_unknown_types() {
@@ -414,22 +513,58 @@ mod tests {
     fn schedules_installments_like_the_sheet() {
         // L003: loan limit of 25 million, 36 months, declining interest at 24% per year.
         assert_eq!(
-            scheduled_installment(25_000_000, 36, 24.0, InterestType::Declining, 24_305_000),
+            scheduled_installment(
+                25_000_000,
+                36,
+                24.0,
+                InterestType::Declining,
+                Some(LoanType::Monthly),
+                None,
+                "2026-01",
+                24_305_000
+            ),
             (695_000, 486_100)
         );
         // Flat interest still uses the loan limit rather than the opening balance.
         assert_eq!(
-            scheduled_installment(25_000_000, 36, 24.0, InterestType::Flat, 24_305_000),
+            scheduled_installment(
+                25_000_000,
+                36,
+                24.0,
+                InterestType::Flat,
+                Some(LoanType::Monthly),
+                None,
+                "2026-01",
+                24_305_000
+            ),
             (695_000, 500_000)
         );
         // The remaining balance is smaller than the installment.
         assert_eq!(
-            scheduled_installment(3_200_000, 15, 24.0, InterestType::Declining, 100_000),
+            scheduled_installment(
+                3_200_000,
+                15,
+                24.0,
+                InterestType::Declining,
+                Some(LoanType::Monthly),
+                None,
+                "2026-01",
+                100_000
+            ),
             (100_000, 2_000)
         );
         // No loan limit provided: no repayment schedule.
         assert_eq!(
-            scheduled_installment(0, 10, 24.0, InterestType::Declining, 5_000_000),
+            scheduled_installment(
+                0,
+                10,
+                24.0,
+                InterestType::Declining,
+                Some(LoanType::Monthly),
+                None,
+                "2026-01",
+                5_000_000
+            ),
             (0, 0)
         );
     }
