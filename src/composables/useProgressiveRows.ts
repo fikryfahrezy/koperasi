@@ -55,9 +55,13 @@ export function useProgressiveRows(
   onDeactivated(() => {
     active = false;
     cancel();
+    // Clear the rendered rows while hidden so returning does not attach the
+    // entire cached table before the loading state can appear.
+    renderedRowCount.value = 0;
   });
   onActivated(() => {
     active = true;
+    renderedRowCount.value = 0;
     schedule();
   });
   onScopeDispose(cancel);
