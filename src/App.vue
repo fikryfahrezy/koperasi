@@ -19,6 +19,7 @@ const {
   selectedYear,
   yearOptions,
   companies,
+  configuredCompanyId,
   selectedCompanyId,
   selectCompany,
 } = useKoperasiStore();
@@ -62,6 +63,7 @@ onMounted(initialize);
             </div>
             <div class="topbar__tools">
               <UiSelect
+                v-if="!configuredCompanyId"
                 class="company-control"
                 :model-value="selectedCompanyId"
                 :options="companyOptions"

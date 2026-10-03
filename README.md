@@ -27,6 +27,18 @@ Perintah tersebut menyalakan frontend Vite dan shell desktop beserta backend
 Rust. `pnpm run dev` hanya menjalankan frontend sehingga command database tidak
 tersedia.
 
+Untuk menetapkan perusahaan dan menyembunyikan pilihan perusahaan di toolbar,
+buat file `.env.local` di root project:
+
+```dotenv
+VITE_COMPANY_ID=default
+```
+
+Gunakan ID perusahaan yang tersedia di database. Jika variabel tidak diisi atau
+dikosongkan, pilihan perusahaan tetap ditampilkan dan dapat diubah. ID yang tidak
+ditemukan akan menampilkan error konfigurasi. Nilai ini dibaca Vite saat dev/build;
+restart proses dev atau build ulang aplikasi setelah mengubahnya.
+
 Untuk validasi frontend produksi dan test backend:
 
 ```bash
