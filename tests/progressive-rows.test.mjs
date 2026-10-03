@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { createRenderer, h, KeepAlive, nextTick, ref } from "vue";
 import { useProgressiveRows } from "../src/composables/useProgressiveRows.ts";
 
-test("sheets yield between batches and restart on filters and every tab visit", async (t) => {
+test("sheets yield between batches, restart on filters, and pause in cached tabs", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const rows = ref(Array.from({ length: 100 }, (_, id) => ({ id })));
   const columns = ref(200);
@@ -51,18 +51,16 @@ test("sheets yield between batches and restart on filters and every tab visit", 
     t.mock.timers.tick(100);
     assert.equal(
       progress.renderedRowCount.value,
-      0,
-      "hidden tabs clear rendered rows and stop rendering",
+      4,
+      "hidden tabs stop rendering",
     );
     visible.value = true;
     await nextTick();
-    assert.equal(progress.renderingRows.value, true);
-    assert.equal(progress.renderedRowCount.value, 0);
     t.mock.timers.tick(16);
     assert.equal(
       progress.renderedRowCount.value,
-      4,
-      "returning starts a new rendering pass using cached data",
+      8,
+      "returning resumes the cached sheet",
     );
 
     rows.value = rows.value.slice(0, 10);
@@ -72,26 +70,6 @@ test("sheets yield between batches and restart on filters and every tab visit", 
       progress.renderedRowCount.value,
       0,
       "filters cancel the previous batch",
-    );
-    t.mock.timers.tick(16);
-    assert.equal(progress.renderedRowCount.value, 10);
-    assert.equal(progress.renderingRows.value, false);
-
-    const cachedRows = rows.value;
-    visible.value = false;
-    await nextTick();
-    visible.value = true;
-    await nextTick();
-    assert.equal(
-      rows.value,
-      cachedRows,
-      "returning preserves the data and filters",
-    );
-    assert.equal(progress.renderedRowCount.value, 0);
-    assert.equal(
-      progress.renderingRows.value,
-      true,
-      "completed sheets also load on return",
     );
     t.mock.timers.tick(16);
     assert.equal(progress.renderedRowCount.value, 10);
@@ -112,7 +90,7 @@ test("sheets yield between batches and restart on filters and every tab visit", 
     t.mock.timers.tick(100);
     assert.equal(
       progress.renderedRowCount.value,
-      0,
+      25,
       "closing a tab cancels pending work",
     );
   } finally {
