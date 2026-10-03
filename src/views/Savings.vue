@@ -129,10 +129,7 @@ const closingKeys = [
     </section>
     <template v-else>
       <section class="panel table-panel">
-        <div
-          v-if="period"
-          class="data-table-wrap sheet-wrap sheet-wrap--header-controls"
-        >
+        <div v-if="period" class="data-table-wrap sheet-wrap">
           <table class="sheet-table">
             <thead>
               <tr>
