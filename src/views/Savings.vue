@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { CalendarX2 } from "lucide-vue-next";
+import { CalendarX2, Search } from "lucide-vue-next";
 import PageHeader from "../components/PageHeader.vue";
 import UiSelect from "../components/UiSelect.vue";
+import { useProgressiveRows } from "../composables/useProgressiveRows";
 import {
   formatPeriod,
   formatPreviousPeriod,
@@ -17,16 +18,20 @@ const { members, selectedYear, refresh } = useKoperasiStore();
 const { monthlyLedger, monthlyLedgerLoading } = useMonthlyLedger();
 
 const period = ref("");
-const periodOptions = computed(() =>
-  [...monthlyLedger.periods]
+const query = ref("");
+const periodOptions = computed(() => [
+  { value: "", label: "Semua" },
+  ...[...monthlyLedger.value.periods]
     .reverse()
     .map((value) => ({ value, label: formatPeriod(value) })),
+]);
+const visiblePeriods = computed(() =>
+  period.value ? [period.value] : [...monthlyLedger.value.periods].sort(),
 );
 watch(
-  () => monthlyLedger.periods,
+  () => monthlyLedger.value.periods,
   (periods) => {
-    if (!periods.includes(period.value))
-      period.value = periods[periods.length - 1] ?? "";
+    if (period.value && !periods.includes(period.value)) period.value = "";
   },
   { immediate: true },
 );
@@ -36,16 +41,18 @@ const memberNames = computed(
 );
 
 // Spreadsheet rows follow member numbers (M001, M002, ...).
-const monthRows = computed(() =>
-  monthlyLedger.savings
-    .filter((row) => row.period === period.value)
+const rowsForPeriod = (selectedPeriod: string) =>
+  monthlyLedger.value.savings
+    .filter((row) => row.period === selectedPeriod)
     .sort((a, b) => a.memberId.localeCompare(b.memberId))
     .map((row, index) => ({
       ...row,
       no: index + 1,
       name: memberNames.value.get(row.memberId) ?? row.memberId,
-    })),
-);
+    }))
+    .filter((row) =>
+      row.name.toLowerCase().includes(query.value.trim().toLowerCase()),
+    );
 type NumericKey = {
   [K in keyof SavingsMonth]: SavingsMonth[K] extends number ? K : never;
 }[keyof SavingsMonth];
@@ -64,16 +71,16 @@ const numericKeys: NumericKey[] = [
   "mandatoryClosing",
   "voluntaryClosing",
 ];
-const totals = computed(() => {
+const totalsForRows = (monthRows: ReturnType<typeof rowsForPeriod>) => {
   const sum = Object.fromEntries(numericKeys.map((key) => [key, 0])) as Record<
     NumericKey,
     number
   >;
-  for (const row of monthRows.value) {
+  for (const row of monthRows) {
     for (const key of numericKeys) sum[key] += row[key];
   }
   return sum;
-});
+};
 const openingTotal = (row: Record<NumericKey, number>) =>
   row.principalOpening + row.mandatoryOpening + row.voluntaryOpening;
 const closingTotal = (row: Record<NumericKey, number>) =>
@@ -86,8 +93,7 @@ const openingKeys = [
 ] as const;
 // Debit = outflow, Credit = inflow, as in the spreadsheet. The profit-sharing column appears only
 // in the January block (profit sharing for the previous fiscal year).
-const hasShu = computed(() => period.value.endsWith("-01"));
-const movementKeys = computed(() =>
+const movementKeysForPeriod = (hasShu: boolean) =>
   (
     [
       "principalOut",
@@ -98,20 +104,71 @@ const movementKeys = computed(() =>
       "voluntaryIn",
       "shu",
     ] as const
-  ).filter((key) => key !== "shu" || hasShu.value),
-);
+  ).filter((key) => key !== "shu" || hasShu);
 const closingKeys = [
   "principalClosing",
   "mandatoryClosing",
   "voluntaryClosing",
 ] as const;
+const periodTables = computed(() =>
+  visiblePeriods.value.map((period) => {
+    const monthRows = rowsForPeriod(period);
+    const hasShu = period.endsWith("-01");
+    return {
+      period,
+      monthRows,
+      rowsById: new Map(monthRows.map((row) => [row.memberId, row])),
+      totals: totalsForRows(monthRows),
+      hasShu,
+      movementKeys: movementKeysForPeriod(hasShu),
+    };
+  }),
+);
+const monthRows = computed(() => {
+  const rowsById = new Map<string, ReturnType<typeof rowsForPeriod>[number]>();
+  for (const table of periodTables.value) {
+    for (const row of table.monthRows) rowsById.set(row.memberId, row);
+  }
+  return [...rowsById.values()]
+    .sort((a, b) => a.memberId.localeCompare(b.memberId))
+    .map((row, index) => ({ ...row, no: index + 1 }));
+});
+const { renderedRowCount, totalRowCount, renderingRows } = useProgressiveRows(
+  () => monthRows.value,
+  () => 2 + visiblePeriods.value.length * 16,
+);
+const renderedRows = computed(() =>
+  monthRows.value.slice(0, renderedRowCount.value),
+);
 </script>
 <template>
   <div class="page-stack page-stack--sheet">
     <PageHeader title="Simpanan" :refresh="refresh">
+      <template #title-meta>
+        <span
+          v-if="monthlyLedgerLoading || renderingRows"
+          class="sheet-loading"
+          role="status"
+        >
+          {{
+            monthlyLedgerLoading
+              ? "Memuat simpanan…"
+              : `Menampilkan ${renderedRowCount} dari ${totalRowCount} baris…`
+          }}
+        </span>
+      </template>
       <template #before-actions>
+        <label v-if="monthlyLedger.periods.length" class="search-field">
+          <Search :size="18" />
+          <input
+            v-model="query"
+            type="search"
+            aria-label="Cari nama pensiunan"
+            placeholder="Cari nama pensiunan..."
+          />
+        </label>
         <UiSelect
-          v-if="periodOptions.length"
+          v-if="monthlyLedger.periods.length"
           v-model="period"
           :options="periodOptions"
           aria-label="Bulan"
@@ -120,23 +177,43 @@ const closingKeys = [
       </template>
     </PageHeader>
     <section
-      v-if="!monthlyLedgerLoading && !monthlyLedger.periods.length"
+      v-if="monthlyLedgerLoading"
+      class="panel backend-state"
+      aria-busy="true"
+    >
+      <strong>Memuat simpanan…</strong>
+    </section>
+    <section
+      v-else-if="!monthlyLedger.periods.length"
       class="panel year-empty-state"
     >
       <CalendarX2 :size="36" />
       <strong>Belum ada data simpanan untuk {{ selectedYear }}</strong>
       <p>Pilih tahun lain.</p>
     </section>
-    <template v-else>
-      <section class="panel table-panel">
-        <div v-if="period" class="data-table-wrap sheet-wrap">
-          <table class="sheet-table">
-            <thead>
-              <tr>
-                <th rowspan="3" class="sheet-sticky sheet-no">No</th>
-                <th rowspan="3" class="sheet-sticky sheet-name">
-                  Nama Pensiunan
+    <section v-else class="panel table-panel" :aria-busy="renderingRows">
+      <div class="data-table-wrap sheet-wrap">
+        <table v-table-navigation class="sheet-table">
+          <thead>
+            <tr>
+              <th rowspan="4" class="sheet-sticky sheet-no">No</th>
+              <th rowspan="4" class="sheet-sticky sheet-name">
+                Nama Pensiunan
+              </th>
+              <template
+                v-for="{ period, hasShu } in periodTables"
+                :key="period"
+              >
+                <th :colspan="hasShu ? 16 : 15" class="sheet-group">
+                  {{ formatPeriod(period) }}
                 </th>
+              </template>
+            </tr>
+            <tr>
+              <template
+                v-for="{ period, hasShu } in periodTables"
+                :key="period"
+              >
                 <th colspan="3" class="sheet-group">
                   Saldo bulan {{ formatPreviousPeriod(period) }}
                 </th>
@@ -155,8 +232,13 @@ const closingKeys = [
                 <th rowspan="3" class="sheet-total">
                   Total simpanan<br />{{ formatPeriod(period) }}
                 </th>
-              </tr>
-              <tr>
+              </template>
+            </tr>
+            <tr>
+              <template
+                v-for="{ period, hasShu } in periodTables"
+                :key="period"
+              >
                 <th rowspan="2">Pokok</th>
                 <th rowspan="2">Wajib</th>
                 <th rowspan="2">Manasuka</th>
@@ -170,65 +252,101 @@ const closingKeys = [
                 <th rowspan="2">Pokok</th>
                 <th rowspan="2">Wajib</th>
                 <th rowspan="2">Manasuka</th>
-              </tr>
-              <tr>
+              </template>
+            </tr>
+            <tr>
+              <template
+                v-for="{ period, hasShu } in periodTables"
+                :key="period"
+              >
                 <th>Debet</th>
                 <th>Kredit</th>
                 <th>Debet</th>
                 <th>Kredit</th>
                 <th>Debet</th>
                 <th>Kredit</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in monthRows" :key="row.memberId">
-                <td class="sheet-sticky sheet-no">{{ row.no }}</td>
-                <td class="sheet-sticky sheet-name">
-                  <strong>{{ row.name }}</strong>
-                </td>
+              </template>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="row in renderedRows"
+              :key="row.memberId"
+              v-memo="[row, periodTables]"
+            >
+              <td class="sheet-sticky sheet-no">{{ row.no }}</td>
+              <td class="sheet-sticky sheet-name">
+                <strong>{{ row.name }}</strong>
+              </td>
+              <template v-for="table in periodTables" :key="table.period">
+                <template
+                  v-for="monthRow in [table.rowsById.get(row.memberId)]"
+                  :key="table.period"
+                >
+                  <td v-for="key in openingKeys" :key="key" class="num-cell">
+                    {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
+                  </td>
+                  <td class="num-cell sheet-total">
+                    {{
+                      monthRow ? formatSheetNumber(openingTotal(monthRow)) : "-"
+                    }}
+                  </td>
+                  <td>
+                    {{
+                      monthRow
+                        ? formatSheetDate(monthRow.transactionDate) || "-"
+                        : "-"
+                    }}
+                  </td>
+                  <td
+                    v-for="key in table.movementKeys"
+                    :key="key"
+                    class="num-cell"
+                  >
+                    {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
+                  </td>
+                  <td v-for="key in closingKeys" :key="key" class="num-cell">
+                    {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
+                  </td>
+                  <td class="num-cell sheet-total">
+                    <strong>{{
+                      monthRow ? formatSheetNumber(closingTotal(monthRow)) : "-"
+                    }}</strong>
+                  </td>
+                </template>
+              </template>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td class="sheet-sticky sheet-no"></td>
+              <td class="sheet-sticky sheet-name">JUMLAH</td>
+              <template v-for="table in periodTables" :key="table.period">
                 <td v-for="key in openingKeys" :key="key" class="num-cell">
-                  {{ formatSheetNumber(row[key]) }}
+                  {{ formatSheetNumber(table.totals[key]) }}
                 </td>
                 <td class="num-cell sheet-total">
-                  {{ formatSheetNumber(openingTotal(row)) }}
-                </td>
-                <td>{{ formatSheetDate(row.transactionDate) || "-" }}</td>
-                <td v-for="key in movementKeys" :key="key" class="num-cell">
-                  {{ formatSheetNumber(row[key]) }}
-                </td>
-                <td v-for="key in closingKeys" :key="key" class="num-cell">
-                  {{ formatSheetNumber(row[key]) }}
-                </td>
-                <td class="num-cell sheet-total">
-                  <strong>{{ formatSheetNumber(closingTotal(row)) }}</strong>
-                </td>
-              </tr>
-            </tbody>
-            <tfoot>
-              <tr>
-                <td class="sheet-sticky sheet-no"></td>
-                <td class="sheet-sticky sheet-name">JUMLAH</td>
-                <td v-for="key in openingKeys" :key="key" class="num-cell">
-                  {{ formatSheetNumber(totals[key]) }}
-                </td>
-                <td class="num-cell sheet-total">
-                  {{ formatSheetNumber(openingTotal(totals)) }}
+                  {{ formatSheetNumber(openingTotal(table.totals)) }}
                 </td>
                 <td></td>
-                <td v-for="key in movementKeys" :key="key" class="num-cell">
-                  {{ formatSheetNumber(totals[key]) }}
+                <td
+                  v-for="key in table.movementKeys"
+                  :key="key"
+                  class="num-cell"
+                >
+                  {{ formatSheetNumber(table.totals[key]) }}
                 </td>
                 <td v-for="key in closingKeys" :key="key" class="num-cell">
-                  {{ formatSheetNumber(totals[key]) }}
+                  {{ formatSheetNumber(table.totals[key]) }}
                 </td>
                 <td class="num-cell sheet-total">
-                  {{ formatSheetNumber(closingTotal(totals)) }}
+                  {{ formatSheetNumber(closingTotal(table.totals)) }}
                 </td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      </section>
-    </template>
+              </template>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
   </div>
 </template>

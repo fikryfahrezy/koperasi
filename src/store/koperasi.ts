@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
-import { computed, effectScope, reactive, ref, watch } from "vue";
+import { useQuery } from "@tanstack/vue-query";
+import { computed, reactive, ref, watch } from "vue";
+import { queryClient, queryKeys } from "../query-client";
 import { DEFAULT_LOCALE, translate } from "../i18n";
 
 export const TransactionStatus = {
@@ -299,12 +301,6 @@ const financialParameters = reactive<FinancialParameters>({
 });
 const toasts = ref<ToastMessage[]>([]);
 const snapshotVersion = ref(0);
-const monthlyLedger = reactive<MonthlyLedger>({
-  periods: [],
-  savings: [],
-  loans: [],
-});
-const monthlyLedgerLoading = ref(false);
 const companies = ref<Company[]>([]);
 const configuredCompanyId = import.meta.env.VITE_COMPANY_ID?.trim() || "";
 const selectedCompanyId = ref(configuredCompanyId || "default");
@@ -326,18 +322,22 @@ const command = {
 
 const backend = {
   listCompanies: () => invoke<Company[]>(command.listCompanies),
-  getAppSnapshot: () =>
+  getAppSnapshot: (companyId = selectedCompanyId.value) =>
     invoke<AppSnapshot>(command.getAppSnapshot, {
-      companyId: selectedCompanyId.value,
+      companyId,
     }),
-  getMonthlyLedger: (year: number) =>
+  getMonthlyLedger: (year: number, companyId = selectedCompanyId.value) =>
     invoke<MonthlyLedger>(command.getMonthlyLedger, {
-      companyId: selectedCompanyId.value,
+      companyId,
       year,
     }),
-  getCashBook: (year: number, channel: Channel) =>
+  getCashBook: (
+    year: number,
+    channel: Channel,
+    companyId = selectedCompanyId.value,
+  ) =>
     invoke<CashBook>(command.getCashBook, {
-      companyId: selectedCompanyId.value,
+      companyId,
       year,
       channel,
     }),
@@ -384,9 +384,9 @@ const backend = {
       input,
       companyId: selectedCompanyId.value,
     }),
-  getFinancialParameters: () =>
+  getFinancialParameters: (companyId = selectedCompanyId.value) =>
     invoke<FinancialParameters>(command.getFinancialParameters, {
-      companyId: selectedCompanyId.value,
+      companyId,
     }),
 };
 
@@ -419,7 +419,11 @@ function notify(
   }, 4200);
 }
 
-function applySnapshot(snapshot: AppSnapshot) {
+function applySnapshot(
+  snapshot: AppSnapshot,
+  companyId = selectedCompanyId.value,
+) {
+  if (companyId !== selectedCompanyId.value) return;
   members.splice(0, members.length, ...snapshot.members);
   loans.splice(0, loans.length, ...snapshot.loans);
   transactions.splice(0, transactions.length, ...snapshot.transactions);
@@ -431,12 +435,37 @@ function applySnapshot(snapshot: AppSnapshot) {
   snapshotVersion.value += 1;
 }
 
+function applyMutationSnapshot(snapshot: AppSnapshot, companyId: string) {
+  void queryClient.cancelQueries({
+    queryKey: queryKeys.snapshot(companyId),
+    exact: true,
+  });
+  queryClient.setQueryData(queryKeys.snapshot(companyId), snapshot);
+  void queryClient.invalidateQueries({
+    queryKey: queryKeys.company(companyId),
+    predicate: (query) =>
+      query.queryKey[2] === "monthly-ledger" ||
+      query.queryKey[2] === "cash-book",
+  });
+  applySnapshot(snapshot, companyId);
+}
+
+function fetchSnapshot(companyId: string) {
+  return queryClient.fetchQuery({
+    queryKey: queryKeys.snapshot(companyId),
+    queryFn: () => backend.getAppSnapshot(companyId),
+  });
+}
+
 async function initialize() {
   if (initializePromise) return initializePromise;
   initializePromise = (async () => {
     loading.value = true;
     try {
-      companies.value = await backend.listCompanies();
+      companies.value = await queryClient.fetchQuery({
+        queryKey: queryKeys.companies,
+        queryFn: backend.listCompanies,
+      });
       if (
         configuredCompanyId &&
         !companies.value.some((company) => company.id === configuredCompanyId)
@@ -452,7 +481,8 @@ async function initialize() {
       ) {
         selectedCompanyId.value = companies.value[0]?.id ?? "default";
       }
-      applySnapshot(await backend.getAppSnapshot());
+      const companyId = selectedCompanyId.value;
+      applySnapshot(await fetchSnapshot(companyId), companyId);
     } catch (error) {
       backendError.value = errorMessage(error);
       notify(
@@ -473,7 +503,16 @@ async function refresh() {
   refreshPromise = (async () => {
     refreshing.value = true;
     try {
-      applySnapshot(await backend.getAppSnapshot());
+      const companyId = selectedCompanyId.value;
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.company(companyId),
+        refetchType: "none",
+      });
+      applySnapshot(await fetchSnapshot(companyId), companyId);
+      await queryClient.refetchQueries({
+        queryKey: queryKeys.company(companyId),
+        type: "active",
+      });
       return true;
     } catch (error) {
       notify(
@@ -494,13 +533,20 @@ async function selectCompany(companyId: string) {
   if (configuredCompanyId && companyId !== configuredCompanyId) return false;
   if (companyId === selectedCompanyId.value) return true;
   selectedCompanyId.value = companyId;
-  loading.value = true;
+  const cached = queryClient.getQueryData<AppSnapshot>(
+    queryKeys.snapshot(companyId),
+  );
+  loading.value = !cached;
+  backendError.value = null;
+  if (cached) applySnapshot(cached, companyId);
   try {
-    applySnapshot(await backend.getAppSnapshot());
+    applySnapshot(await fetchSnapshot(companyId), companyId);
+    if (companyId !== selectedCompanyId.value) return false;
     await loadFinancialParameters();
     return true;
   } catch (error) {
-    backendError.value = errorMessage(error);
+    if (companyId !== selectedCompanyId.value) return false;
+    if (!cached) backendError.value = errorMessage(error);
     notify(
       translate("notifications.refreshFailed"),
       errorMessage(error),
@@ -508,18 +554,20 @@ async function selectCompany(companyId: string) {
     );
     return false;
   } finally {
-    loading.value = false;
+    if (companyId === selectedCompanyId.value) loading.value = false;
   }
 }
 
 async function addMember(input: AddMemberInput, options: PostingOptions = {}) {
+  const companyId = selectedCompanyId.value;
   try {
-    applySnapshot(
+    applyMutationSnapshot(
       await backend.addMember({
         ...input,
         channel: options.channel ?? Channel.Cash,
         ...operationalTimestamp(options.businessDate),
       }),
+      companyId,
     );
     notify(
       translate("notifications.memberAdded"),
@@ -545,8 +593,9 @@ async function createLoan(
   input: CreateLoanInput,
   disburse: PostingOptions = {},
 ) {
+  const companyId = selectedCompanyId.value;
   try {
-    applySnapshot(
+    applyMutationSnapshot(
       await backend.createLoan({
         ...input,
         disbursement: {
@@ -554,6 +603,7 @@ async function createLoan(
           ...operationalTimestamp(disburse.businessDate),
         },
       }),
+      companyId,
     );
     notify(
       translate("notifications.loanDisbursed"),
@@ -596,13 +646,15 @@ async function postSavingsTransaction(
   input: SavingsTransactionInput,
   options: PostingOptions = {},
 ) {
+  const companyId = selectedCompanyId.value;
   try {
-    applySnapshot(
+    applyMutationSnapshot(
       await backend.postSavingsTransaction({
         ...input,
         channel: options.channel ?? Channel.Cash,
         ...operationalTimestamp(options.businessDate),
       }),
+      companyId,
     );
     notify(
       translate("notifications.movementPosted", { movement: input.movement }),
@@ -625,8 +677,9 @@ async function postPayment(input: PaymentInput, options: PostingOptions = {}) {
     channel: options.channel ?? Channel.Cash,
     ...operationalTimestamp(options.businessDate),
   };
+  const companyId = selectedCompanyId.value;
   try {
-    applySnapshot(await backend.postPayment(backendInput));
+    applyMutationSnapshot(await backend.postPayment(backendInput), companyId);
     notify(
       translate("notifications.paymentPosted"),
       translate("notifications.paymentPostedMessage", {
@@ -648,7 +701,14 @@ async function postPayment(input: PaymentInput, options: PostingOptions = {}) {
 
 async function loadFinancialParameters() {
   try {
-    Object.assign(financialParameters, await backend.getFinancialParameters());
+    const companyId = selectedCompanyId.value;
+    const parameters = await queryClient.fetchQuery({
+      queryKey: queryKeys.parameters(companyId),
+      queryFn: () => backend.getFinancialParameters(companyId),
+    });
+    if (companyId === selectedCompanyId.value) {
+      Object.assign(financialParameters, parameters);
+    }
     return true;
   } catch (error) {
     notify(
@@ -664,13 +724,15 @@ async function postCashEntry(
   input: CashEntryInput,
   options: PostingOptions = {},
 ) {
+  const companyId = selectedCompanyId.value;
   try {
-    applySnapshot(
+    applyMutationSnapshot(
       await backend.postCashEntry({
         ...input,
         channel: options.channel ?? Channel.Cash,
         ...operationalTimestamp(options.businessDate),
       }),
+      companyId,
     );
     notify(
       translate("notifications.paymentPosted"),
@@ -688,13 +750,19 @@ async function postCashEntry(
 }
 
 async function getCashBook(year: number, channel: Channel) {
-  return backend.getCashBook(year, channel);
+  const companyId = selectedCompanyId.value;
+  return queryClient.fetchQuery({
+    queryKey: queryKeys.cashBook(companyId, year, channel),
+    queryFn: () => backend.getCashBook(year, channel, companyId),
+  });
 }
 
 async function reverseTransaction(id: string) {
+  const companyId = selectedCompanyId.value;
   try {
-    applySnapshot(
+    applyMutationSnapshot(
       await backend.reverseTransaction({ id, ...operationalTimestamp() }),
+      companyId,
     );
     notify(
       translate("notifications.reversalPosted"),
@@ -712,46 +780,53 @@ async function reverseTransaction(id: string) {
   }
 }
 
-let monthlyLedgerRequest = 0;
-async function loadMonthlyLedger() {
-  const request = ++monthlyLedgerRequest;
-  monthlyLedgerLoading.value = true;
-  try {
-    const ledger = await backend.getMonthlyLedger(selectedYear.value);
-    if (request !== monthlyLedgerRequest) return;
-    monthlyLedger.periods = ledger.periods;
-    monthlyLedger.savings = ledger.savings;
-    monthlyLedger.loans = ledger.loans;
-  } catch (error) {
-    if (request !== monthlyLedgerRequest) return;
-    monthlyLedger.periods = [];
-    monthlyLedger.savings = [];
-    monthlyLedger.loans = [];
-    notify(
-      translate("notifications.refreshFailed"),
-      errorMessage(error),
-      "warning",
-    );
-  } finally {
-    if (request === monthlyLedgerRequest) monthlyLedgerLoading.value = false;
-  }
+const emptyMonthlyLedger: MonthlyLedger = {
+  periods: [],
+  savings: [],
+  loans: [],
+};
+
+/** Shared reports are cached separately for each company and reporting year. */
+export function useMonthlyLedger() {
+  const query = useQuery(
+    computed(() => {
+      const companyId = selectedCompanyId.value;
+      const year = selectedYear.value;
+      return {
+        queryKey: queryKeys.monthlyLedger(companyId, year),
+        queryFn: () => backend.getMonthlyLedger(year, companyId),
+      };
+    }),
+  );
+  watch(query.error, (error) => {
+    if (error)
+      notify(
+        translate("notifications.refreshFailed"),
+        errorMessage(error),
+        "warning",
+      );
+  });
+  return {
+    monthlyLedger: computed(() => query.data.value ?? emptyMonthlyLedger),
+    monthlyLedgerLoading: query.isPending,
+  };
 }
 
-let monthlyLedgerWatching = false;
-/** Loads the monthly ledger and refreshes it when the year, company, or data changes. */
-export function useMonthlyLedger() {
-  if (!monthlyLedgerWatching) {
-    monthlyLedgerWatching = true;
-    // A separate scope keeps the watcher alive after the first page is closed.
-    effectScope(true).run(() =>
-      watch(
-        [selectedYear, selectedCompanyId, snapshotVersion],
-        loadMonthlyLedger,
-      ),
-    );
-  }
-  void loadMonthlyLedger();
-  return { monthlyLedger, monthlyLedgerLoading };
+export function useCashBook(channel: Channel) {
+  const query = useQuery(
+    computed(() => {
+      const companyId = selectedCompanyId.value;
+      const year = selectedYear.value;
+      return {
+        queryKey: queryKeys.cashBook(companyId, year, channel),
+        queryFn: () => backend.getCashBook(year, channel, companyId),
+      };
+    }),
+  );
+  watch(query.error, (error) => {
+    if (error) notify("Buku kas gagal dimuat", errorMessage(error), "warning");
+  });
+  return { cashBook: query.data, loadingBook: query.isPending };
 }
 
 const monthNames = [
@@ -790,11 +865,13 @@ export function formatSheetDate(value: string) {
 }
 
 /** Spreadsheet-style numbers: periods for thousands, parentheses for negatives, "-" for zero. */
+const sheetNumberFormatter = new Intl.NumberFormat(DEFAULT_LOCALE, {
+  maximumFractionDigits: 0,
+});
+
 export function formatSheetNumber(value: number) {
   if (!value) return "-";
-  const formatted = new Intl.NumberFormat(DEFAULT_LOCALE, {
-    maximumFractionDigits: 0,
-  }).format(Math.abs(value));
+  const formatted = sheetNumberFormatter.format(Math.abs(value));
   return value < 0 ? `(${formatted})` : formatted;
 }
 

@@ -1,10 +1,4 @@
 import { createRouter, createWebHistory } from "vue-router";
-import CashLedger from "../views/CashLedger.vue";
-import Loans from "../views/Loans.vue";
-import Members from "../views/Members.vue";
-import MemberDetail from "../views/MemberDetail.vue";
-import Savings from "../views/Savings.vue";
-import NewTab from "../views/NewTab.vue";
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -12,33 +6,33 @@ export const router = createRouter({
     { path: "/", redirect: "/new-tab" },
     {
       path: "/new-tab",
-      component: NewTab,
+      component: () => import("../views/NewTab.vue"),
       meta: { titleKey: "workspaceTabs.newTab" },
     },
     {
       path: "/members",
-      component: Members,
+      component: () => import("../views/Members.vue"),
       meta: { titleKey: "sidebar.nav.members", fitViewport: true },
     },
     {
       path: "/members/:id",
       name: "member-detail",
-      component: MemberDetail,
+      component: () => import("../views/MemberDetail.vue"),
       meta: { titleKey: "sidebar.nav.members" },
     },
     {
       path: "/savings",
-      component: Savings,
+      component: () => import("../views/Savings.vue"),
       meta: { titleKey: "sidebar.nav.savings", fitViewport: true },
     },
     {
       path: "/loans",
-      component: Loans,
+      component: () => import("../views/Loans.vue"),
       meta: { titleKey: "sidebar.nav.loans", fitViewport: true },
     },
     {
       path: "/cash-ledger",
-      component: CashLedger,
+      component: () => import("../views/CashLedger.vue"),
       meta: { titleKey: "sidebar.nav.cashLedger", fitViewport: true },
     },
     { path: "/:pathMatch(.*)*", redirect: "/new-tab" },
