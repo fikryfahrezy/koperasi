@@ -76,18 +76,21 @@ tetap dibaca dari ledger, dan parameter keuangan tetap tersedia untuk Buku kas.
 Savings and Loans use `@tanstack/vue-virtual` pinned to `3.13.39` (virtual-core
 `3.17.11` in the lockfile). Only visible rows plus five rows of overscan on each
 side are mounted. Totals use the complete filtered report. Loan section headings
-and subtotals participate in the virtual row list. Monthly columns remain mounted;
-horizontal virtualization is not implemented.
+and subtotals participate in the virtual row list. Monthly columns are virtualized
+as complete month groups, preserving the merged four-row headers. Leading identity
+and loan metadata columns remain mounted, with the first two columns pinned. Empty
+column spacers preserve the complete scroll width without mounting offscreen months.
 
 Rows have a fixed height of 32px and explicit column widths to prevent table layout
 from changing as different rows enter the viewport. Arrow-key navigation uses
-logical row indexes and renders an offscreen destination before focusing it.
+logical row and column indexes and renders an offscreen destination before focusing it.
 
 Run `pnpm test:virtualization` with Chrome installed, or set `CHROME_BINARY` to a
 Chrome/Chromium executable. This browser regression check starts a separate local
 Vite server and temporary browser profile, replaces Tauri commands with synthetic
 data (1,000 members, 800 loans, 12 months), and checks bounded DOM row counts, row
-heights, totals, filtering, keyboard navigation, section boundaries and tab scroll
+heights, horizontal month windows, header/data/total alignment, totals, filtering,
+keyboard navigation, section boundaries and tab scroll
 restoration. It does not access the native application database.
 
 The production build still targets Chromium 88. Native `scrollend` is disabled;

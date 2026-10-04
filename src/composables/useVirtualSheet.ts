@@ -121,6 +121,7 @@ export function useVirtualSheet<T>(
           headerHeight.value + virtualizer.value.getTotalSize(),
           { behavior: "auto" },
         );
+      scroller.value?.dispatchEvent(new Event("scroll"));
       await nextTick();
     },
   }));
