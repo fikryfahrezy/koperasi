@@ -3,6 +3,7 @@ import { computed, watch } from "vue";
 import { CalendarX2, Search } from "lucide-vue-next";
 import { useDebouncedRef } from "../composables/useDebouncedRef";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
+import { useVirtualSheet } from "../composables/useVirtualSheet";
 import PageHeader from "../components/PageHeader.vue";
 import UiSelect from "../components/UiSelect.vue";
 import {
@@ -194,6 +195,54 @@ const totalColumnCount = computed(
 );
 const totalColumns = (key: string) =>
   key === "openingBalance" || key === "closingBalance";
+
+type Section = (typeof sections.value)[number];
+type SheetRow =
+  | { kind: "heading" | "subtotal"; section: Section; key: string }
+  | {
+      kind: "loan";
+      section: Section;
+      row: Section["rows"][number];
+      key: string;
+    };
+const sheetRows = computed<SheetRow[]>(() =>
+  sections.value.flatMap((section) => [
+    { kind: "heading" as const, section, key: `${section.group}:heading` },
+    ...section.rows.map((row) => ({
+      kind: "loan" as const,
+      section,
+      row,
+      key: row.loanId,
+    })),
+    { kind: "subtotal" as const, section, key: `${section.group}:subtotal` },
+  ]),
+);
+const columnWidths = computed(() => [
+  40,
+  240,
+  120,
+  80,
+  80,
+  80,
+  100,
+  120,
+  120,
+  90,
+  ...Array(totalColumnCount.value - 10).fill(110),
+]);
+const { scroller, table, renderedRows, paddingTop, paddingBottom, navigation } =
+  useVirtualSheet(
+    sheetRows,
+    (row) => row.key,
+    pageState.tabId,
+    pageState.active,
+    (index) =>
+      sheetRows.value[index]?.kind === "heading"
+        ? [1, 1, totalColumnCount.value - 2]
+        : sheetRows.value[index]?.kind === "loan"
+          ? Array(totalColumnCount.value).fill(1)
+          : [1, 1, 1, 7, ...Array(totalColumnCount.value - 10).fill(1)],
+  );
 </script>
 
 <template>
@@ -248,8 +297,23 @@ const totalColumns = (key: string) =>
       <p>Pilih tahun lain.</p>
     </section>
     <section v-else class="panel table-panel">
-      <div class="data-table-wrap sheet-wrap">
-        <table v-table-navigation class="sheet-table">
+      <div ref="scroller" class="data-table-wrap sheet-wrap">
+        <table
+          ref="table"
+          v-table-navigation="navigation"
+          class="sheet-table sheet-table--virtual"
+          :style="{
+            width: `${columnWidths.reduce((sum, width) => sum + width, 0)}px`,
+          }"
+          :aria-rowcount="sheetRows.length + 5"
+        >
+          <colgroup>
+            <col
+              v-for="(width, index) in columnWidths"
+              :key="index"
+              :style="{ width: `${width}px` }"
+            />
+          </colgroup>
           <thead>
             <tr>
               <th rowspan="4" class="sheet-sticky sheet-no">No</th>
@@ -318,53 +382,108 @@ const totalColumns = (key: string) =>
               </template>
             </tr>
           </thead>
-          <tbody v-for="section in sections" :key="section.group">
-            <tr>
-              <td class="sheet-sticky sheet-no"></td>
-              <td class="sheet-sticky sheet-name">
-                <strong>{{ section.title }}</strong>
-              </td>
-              <td :colspan="totalColumnCount - 2"></td>
+          <tbody>
+            <tr v-if="paddingTop" class="sheet-spacer" aria-hidden="true">
+              <td
+                :colspan="totalColumnCount"
+                :style="{ height: `${paddingTop}px` }"
+              ></td>
             </tr>
-            <tr
-              v-for="row in section.rows"
-              :key="row.loanId"
-              v-memo="[row, periodTables]"
+            <template
+              v-for="{ row: item, index } in renderedRows"
+              :key="item.key"
             >
-              <td class="sheet-sticky sheet-no">{{ row.no }}</td>
-              <td class="sheet-sticky sheet-name">
-                <strong>{{ row.loan.memberName }}</strong>
-              </td>
-              <td class="num-cell">
-                {{ formatSheetNumber(row.loan.plafond) }}
-              </td>
-              <td class="num-cell">{{ monthlyRate(row.loan) }}</td>
-              <td>{{ row.loan.interestType.toLowerCase() }}</td>
-              <td>{{ row.loan.guarantee }}</td>
-              <td>{{ row.loan.loanType ?? "" }}</td>
-              <td>{{ row.loan.realizationDate }}</td>
-              <td>{{ row.loan.dueDate }}</td>
-              <td class="num-cell">{{ row.loan.tenor }}</td>
-              <template v-for="table in periodTables" :key="table.period">
-                <template
-                  v-for="monthRow in [table.rowsById.get(row.loanId)]"
-                  :key="table.period"
-                >
+              <tr
+                v-if="item.kind === 'heading'"
+                :data-virtual-row="index"
+                :aria-rowindex="index + 5"
+              >
+                <td class="sheet-sticky sheet-no"></td>
+                <td class="sheet-sticky sheet-name">
+                  <strong>{{ item.section.title }}</strong>
+                </td>
+                <td :colspan="totalColumnCount - 2"></td>
+              </tr>
+              <tr
+                v-else-if="item.kind === 'loan'"
+                :data-virtual-row="index"
+                :aria-rowindex="index + 5"
+              >
+                <td class="sheet-sticky sheet-no">{{ item.row.no }}</td>
+                <td class="sheet-sticky sheet-name">
+                  <strong>{{ item.row.loan.memberName }}</strong>
+                </td>
+                <td class="num-cell">
+                  {{ formatSheetNumber(item.row.loan.plafond) }}
+                </td>
+                <td class="num-cell">{{ monthlyRate(item.row.loan) }}</td>
+                <td>{{ item.row.loan.interestType.toLowerCase() }}</td>
+                <td>{{ item.row.loan.guarantee }}</td>
+                <td>{{ item.row.loan.loanType ?? "" }}</td>
+                <td>{{ item.row.loan.realizationDate }}</td>
+                <td>{{ item.row.loan.dueDate }}</td>
+                <td class="num-cell">{{ item.row.loan.tenor }}</td>
+                <template v-for="table in periodTables" :key="table.period">
+                  <template
+                    v-for="monthRow in [table.rowsById.get(item.row.loanId)]"
+                    :key="table.period"
+                  >
+                    <td
+                      v-for="key in beforeMutation"
+                      :key="key"
+                      class="num-cell"
+                      :class="{ 'sheet-total': totalColumns(key) }"
+                    >
+                      {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
+                    </td>
+                    <td>
+                      {{
+                        monthRow
+                          ? formatSheetDate(monthRow.transactionDate)
+                          : "-"
+                      }}
+                    </td>
+                    <td v-for="key in mutation" :key="key" class="num-cell">
+                      {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
+                    </td>
+                    <td
+                      v-for="key in afterMutation"
+                      :key="key"
+                      class="num-cell"
+                      :class="{ 'sheet-total': totalColumns(key) }"
+                    >
+                      {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
+                    </td>
+                  </template>
+                </template>
+              </tr>
+              <tr v-else :data-virtual-row="index" :aria-rowindex="index + 5">
+                <td class="sheet-sticky sheet-no"></td>
+                <td class="sheet-sticky sheet-name">SUB JUMLAH</td>
+                <td class="num-cell">
+                  {{ formatSheetNumber(item.section.totals.plafond) }}
+                </td>
+                <td colspan="7"></td>
+                <template v-for="table in periodTables" :key="table.period">
                   <td
                     v-for="key in beforeMutation"
                     :key="key"
                     class="num-cell"
                     :class="{ 'sheet-total': totalColumns(key) }"
                   >
-                    {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
-                  </td>
-                  <td>
                     {{
-                      monthRow ? formatSheetDate(monthRow.transactionDate) : "-"
+                      formatSheetNumber(
+                        sectionTotals(table, item.section.group)[key],
+                      )
                     }}
                   </td>
+                  <td></td>
                   <td v-for="key in mutation" :key="key" class="num-cell">
-                    {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
+                    {{
+                      formatSheetNumber(
+                        sectionTotals(table, item.section.group)[key],
+                      )
+                    }}
                   </td>
                   <td
                     v-for="key in afterMutation"
@@ -372,50 +491,27 @@ const totalColumns = (key: string) =>
                     class="num-cell"
                     :class="{ 'sheet-total': totalColumns(key) }"
                   >
-                    {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
+                    {{
+                      formatSheetNumber(
+                        sectionTotals(table, item.section.group)[key],
+                      )
+                    }}
                   </td>
                 </template>
-              </template>
-            </tr>
-            <tr>
-              <td class="sheet-sticky sheet-no"></td>
-              <td class="sheet-sticky sheet-name">SUB JUMLAH</td>
-              <td class="num-cell">
-                {{ formatSheetNumber(section.totals.plafond) }}
-              </td>
-              <td colspan="7"></td>
-              <template v-for="table in periodTables" :key="table.period">
-                <td
-                  v-for="key in beforeMutation"
-                  :key="key"
-                  class="num-cell"
-                  :class="{ 'sheet-total': totalColumns(key) }"
-                >
-                  {{
-                    formatSheetNumber(sectionTotals(table, section.group)[key])
-                  }}
-                </td>
-                <td></td>
-                <td v-for="key in mutation" :key="key" class="num-cell">
-                  {{
-                    formatSheetNumber(sectionTotals(table, section.group)[key])
-                  }}
-                </td>
-                <td
-                  v-for="key in afterMutation"
-                  :key="key"
-                  class="num-cell"
-                  :class="{ 'sheet-total': totalColumns(key) }"
-                >
-                  {{
-                    formatSheetNumber(sectionTotals(table, section.group)[key])
-                  }}
-                </td>
-              </template>
+              </tr>
+            </template>
+            <tr v-if="paddingBottom" class="sheet-spacer" aria-hidden="true">
+              <td
+                :colspan="totalColumnCount"
+                :style="{ height: `${paddingBottom}px` }"
+              ></td>
             </tr>
           </tbody>
           <tfoot>
-            <tr>
+            <tr
+              :data-virtual-row="sheetRows.length"
+              :aria-rowindex="sheetRows.length + 5"
+            >
               <td class="sheet-sticky sheet-no"></td>
               <td class="sheet-sticky sheet-name">JUMLAH TOTAL</td>
               <td class="num-cell">

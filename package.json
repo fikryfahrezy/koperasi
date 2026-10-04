@@ -9,11 +9,13 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "ts:check": "vue-tsc --noEmit",
+    "test:virtualization": "node tests/virtualization.browser.mjs",
     "test:e2e": "wdio run ./wdio.conf.js",
     "prepare": "node -e \"const { execSync } = require('node:child_process'); if (process.env.NODE_ENV !== 'production' && process.env.CI !== 'true') execSync('husky .husky', { stdio: 'inherit', shell: true });\""
   },
   "dependencies": {
     "@tanstack/vue-query": "5.104.1",
+    "@tanstack/vue-virtual": "3.13.39",
     "@tauri-apps/api": "2.5.0",
     "@tauri-apps/plugin-dialog": "2.6.0",
     "@tauri-apps/plugin-fs": "2.4.5",
