@@ -15,6 +15,7 @@ const props = withDefaults(
     modelValue: SelectValue;
     options: SelectOption[];
     ariaLabel: string;
+    label?: string;
     placeholder?: string;
     disabled?: boolean;
     required?: boolean;
@@ -22,6 +23,7 @@ const props = withDefaults(
   }>(),
   {
     placeholder: undefined,
+    label: undefined,
     disabled: false,
     required: false,
     variant: "field",
@@ -52,6 +54,7 @@ function updateValue(event: Event) {
     :class="[`ui-select--${variant}`, { 'ui-select--disabled': disabled }]"
   >
     <slot name="icon" />
+    <span v-if="label" class="ui-select__label">{{ label }}:</span>
     <span class="ui-select__value">{{ selectedLabel }}</span>
     <ChevronDown class="ui-select__chevron" :size="14" />
     <select

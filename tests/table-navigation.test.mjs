@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { scrollTableCellIntoView } from "../src/directives/tableNavigation.ts";
+import {
+  scrollTableCellIntoView,
+  tableNavigation,
+} from "../src/directives/tableNavigation.ts";
 
 function fixture({
   cellTop = 450,
@@ -75,4 +78,190 @@ test("ignores a footer outside the viewport and reveals the row above the scroll
 
 test("keeps rows below the sticky header when moving upward", () => {
   assert.equal(fixture({ cellTop: 185, cellBottom: 215 }).top, -15);
+});
+
+function navigationFixture(t, spans) {
+  const listeners = new Map();
+  const frames = new Map();
+  const counts = { scans: 0, focuses: 0, scrolls: 0, visibility: 0 };
+  let frameId = 0;
+  class Element {
+    closest() {
+      return null;
+    }
+  }
+  const document = {
+    activeElement: new Element(),
+    querySelector: () => null,
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    removeEventListener: (name) => listeners.delete(name),
+  };
+  const globals = {
+    Element,
+    Node: Element,
+    document,
+    requestAnimationFrame(callback) {
+      frames.set(++frameId, callback);
+      return frameId;
+    },
+    cancelAnimationFrame: (id) => frames.delete(id),
+  };
+  const originals = Object.fromEntries(
+    Object.keys(globals).map((key) => [
+      key,
+      Object.getOwnPropertyDescriptor(globalThis, key),
+    ]),
+  );
+  Object.assign(globalThis, globals);
+  const tableListeners = new Map();
+  const table = new Element();
+  let mounted = true;
+  const body = { tagName: "TBODY" };
+  const grid = spans.map((rowSpans) => {
+    const row = {
+      parentElement: body,
+      querySelector: () => null,
+      cells: [],
+    };
+    row.cells = rowSpans.map((colSpan) =>
+      Object.assign(new Element(), {
+        colSpan,
+        tabIndex: -1,
+        parentElement: row,
+        classList: { contains: () => false },
+        focus() {
+          counts.focuses++;
+          document.activeElement = this;
+          tableListeners.get("focusin")({
+            target: this,
+            currentTarget: table,
+            type: "focusin",
+          });
+        },
+        scrollIntoView() {
+          counts.scrolls++;
+        },
+      }),
+    );
+    // Resolve each cell through its own closest(), like the browser DOM.
+    for (const cell of row.cells) {
+      cell.closest = (selector) =>
+        selector === "table" ? table : selector === "td" ? cell : null;
+    }
+    return row;
+  });
+  Object.assign(table, {
+    isConnected: true,
+    closest: () => null,
+    contains: (target) => target.closest?.("table") === table,
+    getClientRects() {
+      counts.visibility++;
+      return [{}];
+    },
+    addEventListener: (name, listener) => tableListeners.set(name, listener),
+    removeEventListener: (name) => tableListeners.delete(name),
+  });
+  Object.defineProperty(table, "rows", {
+    get() {
+      counts.scans++;
+      return grid;
+    },
+  });
+  tableNavigation.mounted(table);
+  t.after(() => {
+    if (mounted) tableNavigation.unmounted(table);
+    for (const [key, descriptor] of Object.entries(originals)) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  });
+  return {
+    table,
+    grid,
+    counts,
+    frames,
+    document,
+    unmount() {
+      tableNavigation.unmounted(table);
+      mounted = false;
+    },
+    press(key) {
+      let prevented = false;
+      listeners.get("keydown")({
+        key,
+        target: document.activeElement,
+        preventDefault: () => {
+          prevented = true;
+        },
+      });
+      return prevented;
+    },
+    flush() {
+      const callbacks = Array.from(frames.values());
+      frames.clear();
+      callbacks.forEach((callback) => callback());
+    },
+  };
+}
+
+test("arrow bursts preserve every step with one focus and scroll per frame and no table rescans", (t) => {
+  const nav = navigationFixture(
+    t,
+    Array.from({ length: 100 }, () => Array(20).fill(1)),
+  );
+  nav.press("ArrowDown"); // Enter the table first.
+  nav.flush();
+  for (let i = 0; i < 80; i++) assert.equal(nav.press("ArrowDown"), true);
+  assert.equal(nav.frames.size, 1);
+  assert.equal(nav.counts.focuses, 1);
+  nav.flush();
+  assert.equal(nav.document.activeElement, nav.grid[80].cells[0]);
+  assert.equal(nav.counts.focuses, 2);
+  assert.equal(nav.counts.scrolls, 2);
+  assert.equal(nav.counts.scans, 1);
+  assert.equal(nav.counts.visibility, 1);
+});
+
+test("batched navigation preserves the preferred column through merged cells and stops at edges", (t) => {
+  const nav = navigationFixture(t, [
+    [1, 1, 1],
+    [2, 1],
+    [1, 1, 1],
+  ]);
+  nav.press("ArrowRight");
+  nav.press("ArrowRight"); // Advance even before the initial focus frame.
+  nav.press("ArrowDown");
+  nav.press("ArrowDown");
+  nav.flush();
+  assert.equal(nav.document.activeElement, nav.grid[2].cells[1]);
+  for (let i = 0; i < 30; i++) nav.press("ArrowDown");
+  assert.equal(nav.frames.size, 0);
+});
+
+test("refreshes cached positions after table updates and cancels work on unmount", (t) => {
+  const nav = navigationFixture(t, [[1], [1]]);
+  nav.press("ArrowDown");
+  nav.flush();
+  nav.grid.shift();
+  nav.document.activeElement = {};
+  tableNavigation.updated(nav.table);
+  nav.press("ArrowDown");
+  assert.equal(nav.frames.size, 1);
+  nav.flush();
+  assert.equal(nav.document.activeElement, nav.grid[0].cells[0]);
+  nav.press("ArrowRight"); // Re-enter when focus is outside the table.
+  nav.document.activeElement = {};
+  nav.press("ArrowDown");
+  nav.unmount();
+  assert.equal(nav.frames.size, 0);
+});
+
+test("pending navigation does not steal focus after another control receives it", (t) => {
+  const nav = navigationFixture(t, [[1, 1]]);
+  nav.press("ArrowRight");
+  const control = {};
+  nav.document.activeElement = control;
+  nav.flush();
+  assert.equal(nav.document.activeElement, control);
+  assert.equal(nav.counts.focuses, 0);
 });
