@@ -173,7 +173,7 @@ const {
 } = useVirtualSheetColumns(
   periodTables,
   (group) => (group.hasShu ? 16 : 15),
-  [40, 240],
+  [56, 240],
   scroller,
   pageState.active,
 );

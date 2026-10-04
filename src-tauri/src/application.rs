@@ -68,6 +68,7 @@ mod tests {
     fn payment(principal: i64, reference: &str, channel: &str) -> PaymentInput {
         PaymentInput {
             member_id: "testing-M001".into(),
+            loan_id: String::new(),
             principal,
             interest: 20_000,
             wajib: 10_000,
@@ -121,6 +122,65 @@ mod tests {
                 ),
                 (50_000, 25_000, 75_000)
             );
+        });
+    }
+
+    #[test]
+    fn pays_a_non_member_loan_directly() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+            let snapshot = create_loan(
+                CreateLoanInput {
+                    loan_group: LoanGroup::NonMember.as_str().into(),
+                    member_id: String::new(),
+                    borrower_name: "Eko Prasetyo".into(),
+                    plafond: 3_000_000,
+                    tenor: 10,
+                    interest_type: InterestType::Flat.as_str().into(),
+                    loan_type: LoanType::Temporary.as_str().into(),
+                    disbursement: DisbursementInput {
+                        channel: "KAS".into(),
+                        business_date: DATE.into(),
+                        display_date: "13 Sep 2026".into(),
+                        display_time: "10:10".into(),
+                    },
+                },
+                "default",
+                &pool,
+            )
+            .await
+            .unwrap();
+            let loan_id = snapshot.loans[0].id.clone();
+            let loan_payment = |principal: i64, savings: i64| {
+                let mut input = payment(principal, "", "KAS");
+                input.member_id = String::new();
+                input.loan_id = loan_id.clone();
+                input.interest = 60_000;
+                input.wajib = savings;
+                input.voluntary = 0;
+                input
+            };
+
+            assert!(
+                post_payment(loan_payment(300_000, 10_000), "default", &pool)
+                    .await
+                    .is_err()
+            );
+            let paid = post_payment(loan_payment(300_000, 0), "default", &pool)
+                .await
+                .unwrap();
+            assert_eq!(paid.loans[0].balance, 2_700_000);
+            // -3,000,000 disbursement + 30,000 provision + 360,000 installment.
+            assert_eq!(paid.totals.cash, -2_610_000);
+            let row = paid
+                .transactions
+                .iter()
+                .find(|row| row.description == "Setoran Eko Prasetyo")
+                .unwrap();
+            assert_eq!(row.amount, 360_000);
+            assert!(post_payment(loan_payment(5_000_000, 0), "default", &pool)
+                .await
+                .is_err());
         });
     }
 
