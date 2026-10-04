@@ -1,4 +1,5 @@
 import type { ObjectDirective } from "vue";
+import { createClippedCellTooltip } from "./clippedCellTooltip.ts";
 
 export type VirtualTableNavigation = {
   count: number;
@@ -18,6 +19,7 @@ type TableState = {
   grid: CellPosition[][];
   positions: Map<HTMLTableCellElement, { row: number; cell: number }>;
   frame: number | null;
+  tooltip: ReturnType<typeof createClippedCellTooltip>;
 };
 const tables = new Map<HTMLTableElement, TableState>();
 let activeTable: HTMLTableElement | null = null;
@@ -324,7 +326,13 @@ function onCellFocus(event: Event) {
       : null;
   if (!cell) return;
   const state = tables.get(table)!;
-  if (event.type === "focusin" && state.selected === cell) return;
+  state.tooltip.show(cell);
+  if (
+    event.type === "focusin" &&
+    state.selected === cell &&
+    (!state.virtual || state.logicalRow === virtualRowIndex(cell))
+  )
+    return;
   const position = state.positions.get(cell);
   if (!position) return;
   cancelFocus(state);
@@ -349,12 +357,13 @@ function sync(table: HTMLTableElement) {
   });
   const cells = state.grid.flat();
   if (
-    !state.virtual &&
-    (!state.selected || !state.positions.has(state.selected))
+    !state.selected ||
+    !state.positions.has(state.selected) ||
+    (state.virtual && state.logicalRow === null)
   ) {
-    cancelFocus(state);
+    if (!state.virtual) cancelFocus(state);
     state.selected = cells[0]?.cell ?? null;
-    state.column = 0;
+    if (!state.virtual) state.column = 0;
   }
   for (const { cell } of cells) {
     const tabIndex = cell === state.selected ? 0 : -1;
@@ -377,6 +386,7 @@ export const tableNavigation: ObjectDirective<
       grid: [],
       positions: new Map(),
       frame: null,
+      tooltip: createClippedCellTooltip(table),
     });
     table.addEventListener("click", onCellFocus);
     table.addEventListener("focusin", onCellFocus);
@@ -394,11 +404,13 @@ export const tableNavigation: ObjectDirective<
       state.logicalRow = null;
       state.selected = null;
       state.column = 0;
+      state.tooltip.hide();
     }
     state.virtual = value;
     sync(table);
   },
   unmounted(table) {
+    tables.get(table)!.tooltip.destroy();
     tables.get(table)!.revision++;
     cancelFocus(tables.get(table)!);
     table.removeEventListener("click", onCellFocus);

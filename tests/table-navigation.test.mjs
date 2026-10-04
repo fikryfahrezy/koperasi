@@ -364,3 +364,66 @@ test("horizontal virtual navigation skips gap cells and focuses the logical dest
     "spacers never become navigation targets",
   );
 });
+
+test("virtual reports have one Tab entry and arrows advance from the focused entry", async (t) => {
+  const virtual = {
+    count: 3,
+    context: "first",
+    rows: [],
+    columnSpans: () => [1, 1],
+    async scrollToRow() {},
+  };
+  const nav = navigationFixture(
+    t,
+    [
+      [1, 1],
+      [1, 1],
+      [1, 1],
+    ],
+    virtual,
+  );
+  const tabbable = () =>
+    nav.grid.flatMap((row) => row.cells).filter((cell) => cell.tabIndex === 0);
+  assert.deepEqual(tabbable(), [nav.grid[0].cells[0]]);
+  nav.grid[0].cells[0].focus();
+  nav.press("ArrowDown");
+  await nav.flush();
+  assert.equal(nav.document.activeElement, nav.grid[1].cells[0]);
+  assert.deepEqual(tabbable(), [nav.grid[1].cells[0]]);
+
+  // Scrolling unmounts the selection; the next mounted row becomes the entry.
+  nav.grid.splice(0, 2);
+  nav.document.activeElement = {};
+  tableNavigation.updated(nav.table, { value: virtual });
+  assert.deepEqual(tabbable(), [nav.grid[0].cells[0]]);
+  nav.grid[0].cells[0].focus();
+  nav.press("ArrowRight");
+  await nav.flush();
+  assert.equal(nav.document.activeElement, nav.grid[0].cells[1]);
+
+  // Filters and tab changes must also restore a single entry point.
+  tableNavigation.updated(nav.table, { value: { ...virtual, rows: [{}] } });
+  assert.deepEqual(tabbable(), [nav.grid[0].cells[0]]);
+  tableNavigation.updated(nav.table, {
+    value: { ...virtual, context: "second" },
+  });
+  assert.deepEqual(tabbable(), [nav.grid[0].cells[0]]);
+});
+
+test("the Tab entry moves from initial totals to data rows when they finish mounting", (t) => {
+  const virtual = {
+    count: 2,
+    context: "first",
+    rows: [],
+    columnSpans: () => [1],
+    async scrollToRow() {},
+  };
+  const nav = navigationFixture(t, [[1], [1]], virtual);
+  const firstRow = nav.grid.shift();
+  tableNavigation.updated(nav.table, { value: virtual });
+  assert.equal(nav.grid[0].cells[0].tabIndex, 0);
+  nav.grid.unshift(firstRow);
+  tableNavigation.updated(nav.table, { value: virtual });
+  assert.equal(firstRow.cells[0].tabIndex, 0);
+  assert.equal(nav.grid[1].cells[0].tabIndex, -1);
+});
