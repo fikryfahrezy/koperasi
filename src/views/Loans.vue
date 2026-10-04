@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, watch } from "vue";
+import { computed, nextTick, watch } from "vue";
 import { CalendarX2, Search } from "lucide-vue-next";
 import { useDebouncedRef } from "../composables/useDebouncedRef";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
+import { useVirtualSheetColumns } from "../composables/useVirtualSheetColumns";
 import { useVirtualSheet } from "../composables/useVirtualSheet";
 import PageHeader from "../components/PageHeader.vue";
 import UiSelect from "../components/UiSelect.vue";
@@ -217,32 +218,48 @@ const sheetRows = computed<SheetRow[]>(() =>
     { kind: "subtotal" as const, section, key: `${section.group}:subtotal` },
   ]),
 );
-const columnWidths = computed(() => [
-  40,
-  240,
-  120,
-  80,
-  80,
-  80,
-  100,
-  120,
-  120,
-  90,
-  ...Array(totalColumnCount.value - 10).fill(110),
-]);
-const { scroller, table, renderedRows, paddingTop, paddingBottom, navigation } =
-  useVirtualSheet(
-    sheetRows,
-    (row) => row.key,
-    pageState.tabId,
-    pageState.active,
-    (index) =>
-      sheetRows.value[index]?.kind === "heading"
-        ? [1, 1, totalColumnCount.value - 2]
-        : sheetRows.value[index]?.kind === "loan"
-          ? Array(totalColumnCount.value).fill(1)
-          : [1, 1, 1, 7, ...Array(totalColumnCount.value - 10).fill(1)],
-  );
+const {
+  scroller,
+  table,
+  renderedRows,
+  paddingTop,
+  paddingBottom,
+  navigation: rowNavigation,
+} = useVirtualSheet(
+  sheetRows,
+  (row) => row.key,
+  pageState.tabId,
+  pageState.active,
+  (index) =>
+    sheetRows.value[index]?.kind === "heading"
+      ? [1, 1, totalColumnCount.value - 2]
+      : sheetRows.value[index]?.kind === "loan"
+        ? Array(totalColumnCount.value).fill(1)
+        : [1, 1, 1, 7, ...Array(totalColumnCount.value - 10).fill(1)],
+);
+const {
+  renderedGroups: renderedPeriodTables,
+  leftColumns,
+  rightColumns,
+  widths: columnWidths,
+  totalWidth,
+  scrollToColumn,
+} = useVirtualSheetColumns(
+  periodTables,
+  () => monthColumnCount,
+  [40, 240, 120, 80, 80, 80, 100, 120, 120, 90],
+  scroller,
+  pageState.active,
+);
+const renderedColumnCount = computed(() => columnWidths.value.length);
+const navigation = computed(() => ({
+  ...rowNavigation.value,
+  async scrollToRow(index: number, column = 0) {
+    scrollToColumn(column);
+    await rowNavigation.value.scrollToRow(index);
+    await nextTick();
+  },
+}));
 </script>
 
 <template>
@@ -303,8 +320,9 @@ const { scroller, table, renderedRows, paddingTop, paddingBottom, navigation } =
           v-table-navigation="navigation"
           class="sheet-table sheet-table--virtual"
           :style="{
-            width: `${columnWidths.reduce((sum, width) => sum + width, 0)}px`,
+            width: `${totalWidth}px`,
           }"
+          :aria-colcount="totalColumnCount"
           :aria-rowcount="sheetRows.length + 5"
         >
           <colgroup>
@@ -325,14 +343,36 @@ const { scroller, table, renderedRows, paddingTop, paddingBottom, navigation } =
               <th rowspan="4">Tanggal<br />Realisasi</th>
               <th rowspan="4">Tanggal<br />Jatuh Tempo</th>
               <th rowspan="4">Jangka<br />Waktu</th>
-              <template v-for="{ period } in periodTables" :key="period">
-                <th :colspan="monthColumnCount" class="sheet-group">
+              <th
+                v-if="leftColumns"
+                rowspan="4"
+                class="sheet-column-spacer"
+                aria-hidden="true"
+              ></th>
+              <template
+                v-for="{ period } in renderedPeriodTables"
+                :key="period"
+              >
+                <th
+                  :colspan="monthColumnCount"
+                  class="sheet-group"
+                  :data-period="period"
+                >
                   {{ formatPeriod(period) }}
                 </th>
               </template>
+              <th
+                v-if="rightColumns"
+                rowspan="4"
+                class="sheet-column-spacer"
+                aria-hidden="true"
+              ></th>
             </tr>
             <tr>
-              <template v-for="{ period } in periodTables" :key="period">
+              <template
+                v-for="{ period } in renderedPeriodTables"
+                :key="period"
+              >
                 <th rowspan="3" class="sheet-total">
                   Saldo Posisi<br />{{ formatPreviousPeriod(period) }}
                 </th>
@@ -357,14 +397,20 @@ const { scroller, table, renderedRows, paddingTop, paddingBottom, navigation } =
               </template>
             </tr>
             <tr>
-              <template v-for="{ period } in periodTables" :key="period">
+              <template
+                v-for="{ period } in renderedPeriodTables"
+                :key="period"
+              >
                 <th colspan="6" class="sheet-group sheet-group--mutasi">
                   Mutasi bulan {{ formatPeriod(period) }}
                 </th>
               </template>
             </tr>
             <tr>
-              <template v-for="{ period } in periodTables" :key="period">
+              <template
+                v-for="{ period } in renderedPeriodTables"
+                :key="period"
+              >
                 <template v-for="block in 3" :key="block">
                   <th>Pokok</th>
                   <th>Bunga</th>
@@ -385,7 +431,7 @@ const { scroller, table, renderedRows, paddingTop, paddingBottom, navigation } =
           <tbody>
             <tr v-if="paddingTop" class="sheet-spacer" aria-hidden="true">
               <td
-                :colspan="totalColumnCount"
+                :colspan="renderedColumnCount"
                 :style="{ height: `${paddingTop}px` }"
               ></td>
             </tr>
@@ -402,7 +448,10 @@ const { scroller, table, renderedRows, paddingTop, paddingBottom, navigation } =
                 <td class="sheet-sticky sheet-name">
                   <strong>{{ item.section.title }}</strong>
                 </td>
-                <td :colspan="totalColumnCount - 2"></td>
+                <td
+                  :colspan="renderedColumnCount - 2"
+                  :data-virtual-span="totalColumnCount - 2"
+                ></td>
               </tr>
               <tr
                 v-else-if="item.kind === 'loan'"
@@ -423,7 +472,17 @@ const { scroller, table, renderedRows, paddingTop, paddingBottom, navigation } =
                 <td>{{ item.row.loan.realizationDate }}</td>
                 <td>{{ item.row.loan.dueDate }}</td>
                 <td class="num-cell">{{ item.row.loan.tenor }}</td>
-                <template v-for="table in periodTables" :key="table.period">
+                <td
+                  v-if="leftColumns"
+                  class="sheet-column-spacer"
+                  aria-hidden="true"
+                  data-virtual-gap
+                  :data-virtual-span="leftColumns"
+                ></td>
+                <template
+                  v-for="table in renderedPeriodTables"
+                  :key="table.period"
+                >
                   <template
                     v-for="monthRow in [table.rowsById.get(item.row.loanId)]"
                     :key="table.period"
@@ -456,6 +515,13 @@ const { scroller, table, renderedRows, paddingTop, paddingBottom, navigation } =
                     </td>
                   </template>
                 </template>
+                <td
+                  v-if="rightColumns"
+                  class="sheet-column-spacer"
+                  aria-hidden="true"
+                  data-virtual-gap
+                  :data-virtual-span="rightColumns"
+                ></td>
               </tr>
               <tr v-else :data-virtual-row="index" :aria-rowindex="index + 5">
                 <td class="sheet-sticky sheet-no"></td>
@@ -464,7 +530,17 @@ const { scroller, table, renderedRows, paddingTop, paddingBottom, navigation } =
                   {{ formatSheetNumber(item.section.totals.plafond) }}
                 </td>
                 <td colspan="7"></td>
-                <template v-for="table in periodTables" :key="table.period">
+                <td
+                  v-if="leftColumns"
+                  class="sheet-column-spacer"
+                  aria-hidden="true"
+                  data-virtual-gap
+                  :data-virtual-span="leftColumns"
+                ></td>
+                <template
+                  v-for="table in renderedPeriodTables"
+                  :key="table.period"
+                >
                   <td
                     v-for="key in beforeMutation"
                     :key="key"
@@ -498,11 +574,18 @@ const { scroller, table, renderedRows, paddingTop, paddingBottom, navigation } =
                     }}
                   </td>
                 </template>
+                <td
+                  v-if="rightColumns"
+                  class="sheet-column-spacer"
+                  aria-hidden="true"
+                  data-virtual-gap
+                  :data-virtual-span="rightColumns"
+                ></td>
               </tr>
             </template>
             <tr v-if="paddingBottom" class="sheet-spacer" aria-hidden="true">
               <td
-                :colspan="totalColumnCount"
+                :colspan="renderedColumnCount"
                 :style="{ height: `${paddingBottom}px` }"
               ></td>
             </tr>
@@ -518,7 +601,17 @@ const { scroller, table, renderedRows, paddingTop, paddingBottom, navigation } =
                 {{ formatSheetNumber(plafondTotal) }}
               </td>
               <td colspan="7"></td>
-              <template v-for="table in periodTables" :key="table.period">
+              <td
+                v-if="leftColumns"
+                class="sheet-column-spacer"
+                aria-hidden="true"
+                data-virtual-gap
+                :data-virtual-span="leftColumns"
+              ></td>
+              <template
+                v-for="table in renderedPeriodTables"
+                :key="table.period"
+              >
                 <td
                   v-for="key in beforeMutation"
                   :key="key"
@@ -540,6 +633,13 @@ const { scroller, table, renderedRows, paddingTop, paddingBottom, navigation } =
                   {{ formatSheetNumber(table.totals[key]) }}
                 </td>
               </template>
+              <td
+                v-if="rightColumns"
+                class="sheet-column-spacer"
+                aria-hidden="true"
+                data-virtual-gap
+                :data-virtual-span="rightColumns"
+              ></td>
             </tr>
           </tfoot>
         </table>

@@ -103,7 +103,7 @@ try {
     const members=Array.from({length:1000},(_,i)=>({id:'M'+String(i+1).padStart(4,'0'),name:'Member '+String(i+1).padStart(4,'0'),joinedAt:'2026-01-01',principalSavings:50000}));
     const loans=members.slice(0,800).map((m,i)=>({id:'L'+String(i+1).padStart(4,'0'),loanGroup:i<400?'Anggota PP BRI':'Non Anggota PP BRI',memberId:m.id,memberName:m.name,plafond:10000000,balance:9000000,rate:12,tenor:24,interestType:'Menurun',loanType:'Bulanan',realizationDate:'2026-01-01',dueDate:'2028-01-01',guarantee:'TEST'}));
     const periods=Array.from({length:12},(_,i)=>'2026-'+String(i+1).padStart(2,'0'));
-    const ledger={periods,savings:periods.flatMap(period=>members.map(m=>({memberId:m.id,period,transactionDate:period+'-01',principalOpening:50000,mandatoryOpening:100000,voluntaryOpening:0,principalIn:0,principalOut:0,mandatoryIn:50000,mandatoryOut:0,voluntaryIn:0,voluntaryOut:0,shu:0,principalClosing:50000,mandatoryClosing:150000,voluntaryClosing:0}))),loans:periods.flatMap(period=>loans.map(l=>({loanId:l.id,period,transactionDate:period+'-01',openingBalance:10000000,disbursed:0,principalPaid:100000,interestPaid:10000,provision:0,scheduledPrincipal:100000,scheduledInterest:10000,arrearsPrincipal:0,arrearsInterest:0,closingBalance:9900000})))};
+    const ledger={periods,savings:periods.flatMap(period=>members.map(m=>({memberId:m.id,period,transactionDate:period+'-01',principalOpening:50000,mandatoryOpening:100000,voluntaryOpening:0,principalIn:Number(period.slice(-2)),principalOut:0,mandatoryIn:50000,mandatoryOut:0,voluntaryIn:0,voluntaryOut:0,shu:0,principalClosing:50000,mandatoryClosing:150000,voluntaryClosing:0}))),loans:periods.flatMap(period=>loans.map(l=>({loanId:l.id,period,transactionDate:period+'-01',openingBalance:10000000,disbursed:0,principalPaid:100000,interestPaid:10000,provision:0,scheduledPrincipal:100000,scheduledInterest:10000,arrearsPrincipal:0,arrearsInterest:0,closingBalance:9900000})))};
     window.__TAURI_INTERNALS__={invoke:async(command)=>{
       if(command==='list_companies')return [{id:'default',name:'Test'}];
       if(command==='get_app_snapshot')return {members,loans,transactions:[],savingsBalances:[],totals:{cash:0,savings:200000000,loanPortfolio:7200000000,members:1000}};
@@ -127,7 +127,7 @@ try {
   await waitFor(`document.querySelector('tbody tr[data-virtual-row]')`);
   const read = () =>
     evaluate(
-      `(()=>{const table=document.querySelector('.sheet-table');const wrap=table.closest('.data-table-wrap');const rows=[...table.querySelectorAll('tbody tr[data-virtual-row]')];return {count:rows.length,first:Number(rows[0]?.dataset.virtualRow),last:Number(rows.at(-1)?.dataset.virtualRow),heights:rows.map(r=>r.getBoundingClientRect().height),scrollTop:wrap.scrollTop,scrollHeight:wrap.scrollHeight,error:document.querySelector('.runtime-banner')?.textContent,footer:table.tFoot.textContent}})()`,
+      `(()=>{const table=document.querySelector('.sheet-table');const wrap=table.closest('.data-table-wrap');const rows=[...table.querySelectorAll('tbody tr[data-virtual-row]')];return {count:rows.length,first:Number(rows[0]?.dataset.virtualRow),last:Number(rows[rows.length-1]?.dataset.virtualRow),heights:rows.map(r=>r.getBoundingClientRect().height),scrollTop:wrap.scrollTop,scrollHeight:wrap.scrollHeight,error:document.querySelector('.runtime-banner')?.textContent,footer:table.tFoot.textContent}})()`,
     );
   let result = await read();
   assert(result.count > 0 && result.count < 45, JSON.stringify(result));
@@ -145,6 +145,81 @@ try {
       scrollHeight: result.scrollHeight,
     }),
   );
+  const horizontalState = () =>
+    evaluate(`(()=>{
+    const table=document.querySelector('.sheet-table'); const wrap=table.closest('.sheet-wrap');
+    const row=[...table.querySelectorAll('tbody tr[data-virtual-row]')].find(row=>!row.querySelector('td[data-virtual-span]:not([data-virtual-gap])'));
+    const pinned=row?.querySelector('.sheet-name')?.getBoundingClientRect();
+    return {periods:[...table.querySelectorAll('thead th[data-period]')].map(cell=>cell.dataset.period),
+      cells:row?.querySelectorAll('td:not([data-virtual-gap])').length,
+      logicalColumns:Number(table.getAttribute('aria-colcount')),scrollLeft:wrap.scrollLeft,
+      pinnedLeft:pinned?.left,viewportLeft:wrap.getBoundingClientRect().left,
+      scrollWidth:wrap.scrollWidth,clientWidth:wrap.clientWidth};
+  })()`);
+  const headersAlign = () =>
+    evaluate(`(()=>{
+    const table=document.querySelector('.sheet-table');
+    const loan=location.pathname==='/loans';const leading=loan?10:2;
+    const selected=document.querySelector('select[aria-label="Bulan"]').value;
+    return [...table.querySelectorAll('thead th[data-period]')].every(header=>{
+      const month=selected ? 0 : Number(header.dataset.period.slice(-2))-1;
+      const column=leading+(loan?month*20:month*15+(month>0?1:0));
+      const cell=table.querySelector('tbody td[data-virtual-column="'+column+'"]');
+      const footer=table.querySelector('tfoot td[data-virtual-column="'+column+'"]');
+      return cell && footer && Math.abs(header.getBoundingClientRect().left-cell.getBoundingClientRect().left)<1 && Math.abs(header.getBoundingClientRect().left-footer.getBoundingClientRect().left)<1;
+    });
+  })()`);
+  let horizontal = await horizontalState();
+  assert.equal(horizontal.logicalColumns, 183);
+  assert(horizontal.cells < 40, JSON.stringify(horizontal));
+  const originalScrollWidth = horizontal.scrollWidth;
+  await evaluate(`document.querySelector('.sheet-wrap').scrollLeft=19000`);
+  await waitFor(`document.querySelector('thead th[data-period="2026-12"]')`);
+  horizontal = await horizontalState();
+  assert(horizontal.cells < 40, JSON.stringify(horizontal));
+  assert(!horizontal.periods.includes("2026-01"));
+  assert.equal(horizontal.scrollWidth, originalScrollWidth);
+  assert(
+    Math.abs(horizontal.pinnedLeft - horizontal.viewportLeft - 40) < 2,
+    JSON.stringify(horizontal),
+  );
+  assert.equal(
+    await evaluate(
+      `document.querySelector('tfoot td[data-virtual-column="174"]').textContent.trim()`,
+    ),
+    "12.000",
+  );
+  assert(
+    await headersAlign(),
+    "Savings headers, data and totals must align after horizontal scrolling",
+  );
+  console.log("Savings horizontal", JSON.stringify(horizontal));
+  // Jump to the last January cell; one right arrow must mount February and focus it.
+  await evaluate(`document.querySelector('.sheet-wrap').scrollLeft=0`);
+  await waitFor(`document.querySelector('tbody td[data-virtual-column="17"]')`);
+  await evaluate(
+    `document.querySelector('tbody td[data-virtual-column="17"]').click()`,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  await send("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "ArrowRight",
+    code: "ArrowRight",
+  });
+  await waitFor(`document.activeElement?.dataset.virtualColumn==='18'`);
+  assert((await horizontalState()).scrollLeft > 0);
+  for (let index = 0; index < 150; index++)
+    await send("Input.dispatchKeyEvent", {
+      type: "keyDown",
+      key: "ArrowRight",
+      code: "ArrowRight",
+    });
+  await waitFor(`Number(document.activeElement?.dataset.virtualColumn)>=168`);
+  console.log(
+    "Horizontal keyboard",
+    await evaluate(`document.activeElement.dataset.virtualColumn`),
+  );
+  const savedHorizontal = (await horizontalState()).scrollLeft;
   await evaluate(`document.querySelector('.sheet-wrap').scrollTop=24000`);
   await waitFor(
     `Number(document.querySelector('tbody tr[data-virtual-row]')?.dataset.virtualRow)>700`,
@@ -192,6 +267,9 @@ try {
   await waitFor(
     `Number(document.querySelector('tbody tr[data-virtual-row]')?.dataset.virtualRow)>700`,
   );
+  await waitFor(
+    `Math.abs(document.querySelector('.sheet-wrap').scrollLeft-${savedHorizontal})<2`,
+  );
   console.log(
     "Tab restoration",
     JSON.stringify({
@@ -233,6 +311,63 @@ try {
       last: result.last,
     }),
   );
+  horizontal = await horizontalState();
+  assert(horizontal.cells < 55, JSON.stringify(horizontal));
+  assert.equal(horizontal.logicalColumns, 250);
+  await evaluate(`document.querySelector('.sheet-wrap').scrollLeft=25000`);
+  await waitFor(`document.querySelector('thead th[data-period="2026-12"]')`);
+  horizontal = await horizontalState();
+  assert(horizontal.cells < 55, JSON.stringify(horizontal));
+  assert(!horizontal.periods.includes("2026-01"));
+  assert(
+    Math.abs(horizontal.pinnedLeft - horizontal.viewportLeft - 40) < 2,
+    JSON.stringify(horizontal),
+  );
+  assert(
+    await headersAlign(),
+    "Loans headers, data and totals must align after horizontal scrolling",
+  );
+  console.log("Loans horizontal", JSON.stringify(horizontal));
+  await evaluate(
+    `document.querySelector('tbody td[data-virtual-column="249"]').click()`,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  for (let index = 0; index < 150; index++)
+    await send("Input.dispatchKeyEvent", {
+      type: "keyDown",
+      key: "ArrowLeft",
+      code: "ArrowLeft",
+    });
+  await waitFor(`document.activeElement?.dataset.virtualColumn==='99'`);
+  const loanSelectedRow = await evaluate(
+    `Number(document.activeElement.parentElement.dataset.virtualRow)`,
+  );
+  await send("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "ArrowDown",
+    code: "ArrowDown",
+  });
+  await waitFor(
+    `document.activeElement?.dataset.virtualColumn==='99' && Number(document.activeElement.parentElement.dataset.virtualRow)===${loanSelectedRow + 1}`,
+  );
+  assert(await headersAlign());
+  // Shrinking to a single month must clamp the horizontal offset and preserve totals.
+  await evaluate(
+    `const select=document.querySelector('select[aria-label="Bulan"]');select.value='2026-12';select.dispatchEvent(new Event('change',{bubbles:true}))`,
+  );
+  await waitFor(
+    `document.querySelector('.sheet-table')?.getAttribute('aria-colcount')==='30'`,
+  );
+  await waitFor(
+    `document.querySelector('.sheet-wrap').scrollLeft<=Math.max(0,document.querySelector('.sheet-wrap').scrollWidth-document.querySelector('.sheet-wrap').clientWidth)`,
+  );
+  horizontal = await horizontalState();
+  assert.deepEqual(horizontal.periods, ["2026-12"]);
+  assert(
+    await headersAlign(),
+    "Header alignment must survive a month filter change",
+  );
+  assert((await read()).footer.includes("8.000.000.000"));
   await evaluate(`document.querySelector('.sheet-wrap').scrollTop=12800`);
   await waitFor(
     `Number(document.querySelector('tbody tr[data-virtual-row]')?.dataset.virtualRow)>380`,
@@ -257,7 +392,7 @@ try {
   );
   assert(!result.error, result.error);
   console.log(
-    "PASS: virtual reports, row height, totals, keyboard navigation, tab restore, filtering, section boundary",
+    "PASS: virtual reports, row height, totals, keyboard navigation, horizontal windows, merged headers, tab restore, filtering, section boundary",
   );
 } finally {
   ws?.close();
