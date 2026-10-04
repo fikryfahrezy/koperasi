@@ -5,7 +5,7 @@ export type VirtualTableNavigation = {
   context: string;
   rows: readonly unknown[];
   columnSpans: (index: number) => number[];
-  scrollToRow: (index: number) => Promise<void>;
+  scrollToRow: (index: number, column?: number) => Promise<void>;
 };
 
 type CellPosition = { cell: HTMLTableCellElement; column: number };
@@ -35,11 +35,17 @@ function rows(table: HTMLTableElement): CellPosition[][] {
     )
     .map((row) => {
       let column = 0;
-      return Array.from(row.cells).map((cell) => {
-        const position = { cell, column };
-        column += cell.colSpan;
-        return position;
-      });
+      const cells: CellPosition[] = [];
+      for (const cell of Array.from(row.cells)) {
+        const span = Number(cell.dataset?.virtualSpan) || cell.colSpan;
+        if (cell.dataset?.virtualGap === undefined) {
+          cells.push({ cell, column });
+          if (cell.dataset) cell.dataset.virtualColumn = String(column);
+          cell.setAttribute?.("aria-colindex", String(column + 1));
+        }
+        column += span;
+      }
+      return cells;
     })
     .filter((row) => row.length > 0);
 }
@@ -144,7 +150,7 @@ function queueVirtualFocus(table: HTMLTableElement, state: TableState) {
     const index = state.logicalRow;
     if (index === null || !state.virtual || revision !== state.revision) return;
     const column = state.column;
-    await state.virtual.scrollToRow(index);
+    await state.virtual.scrollToRow(index, column);
     if (
       revision !== state.revision ||
       index !== state.logicalRow ||
@@ -164,7 +170,8 @@ function queueVirtualFocus(table: HTMLTableElement, state: TableState) {
     );
     const next = row?.find(
       ({ cell, column: start }) =>
-        column >= start && column < start + cell.colSpan,
+        column >= start &&
+        column < start + (Number(cell.dataset?.virtualSpan) || cell.colSpan),
     );
     if (!next) return;
     select(table, next.cell, false);
