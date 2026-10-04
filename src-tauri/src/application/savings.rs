@@ -153,6 +153,9 @@ pub(crate) async fn post_payment(
     }
     let channel = Channel::try_from(input.channel.as_str())?;
     validate_business_date(&input.business_date)?;
+    if !input.loan_id.trim().is_empty() {
+        return post_loan_payment(input, channel, company_id, pool).await;
+    }
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
     let member_name = member_name(&mut db, company_id, &input.member_id).await?;
     let id = timestamp_id("TRX");
@@ -246,6 +249,85 @@ pub(crate) async fn post_payment(
         &id,
         AuditAction::Posted,
         serde_json::json!({"amount": amount, "channel": channel.as_str(), "reference": reference}),
+    )
+    .await?;
+    db.commit().await.map_err(|error| error.to_string())?;
+    get_app_snapshot(company_id, pool).await
+}
+
+/// Installment for one loan, as in the daily cash ledger rows for Non Anggota borrowers
+/// (e.g. "Mas Roby 13 feb 25 15 juta"). Only principal and interest; there are no savings.
+async fn post_loan_payment(
+    input: PaymentInput,
+    channel: Channel,
+    company_id: &str,
+    pool: &SqlitePool,
+) -> Result<AppSnapshot, String> {
+    if input.wajib != 0 || input.voluntary != 0 {
+        return Err("Pembayaran per pinjaman tidak memuat simpanan.".into());
+    }
+    let loan_id = input.loan_id.trim();
+    let mut db = pool.begin().await.map_err(|error| error.to_string())?;
+    let loan =
+        sqlx::query("SELECT member_id, member_name FROM loans WHERE company_id = ? AND id = ?")
+            .bind(company_id)
+            .bind(loan_id)
+            .fetch_optional(&mut *db)
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or("Pinjaman tidak ditemukan.")?;
+    let member_id: Option<String> = loan
+        .try_get("member_id")
+        .map_err(|error| error.to_string())?;
+    let borrower_name: String = loan
+        .try_get("member_name")
+        .map_err(|error| error.to_string())?;
+    if input.principal > loan_balance(&mut db, company_id, loan_id).await? {
+        return Err("Pembayaran pokok melebihi saldo pinjaman berjalan.".into());
+    }
+    let id = timestamp_id("TRX");
+    let reference = reference_or(&input.reference, format!("KBS/RCPT/{id}"));
+    ensure_reference_unused(&mut db, company_id, &reference).await?;
+    let amount = append(
+        &mut db,
+        company_id,
+        Entry {
+            id: id.clone(),
+            business_date: &input.business_date,
+            display_date: &input.display_date,
+            display_time: &input.display_time,
+            member_id: member_id.as_deref(),
+            member_name: &borrower_name,
+            channel,
+            description: &format!("Setoran {borrower_name}"),
+            reference: &reference,
+            direction: TransactionDirection::In,
+            actor: APP_ACTOR,
+            reversed_transaction_id: None,
+            components: vec![
+                Component::new(
+                    ComponentType::LoanPrincipal,
+                    "Pokok pinjaman",
+                    input.principal,
+                )
+                .for_loan(loan_id),
+                Component::new(
+                    ComponentType::LoanInterest,
+                    "Bunga pinjaman",
+                    input.interest,
+                )
+                .for_loan(loan_id),
+            ],
+        },
+    )
+    .await?;
+    audit(
+        &mut db,
+        company_id,
+        AuditEntityType::Transaction,
+        &id,
+        AuditAction::Posted,
+        serde_json::json!({"amount": amount, "loanId": loan_id, "channel": channel.as_str(), "reference": reference}),
     )
     .await?;
     db.commit().await.map_err(|error| error.to_string())?;

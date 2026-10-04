@@ -87,7 +87,12 @@ const memberTransactions = computed(() => {
             </div>
             <div class="member-detail__list-value">
               <strong>{{ formatCurrency(loan.balance) }}</strong>
-              <StatusPill v-if="loan.balance <= 0" label="Lunas" />
+              <StatusPill
+                v-if="loan.balance < 0"
+                label="Lebih bayar"
+                tone="warning"
+              />
+              <StatusPill v-else-if="loan.balance === 0" label="Lunas" />
             </div>
           </div>
         </div>

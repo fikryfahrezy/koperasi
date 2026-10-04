@@ -247,7 +247,7 @@ const {
 } = useVirtualSheetColumns(
   periodTables,
   () => monthColumnCount,
-  [40, 240, 120, 80, 80, 80, 100, 120, 120, 90],
+  [56, 240, 120, 80, 80, 80, 100, 120, 120, 90],
   scroller,
   pageState.active,
 );
