@@ -45,6 +45,7 @@ const pageState = useWorkspacePageState("/cash-ledger");
 const {
   members,
   loans,
+  selectedYear,
   financialParameters,
   createLoan,
   loadFinancialParameters,

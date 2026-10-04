@@ -3,6 +3,7 @@ import { computed, watch } from "vue";
 import { CalendarX2, Search } from "lucide-vue-next";
 import { useDebouncedRef } from "../composables/useDebouncedRef";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
+import { useVirtualSheet } from "../composables/useVirtualSheet";
 import PageHeader from "../components/PageHeader.vue";
 import UiSelect from "../components/UiSelect.vue";
 import {
@@ -139,6 +140,27 @@ const monthRows = computed(() => {
     .sort((a, b) => a.memberId.localeCompare(b.memberId))
     .map((row, index) => ({ ...row, no: index + 1 }));
 });
+const totalColumnCount = computed(
+  () =>
+    2 +
+    periodTables.value.reduce(
+      (count, table) => count + (table.hasShu ? 16 : 15),
+      0,
+    ),
+);
+const columnWidths = computed(() => [
+  40,
+  240,
+  ...Array(totalColumnCount.value - 2).fill(110),
+]);
+const { scroller, table, renderedRows, paddingTop, paddingBottom, navigation } =
+  useVirtualSheet(
+    monthRows,
+    (row) => row.memberId,
+    pageState.tabId,
+    pageState.active,
+    () => Array(totalColumnCount.value).fill(1),
+  );
 </script>
 <template>
   <div class="page-stack page-stack--sheet">
@@ -184,8 +206,23 @@ const monthRows = computed(() => {
       <p>Pilih tahun lain.</p>
     </section>
     <section v-else class="panel table-panel">
-      <div class="data-table-wrap sheet-wrap">
-        <table v-table-navigation class="sheet-table">
+      <div ref="scroller" class="data-table-wrap sheet-wrap">
+        <table
+          ref="table"
+          v-table-navigation="navigation"
+          class="sheet-table sheet-table--virtual"
+          :style="{
+            width: `${columnWidths.reduce((sum, width) => sum + width, 0)}px`,
+          }"
+          :aria-rowcount="monthRows.length + 5"
+        >
+          <colgroup>
+            <col
+              v-for="(width, index) in columnWidths"
+              :key="index"
+              :style="{ width: `${width}px` }"
+            />
+          </colgroup>
           <thead>
             <tr>
               <th rowspan="4" class="sheet-sticky sheet-no">No</th>
@@ -261,10 +298,17 @@ const monthRows = computed(() => {
             </tr>
           </thead>
           <tbody>
+            <tr v-if="paddingTop" class="sheet-spacer" aria-hidden="true">
+              <td
+                :colspan="totalColumnCount"
+                :style="{ height: `${paddingTop}px` }"
+              ></td>
+            </tr>
             <tr
-              v-for="row in monthRows"
+              v-for="{ row, index } in renderedRows"
               :key="row.memberId"
-              v-memo="[row, periodTables]"
+              :data-virtual-row="index"
+              :aria-rowindex="index + 5"
             >
               <td class="sheet-sticky sheet-no">{{ row.no }}</td>
               <td class="sheet-sticky sheet-name">
@@ -308,9 +352,18 @@ const monthRows = computed(() => {
                 </template>
               </template>
             </tr>
+            <tr v-if="paddingBottom" class="sheet-spacer" aria-hidden="true">
+              <td
+                :colspan="totalColumnCount"
+                :style="{ height: `${paddingBottom}px` }"
+              ></td>
+            </tr>
           </tbody>
           <tfoot>
-            <tr>
+            <tr
+              :data-virtual-row="monthRows.length"
+              :aria-rowindex="monthRows.length + 5"
+            >
               <td class="sheet-sticky sheet-no"></td>
               <td class="sheet-sticky sheet-name">JUMLAH</td>
               <template v-for="table in periodTables" :key="table.period">

@@ -80,7 +80,7 @@ test("keeps rows below the sticky header when moving upward", () => {
   assert.equal(fixture({ cellTop: 185, cellBottom: 215 }).top, -15);
 });
 
-function navigationFixture(t, spans) {
+function navigationFixture(t, spans, virtual) {
   const listeners = new Map();
   const frames = new Map();
   const counts = { scans: 0, focuses: 0, scrolls: 0, visibility: 0 };
@@ -117,9 +117,10 @@ function navigationFixture(t, spans) {
   const table = new Element();
   let mounted = true;
   const body = { tagName: "TBODY" };
-  const grid = spans.map((rowSpans) => {
+  const grid = spans.map((rowSpans, index) => {
     const row = {
       parentElement: body,
+      dataset: { virtualRow: String(index) },
       querySelector: () => null,
       cells: [],
     };
@@ -167,7 +168,7 @@ function navigationFixture(t, spans) {
       return grid;
     },
   });
-  tableNavigation.mounted(table);
+  tableNavigation.mounted(table, { value: virtual });
   t.after(() => {
     if (mounted) tableNavigation.unmounted(table);
     for (const [key, descriptor] of Object.entries(originals)) {
@@ -199,7 +200,7 @@ function navigationFixture(t, spans) {
     flush() {
       const callbacks = Array.from(frames.values());
       frames.clear();
-      callbacks.forEach((callback) => callback());
+      return Promise.all(callbacks.map((callback) => callback()));
     },
   };
 }
@@ -263,5 +264,69 @@ test("pending navigation does not steal focus after another control receives it"
   nav.document.activeElement = control;
   nav.flush();
   assert.equal(nav.document.activeElement, control);
+  assert.equal(nav.counts.focuses, 0);
+});
+
+test("virtual arrow bursts cross unmounted rows and preserve columns through merged rows", async (t) => {
+  let nav;
+  let cells;
+  const virtual = {
+    count: 1001,
+    context: "tab-1",
+    rows: [],
+    columnSpans: (index) => (index === 80 ? [2, 1] : [1, 1, 1]),
+    async scrollToRow(index) {
+      const row = nav.grid[0];
+      cells ??= [...row.cells];
+      row.cells = virtual.columnSpans(index).map((span, cellIndex) => {
+        cells[cellIndex].colSpan = span;
+        return cells[cellIndex];
+      });
+      row.dataset.virtualRow = String(index);
+      nav.grid.splice(0, nav.grid.length, row);
+      tableNavigation.updated(nav.table, { value: virtual });
+    },
+  };
+  nav = navigationFixture(t, [[1, 1, 1]], virtual);
+  nav.press("ArrowDown");
+  await nav.flush();
+  nav.press("ArrowRight");
+  for (let i = 0; i < 80; i++) nav.press("ArrowDown");
+  assert.equal(nav.frames.size, 1);
+  await nav.flush();
+  assert.equal(
+    nav.document.activeElement.parentElement.dataset.virtualRow,
+    "80",
+  );
+  assert.equal(nav.document.activeElement, nav.grid[0].cells[0]);
+  nav.press("ArrowDown");
+  await nav.flush();
+  assert.equal(
+    nav.document.activeElement.parentElement.dataset.virtualRow,
+    "81",
+  );
+  assert.equal(nav.counts.focuses, 3);
+});
+
+test("virtual focus waits for rendering and is cancelled when the tab changes", async (t) => {
+  let resolveScroll;
+  const virtual = {
+    count: 100,
+    context: "first",
+    rows: [],
+    columnSpans: () => [1],
+    scrollToRow: () =>
+      new Promise((resolve) => {
+        resolveScroll = resolve;
+      }),
+  };
+  const nav = navigationFixture(t, [[1]], virtual);
+  nav.press("ArrowDown");
+  const pending = nav.flush();
+  tableNavigation.updated(nav.table, {
+    value: { ...virtual, context: "second" },
+  });
+  resolveScroll();
+  await pending;
   assert.equal(nav.counts.focuses, 0);
 });

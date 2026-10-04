@@ -1,8 +1,19 @@
 import type { ObjectDirective } from "vue";
 
+export type VirtualTableNavigation = {
+  count: number;
+  context: string;
+  rows: readonly unknown[];
+  columnSpans: (index: number) => number[];
+  scrollToRow: (index: number) => Promise<void>;
+};
+
 type CellPosition = { cell: HTMLTableCellElement; column: number };
 type TableState = {
   selected: HTMLTableCellElement | null;
+  virtual?: VirtualTableNavigation;
+  logicalRow: number | null;
+  revision: number;
   column: number;
   grid: CellPosition[][];
   positions: Map<HTMLTableCellElement, { row: number; cell: number }>;
@@ -119,6 +130,95 @@ export function scrollTableCellIntoView(
   });
 }
 
+function virtualRowIndex(cell: HTMLTableCellElement | null) {
+  const value = cell?.parentElement?.dataset?.virtualRow;
+  return value === undefined ? null : Number(value);
+}
+
+function queueVirtualFocus(table: HTMLTableElement, state: TableState) {
+  if (state.frame !== null) return;
+  const origin = document.activeElement;
+  const revision = state.revision;
+  state.frame = requestAnimationFrame(async () => {
+    state.frame = null;
+    const index = state.logicalRow;
+    if (index === null || !state.virtual || revision !== state.revision) return;
+    const column = state.column;
+    await state.virtual.scrollToRow(index);
+    if (
+      revision !== state.revision ||
+      index !== state.logicalRow ||
+      column !== state.column ||
+      !table.isConnected ||
+      activeTable !== table ||
+      (document.activeElement !== origin &&
+        !(
+          origin &&
+          !origin.isConnected &&
+          document.activeElement === document.body
+        ))
+    )
+      return;
+    const row = state.grid.find(
+      (cells) => virtualRowIndex(cells[0]?.cell ?? null) === index,
+    );
+    const next = row?.find(
+      ({ cell, column: start }) =>
+        column >= start && column < start + cell.colSpan,
+    );
+    if (!next) return;
+    select(table, next.cell, false);
+    next.cell.focus({ preventScroll: true });
+    scrollTableCellIntoView(table, next.cell);
+  });
+}
+
+function navigateVirtual(
+  table: HTMLTableElement,
+  state: TableState,
+  event: KeyboardEvent,
+) {
+  const virtual = state.virtual!;
+  if (!virtual.count) return;
+  event.preventDefault();
+  activeTable = table;
+  if (state.logicalRow === null) {
+    state.logicalRow = virtualRowIndex(state.grid[0]?.[0]?.cell ?? null) ?? 0;
+    state.column = 0;
+  } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    state.logicalRow = Math.max(
+      0,
+      Math.min(
+        virtual.count - 1,
+        state.logicalRow + (event.key === "ArrowDown" ? 1 : -1),
+      ),
+    );
+  } else {
+    const spans = virtual.columnSpans(state.logicalRow);
+    const starts: number[] = [];
+    let column = 0;
+    for (const span of spans) {
+      starts.push(column);
+      column += span;
+    }
+    const current = starts.findIndex(
+      (start, index) =>
+        state.column >= start && state.column < start + spans[index]!,
+    );
+    state.column =
+      starts[
+        Math.max(
+          0,
+          Math.min(
+            starts.length - 1,
+            current + (event.key === "ArrowRight" ? 1 : -1),
+          ),
+        )
+      ] ?? 0;
+  }
+  queueVirtualFocus(table, state);
+}
+
 function onKeydown(event: KeyboardEvent) {
   if (
     !arrowKeys.has(event.key) ||
@@ -153,6 +253,10 @@ function onKeydown(event: KeyboardEvent) {
         : Array.from(tables.keys()).find(isVisible);
   if (!table) return;
   const state = tables.get(table)!;
+  if (state.virtual) {
+    navigateVirtual(table, state, event);
+    return;
+  }
   const grid = state.grid;
   const position = state.selected ? state.positions.get(state.selected) : null;
   const rowIndex = position?.row ?? -1;
@@ -217,6 +321,7 @@ function onCellFocus(event: Event) {
   const position = state.positions.get(cell);
   if (!position) return;
   cancelFocus(state);
+  state.logicalRow = virtualRowIndex(cell);
   state.column = state.grid[position.row]![position.cell]!.column;
   select(
     table,
@@ -236,7 +341,10 @@ function sync(table: HTMLTableElement) {
     });
   });
   const cells = state.grid.flat();
-  if (!state.selected || !state.positions.has(state.selected)) {
+  if (
+    !state.virtual &&
+    (!state.selected || !state.positions.has(state.selected))
+  ) {
     cancelFocus(state);
     state.selected = cells[0]?.cell ?? null;
     state.column = 0;
@@ -247,11 +355,17 @@ function sync(table: HTMLTableElement) {
   }
 }
 
-export const tableNavigation: ObjectDirective<HTMLTableElement> = {
-  mounted(table) {
+export const tableNavigation: ObjectDirective<
+  HTMLTableElement,
+  VirtualTableNavigation | undefined
+> = {
+  mounted(table, binding) {
     if (!tables.size) document.addEventListener("keydown", onKeydown);
     tables.set(table, {
       selected: null,
+      virtual: binding?.value,
+      logicalRow: null,
+      revision: 0,
       column: 0,
       grid: [],
       positions: new Map(),
@@ -261,8 +375,24 @@ export const tableNavigation: ObjectDirective<HTMLTableElement> = {
     table.addEventListener("focusin", onCellFocus);
     sync(table);
   },
-  updated: sync,
+  updated(table, binding) {
+    const state = tables.get(table)!;
+    const value = binding?.value;
+    if (
+      state.virtual?.context !== value?.context ||
+      state.virtual?.rows !== value?.rows
+    ) {
+      cancelFocus(state);
+      state.revision++;
+      state.logicalRow = null;
+      state.selected = null;
+      state.column = 0;
+    }
+    state.virtual = value;
+    sync(table);
+  },
   unmounted(table) {
+    tables.get(table)!.revision++;
     cancelFocus(tables.get(table)!);
     table.removeEventListener("click", onCellFocus);
     table.removeEventListener("focusin", onCellFocus);

@@ -70,3 +70,31 @@ Tauri dan menampilkan snapshot ledger. Posting pembayaran dan reversal dijalanka
 secara atomik serta direkam pada audit trail. Entrypoint backend hanya melayani modul aktif. Impor workbook dan perubahan
 parameter administrasi telah dihapus; data hasil impor yang sudah tersimpan
 tetap dibaca dari ledger, dan parameter keuangan tetap tersedia untuk Buku kas.
+
+## Virtualized reports
+
+Savings and Loans use `@tanstack/vue-virtual` pinned to `3.13.39` (virtual-core
+`3.17.11` in the lockfile). Only visible rows plus five rows of overscan on each
+side are mounted. Totals use the complete filtered report. Loan section headings
+and subtotals participate in the virtual row list. Monthly columns remain mounted;
+horizontal virtualization is not implemented.
+
+Rows have a fixed height of 32px and explicit column widths to prevent table layout
+from changing as different rows enter the viewport. Arrow-key navigation uses
+logical row indexes and renders an offscreen destination before focusing it.
+
+Run `pnpm test:virtualization` with Chrome installed, or set `CHROME_BINARY` to a
+Chrome/Chromium executable. This browser regression check starts a separate local
+Vite server and temporary browser profile, replaces Tauri commands with synthetic
+data (1,000 members, 800 loans, 12 months), and checks bounded DOM row counts, row
+heights, totals, filtering, keyboard navigation, section boundaries and tab scroll
+restoration. It does not access the native application database.
+
+The production build still targets Chromium 88. Native `scrollend` is disabled;
+TanStack uses its timer fallback. The browser regression runs on the locally
+installed browser and does **not** certify Windows 7 compatibility. Before release,
+test the packaged application on Windows 7 x64 with bundled WebView2 `88.0.705.81`:
+scroll both reports to the bottom and across months, traverse offscreen rows with
+arrow keys, cross both loan groups, filter while scrolled down, and switch between
+two tabs with different filters and scroll positions. Verify totals and absence of
+blank ranges or runtime errors. Do not upgrade the fixed runtime for this feature.
