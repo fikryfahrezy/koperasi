@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
-import { RouterView, useRoute } from "vue-router";
+import { useRoute } from "vue-router";
 import { Building2, CalendarDays } from "lucide-vue-next";
 import logo from "./assets/logo.png";
 import AppMenu from "./components/AppMenu.vue";
@@ -8,9 +8,9 @@ import ToastHost from "./components/ToastHost.vue";
 import UiSelect from "./components/UiSelect.vue";
 import UpdateChecker from "./components/UpdateChecker.vue";
 import WorkspaceTabs from "./components/WorkspaceTabs.vue";
+import WorkspaceTabPages from "./components/WorkspaceTabPages.vue";
 import { clearRuntimeError, runtimeError } from "./runtime-error";
 import { useKoperasiStore } from "./store/koperasi";
-import { activeWorkspaceTabId } from "./workspace-tabs";
 
 const {
   initialize,
@@ -100,14 +100,7 @@ onMounted(initialize);
               {{ $t("common.retry") }}
             </button>
           </section>
-          <RouterView v-else v-slot="{ Component }">
-            <KeepAlive>
-              <component
-                :is="Component"
-                :key="`${activeWorkspaceTabId}:${$route.path}`"
-              />
-            </KeepAlive>
-          </RouterView>
+          <WorkspaceTabPages v-else />
         </main>
         <AppMenu />
       </div>

@@ -1,29 +1,39 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
+import { computed, watch } from "vue";
 import { Plus, Search, UserRound } from "lucide-vue-next";
 import { useRoute } from "vue-router";
+import { useDebouncedRef } from "../composables/useDebouncedRef";
+import { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import PageHeader from "../components/PageHeader.vue";
 import RupiahInput from "../components/RupiahInput.vue";
 import UiModal from "../components/UiModal.vue";
 import { SavingsAccountType, useKoperasiStore } from "../store/koperasi";
 
+const pageState = useWorkspacePageState("/members");
+
 const { members, totals, addMember, refresh } = useKoperasiStore();
 const route = useRoute();
-const query = ref(String(route.query.q ?? ""));
+const query = pageState.field("query", () =>
+  route.path === "/members" ? String(route.query.q ?? "") : "",
+);
+const debouncedQuery = useDebouncedRef(query, pageState.tabId);
 watch(
   () => route.query.q,
-  (value) => (query.value = String(value ?? "")),
+  (value) => {
+    if (route.path === "/members" && value !== undefined)
+      query.value = String(value);
+  },
 );
-const open = ref(false);
-const form = reactive({
+const open = pageState.field("open", () => false);
+const form = pageState.field("form", () => ({
   name: "",
   joinedAt: "2026-09-13",
   principalSavings: 50_000,
-});
+}));
 
 const filteredMembers = computed(() =>
   members.filter((member) =>
-    member.name.toLowerCase().includes(query.value.toLowerCase()),
+    member.name.toLowerCase().includes(debouncedQuery.value.toLowerCase()),
   ),
 );
 const joinedAtFormatter = new Intl.DateTimeFormat("id-ID", {
@@ -41,25 +51,28 @@ function formatJoinedAt(value: string) {
   return Number.isNaN(date.getTime()) ? "—" : joinedAtFormatter.format(date);
 }
 async function submit() {
+  const tabId = pageState.tabId.value;
+  const submittedForm = form.forTab(tabId);
+  const submittedOpen = open.forTab(tabId);
   if (
-    !form.name ||
-    !Number.isFinite(form.principalSavings) ||
-    form.principalSavings < 50_000
+    !form.value.name ||
+    !Number.isFinite(form.value.principalSavings) ||
+    form.value.principalSavings < 50_000
   )
     return;
   const saved = await addMember({
-    name: form.name,
-    joinedAt: form.joinedAt,
+    name: form.value.name,
+    joinedAt: form.value.joinedAt,
     openingSavings: [
       {
         accountType: SavingsAccountType.Principal,
-        amount: form.principalSavings,
+        amount: form.value.principalSavings,
       },
     ],
   });
   if (!saved) return;
-  open.value = false;
-  Object.assign(form, {
+  submittedOpen.value = false;
+  Object.assign(submittedForm.value, {
     name: "",
     joinedAt: "2026-09-13",
     principalSavings: 50_000,
@@ -135,7 +148,11 @@ async function submit() {
         </table>
       </div>
     </section>
-    <UiModal :open="open" title="Tambah anggota baru" @close="open = false">
+    <UiModal
+      :open="open && pageState.active.value"
+      title="Tambah anggota baru"
+      @close="open = false"
+    >
       <form class="form-stack" @submit.prevent="submit">
         <label class="field"
           ><span>Nama lengkap</span
