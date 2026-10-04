@@ -101,7 +101,7 @@ try {
   await send("Page.addScriptToEvaluateOnNewDocument", {
     source: `
     const members=Array.from({length:1000},(_,i)=>({id:'M'+String(i+1).padStart(4,'0'),name:'Member '+String(i+1).padStart(4,'0'),joinedAt:'2026-01-01',principalSavings:50000}));
-    const loans=members.slice(0,800).map((m,i)=>({id:'L'+String(i+1).padStart(4,'0'),loanGroup:i<400?'Anggota PP BRI':'Non Anggota PP BRI',memberId:m.id,memberName:m.name,plafond:10000000,balance:9000000,rate:12,tenor:24,interestType:'Menurun',loanType:'Bulanan',realizationDate:'2026-01-01',dueDate:'2028-01-01',guarantee:'TEST'}));
+    const loans=members.slice(0,800).map((m,i)=>({id:'L'+String(i+1).padStart(4,'0'),loanGroup:i<400?'Anggota PP BRI':'Non Anggota PP BRI',memberId:m.id,memberName:m.name,plafond:10000000,balance:9000000,rate:12,tenor:24,interestType:'Menurun',loanType:'Bulanan',realizationDate:'2026-01-01',dueDate:'2028-01-01',guarantee:'Sertifikat rumah dan tanah'}));
     const periods=Array.from({length:12},(_,i)=>'2026-'+String(i+1).padStart(2,'0'));
     const ledger={periods,savings:periods.flatMap(period=>members.map(m=>({memberId:m.id,period,transactionDate:period+'-01',principalOpening:50000,mandatoryOpening:100000,voluntaryOpening:0,principalIn:Number(period.slice(-2)),principalOut:0,mandatoryIn:50000,mandatoryOut:0,voluntaryIn:0,voluntaryOut:0,shu:0,principalClosing:50000,mandatoryClosing:150000,voluntaryClosing:0}))),loans:periods.flatMap(period=>loans.map(l=>({loanId:l.id,period,transactionDate:period+'-01',openingBalance:10000000,disbursed:0,principalPaid:100000,interestPaid:10000,provision:0,scheduledPrincipal:100000,scheduledInterest:10000,arrearsPrincipal:0,arrearsInterest:0,closingBalance:9900000})))};
     window.__TAURI_INTERNALS__={invoke:async(command)=>{
@@ -129,6 +129,31 @@ try {
     evaluate(
       `(()=>{const table=document.querySelector('.sheet-table');const wrap=table.closest('.data-table-wrap');const rows=[...table.querySelectorAll('tbody tr[data-virtual-row]')];return {count:rows.length,first:Number(rows[0]?.dataset.virtualRow),last:Number(rows[rows.length-1]?.dataset.virtualRow),heights:rows.map(r=>r.getBoundingClientRect().height),scrollTop:wrap.scrollTop,scrollHeight:wrap.scrollHeight,error:document.querySelector('.runtime-banner')?.textContent,footer:table.tFoot.textContent}})()`,
     );
+  const tabEntryCount = () =>
+    evaluate(
+      `document.querySelectorAll('.sheet-table td[tabindex="0"]').length`,
+    );
+  assert.equal(await tabEntryCount(), 1);
+  await evaluate(
+    `const table=document.querySelector('.sheet-table');const entry=document.createElement('button');entry.id='tab-entry-probe';entry.style.position='fixed';entry.style.left='-9999px';table.before(entry);entry.focus()`,
+  );
+  await send("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "Tab",
+    code: "Tab",
+  });
+  await waitFor(
+    `document.activeElement===document.querySelector('.sheet-table td[tabindex="0"]')`,
+  );
+  await send("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "ArrowDown",
+    code: "ArrowDown",
+  });
+  await waitFor(
+    `document.activeElement?.parentElement?.dataset.virtualRow==='1'`,
+  );
+  await evaluate(`document.querySelector('#tab-entry-probe').remove()`);
   let result = await read();
   assert(result.count > 0 && result.count < 45, JSON.stringify(result));
   assert(
@@ -226,6 +251,7 @@ try {
   );
   result = await read();
   assert(result.count < 45);
+  assert.equal(await tabEntryCount(), 1);
   assert(result.footer.includes("200.000.000"));
   console.log(
     "Savings scrolled",
@@ -284,6 +310,7 @@ try {
     `document.querySelectorAll('tbody tr[data-virtual-row]').length===1`,
   );
   assert((await read()).footer.includes("200.000"));
+  assert.equal(await tabEntryCount(), 1);
   console.log(
     "Savings filtering",
     JSON.stringify({
@@ -310,6 +337,68 @@ try {
       first: result.first,
       last: result.last,
     }),
+  );
+  assert.equal(await tabEntryCount(), 1);
+  const collateral = `document.querySelector('tbody tr[data-virtual-row="1"]').cells[5]`;
+  assert(
+    await evaluate(`${collateral}.scrollWidth > ${collateral}.clientWidth`),
+  );
+  await evaluate(
+    `${collateral}.dispatchEvent(new MouseEvent('mouseover',{bubbles:true}))`,
+  );
+  await waitFor(
+    `document.querySelector('[role="tooltip"]')?.textContent==='Sertifikat rumah dan tanah'`,
+  );
+  await evaluate(
+    `${collateral}.dispatchEvent(new MouseEvent('mouseout',{bubbles:true}))`,
+  );
+  assert.equal(
+    await evaluate(`document.querySelector('[role="tooltip"]')`),
+    null,
+  );
+  await evaluate(
+    `document.querySelector('tbody tr[data-virtual-row="1"]').cells[0].click()`,
+  );
+  await waitFor(
+    `document.activeElement?.parentElement?.dataset.virtualRow==='1'`,
+  );
+  for (let index = 0; index < 5; index++)
+    await send("Input.dispatchKeyEvent", {
+      type: "keyDown",
+      key: "ArrowRight",
+      code: "ArrowRight",
+    });
+  await waitFor(`document.activeElement===${collateral}`);
+  await waitFor(
+    `document.querySelector('[role="tooltip"]')?.textContent==='Sertifikat rumah dan tanah'`,
+  );
+  assert(
+    await evaluate(
+      `${collateral}.getAttribute('aria-describedby')===document.querySelector('[role="tooltip"]').id`,
+    ),
+  );
+  await send("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "Escape",
+    code: "Escape",
+  });
+  assert.equal(
+    await evaluate(`document.querySelector('[role="tooltip"]')`),
+    null,
+  );
+  assert.equal(
+    await evaluate(`${collateral}.getAttribute('aria-describedby')`),
+    null,
+  );
+  await evaluate(
+    `document.querySelector('tbody tr[data-virtual-row="1"]').cells[0].focus()`,
+  );
+  assert.equal(
+    await evaluate(`document.querySelector('[role="tooltip"]')`),
+    null,
+  );
+  console.log(
+    "PASS: Tab entry, selection removal, clipped text on hover/focus, Escape dismissal",
   );
   horizontal = await horizontalState();
   assert(horizontal.cells < 55, JSON.stringify(horizontal));
