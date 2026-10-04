@@ -106,6 +106,12 @@ strong {
   flex-direction: column;
   overflow: hidden;
 }
+.workspace-tab-pages {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0%;
+  min-height: 0;
+}
 .page-stack--sheet {
   flex: 1 1 0%;
   min-height: 0;
@@ -309,6 +315,9 @@ strong {
   color: var(--soft);
   background: #f3f5f4;
   cursor: default;
+}
+.ui-select__label {
+  font-weight: 400;
 }
 .ui-select__value {
   min-width: 0;
