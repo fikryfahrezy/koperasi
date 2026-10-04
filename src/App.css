@@ -814,6 +814,22 @@ strong {
   border-spacing: 0;
   font-size: 10.5px;
 }
+.sheet-table--virtual {
+  table-layout: fixed;
+}
+.sheet-table--virtual tbody tr:not(.sheet-spacer) td,
+.sheet-table--virtual tfoot td {
+  height: 32px;
+  box-sizing: border-box;
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sheet-table--virtual .sheet-spacer td {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
 .sheet-table th,
 .sheet-table td {
   padding: 7px 10px;
