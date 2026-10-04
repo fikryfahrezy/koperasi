@@ -72,35 +72,44 @@ watch(
 
 <template>
   <div class="date-input" role="group" :aria-label="ariaLabel">
-    <UiSelect
-      :model-value="day"
-      :options="dayOptions"
-      :aria-label="`${ariaLabel}: hari`"
-      placeholder="DD"
-      :required="props.required"
-      :disabled="props.disabled"
-      @update:model-value="updatePart('day', $event)"
-    />
+    <div class="date-input__part">
+      <small aria-hidden="true">Hari</small>
+      <UiSelect
+        :model-value="day"
+        :options="dayOptions"
+        :aria-label="`${ariaLabel}: hari`"
+        placeholder="DD"
+        :required="props.required"
+        :disabled="props.disabled"
+        @update:model-value="updatePart('day', $event)"
+      />
+    </div>
     <span aria-hidden="true">/</span>
-    <UiSelect
-      :model-value="month"
-      :options="monthOptions"
-      :aria-label="`${ariaLabel}: bulan`"
-      placeholder="MM"
-      :required="props.required"
-      :disabled="props.disabled"
-      @update:model-value="updatePart('month', $event)"
-    />
+    <div class="date-input__part">
+      <small aria-hidden="true">Bulan</small>
+      <UiSelect
+        :model-value="month"
+        :options="monthOptions"
+        :aria-label="`${ariaLabel}: bulan`"
+        placeholder="MM"
+        :required="props.required"
+        :disabled="props.disabled"
+        @update:model-value="updatePart('month', $event)"
+      />
+    </div>
     <span aria-hidden="true">/</span>
-    <UiSelect
-      :model-value="year"
-      :options="yearOptions"
-      :aria-label="`${ariaLabel}: tahun`"
-      placeholder="YYYY"
-      :required="props.required"
-      :disabled="props.disabled"
-      @update:model-value="updatePart('year', $event)"
-    />
+    <div class="date-input__part">
+      <small aria-hidden="true">Tahun</small>
+      <UiSelect
+        :model-value="year"
+        :options="yearOptions"
+        :aria-label="`${ariaLabel}: tahun`"
+        placeholder="YYYY"
+        :required="props.required"
+        :disabled="props.disabled"
+        @update:model-value="updatePart('year', $event)"
+      />
+    </div>
   </div>
 </template>
 
@@ -111,10 +120,22 @@ watch(
       0,
       1.4fr
     );
-  align-items: center;
+  align-items: end;
   gap: 8px;
 }
 .date-input > span {
+  /* Center the separator on the selects, below the part labels. */
+  align-self: end;
+  padding-bottom: 12px;
   color: var(--soft);
+}
+.date-input__part {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.date-input__part > small {
+  color: var(--soft);
+  font-size: 11px;
 }
 </style>

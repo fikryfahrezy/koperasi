@@ -153,6 +153,9 @@ pub(crate) struct DisbursementInput {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PaymentInput {
     pub(crate) member_id: String,
+    /// Set to pay one loan directly (Non Anggota borrowers have no member).
+    #[serde(default)]
+    pub(crate) loan_id: String,
     pub(crate) principal: i64,
     pub(crate) interest: i64,
     pub(crate) wajib: i64,

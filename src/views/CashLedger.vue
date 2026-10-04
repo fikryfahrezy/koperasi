@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import {
-  ArrowDownToLine,
-  ArrowUpFromLine,
+  BanknoteArrowDown,
+  BanknoteArrowUp,
   Calculator,
   CalendarX2,
   Coins,
@@ -11,7 +11,7 @@ import {
   ReceiptText,
   Search,
   Undo2,
-  Wallet,
+  WalletMinimal,
 } from "lucide-vue-next";
 import { useDebouncedRef } from "../composables/useDebouncedRef";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
@@ -85,9 +85,11 @@ const isExcluded = (item: CashBookRow) =>
 // --- Transaction entry form ---------------------------------------------------
 const Category = {
   Payment: "payment",
-  Savings: "savings",
   Loan: "loan",
-  Other: "other",
+  SavingsDeposit: "savings-deposit",
+  SavingsWithdrawal: "savings-withdrawal",
+  CashIn: "cash-in",
+  CashOut: "cash-out",
 } as const;
 type Category = (typeof Category)[keyof typeof Category];
 const modalOpen = pageState.field("modalOpen", () => false);
@@ -97,7 +99,9 @@ const posting = pageState.field("posting", () => ({
   businessDate: todayIso(),
 }));
 const paymentForm = pageState.field("paymentForm", () => ({
+  loanGroup: LoanGroup.Member as LoanGroup,
   memberId: "",
+  loanId: "",
   principal: 0,
   interest: 0,
   wajib: 50_000,
@@ -106,7 +110,6 @@ const paymentForm = pageState.field("paymentForm", () => ({
 const savingsForm = pageState.field("savingsForm", () => ({
   memberId: "",
   accountType: SavingsAccountType.Mandatory as SavingsAccountType,
-  movement: SavingsMovement.Deposit as SavingsMovement,
   amount: 50_000,
 }));
 const loanForm = pageState.field("loanForm", () => ({
@@ -119,7 +122,6 @@ const loanForm = pageState.field("loanForm", () => ({
   loanType: LoanType.Monthly as LoanType,
 }));
 const otherForm = pageState.field("otherForm", () => ({
-  direction: TransactionDirection.Out as TransactionDirection,
   category: "" as CashCategory | "",
   description: "",
   amount: 0,
@@ -157,17 +159,38 @@ const cashCategoryOptions = [
   { value: "", label: "Tanpa kategori" },
   ...cashCategories,
 ];
-// The selected member's outstanding loan balance helps fill in the installment.
+const isNonMemberPayment = computed(
+  () => paymentForm.value.loanGroup === LoanGroup.NonMember,
+);
+// Non Anggota borrowers have no member, so their payment picks the loan itself.
+const nonMemberLoanOptions = computed(() =>
+  loans
+    .filter(
+      (loan) => loan.loanGroup === LoanGroup.NonMember && loan.balance > 0,
+    )
+    .map((loan) => ({
+      value: loan.id,
+      label: `${loan.memberName} · ${formatCurrency(loan.plafond)} · ${loan.realizationDate}`,
+    })),
+);
+// The outstanding loan balance helps fill in the installment.
 const paymentLoans = computed(() =>
-  loans.filter(
-    (loan) => loan.memberId === paymentForm.value.memberId && loan.balance > 0,
+  loans.filter((loan) =>
+    isNonMemberPayment.value
+      ? loan.id === paymentForm.value.loanId
+      : loan.memberId === paymentForm.value.memberId && loan.balance > 0,
   ),
 );
 const paymentLoanBalance = computed(() =>
   paymentLoans.value.reduce((sum, loan) => sum + loan.balance, 0),
 );
 watch(
-  [() => pageState.tabId.value, () => paymentForm.value.memberId],
+  [
+    () => pageState.tabId.value,
+    () => paymentForm.value.memberId,
+    () => paymentForm.value.loanId,
+    () => paymentForm.value.loanGroup,
+  ],
   ([tabId], [previousTabId]) => {
     if (tabId !== previousTabId) return;
     const loan = paymentLoans.value[0];
@@ -193,8 +216,9 @@ const paymentTotal = computed(
   () =>
     (paymentForm.value.principal || 0) +
     (paymentForm.value.interest || 0) +
-    (paymentForm.value.wajib || 0) +
-    (paymentForm.value.voluntary || 0),
+    (isNonMemberPayment.value
+      ? 0
+      : (paymentForm.value.wajib || 0) + (paymentForm.value.voluntary || 0)),
 );
 
 watch(
@@ -219,7 +243,9 @@ function openModal() {
   category.value = Category.Payment;
   posting.value.businessDate = todayIso();
   Object.assign(paymentForm.value, {
+    loanGroup: LoanGroup.Member,
     memberId: "",
+    loanId: "",
     principal: 0,
     interest: 0,
     wajib: financialParameters.mandatorySavings || 50_000,
@@ -228,7 +254,6 @@ function openModal() {
   Object.assign(savingsForm.value, {
     memberId: "",
     accountType: SavingsAccountType.Mandatory,
-    movement: SavingsMovement.Deposit,
     amount: financialParameters.mandatorySavings || 50_000,
   });
   Object.assign(loanForm.value, {
@@ -241,16 +266,25 @@ function openModal() {
     loanType: LoanType.Monthly,
   });
   Object.assign(otherForm.value, {
-    direction: TransactionDirection.Out,
     category: "",
     description: "",
     amount: 0,
   });
   modalOpen.value = true;
 }
-function setSavingsMovementDefaults() {
+const isSavings = computed(
+  () =>
+    category.value === Category.SavingsDeposit ||
+    category.value === Category.SavingsWithdrawal,
+);
+const isCash = computed(
+  () =>
+    category.value === Category.CashIn || category.value === Category.CashOut,
+);
+// Only manasuka can be withdrawn, so a withdrawal always starts from it.
+function setSavingsDefaults() {
   savingsForm.value.accountType =
-    savingsForm.value.movement === SavingsMovement.Withdrawal
+    category.value === Category.SavingsWithdrawal
       ? SavingsAccountType.Voluntary
       : SavingsAccountType.Mandatory;
 }
@@ -260,9 +294,11 @@ const submitLabel = computed(
     (
       ({
         [Category.Payment]: `Catat setoran ${formatCurrency(paymentTotal.value)}`,
-        [Category.Savings]: `Catat ${savingsForm.value.movement.toLowerCase()}`,
-        [Category.Loan]: "Catat pencairan",
-        [Category.Other]: "Catat",
+        [Category.Loan]: "Catat realisasi",
+        [Category.SavingsDeposit]: "Catat setoran",
+        [Category.SavingsWithdrawal]: "Catat pengambilan",
+        [Category.CashIn]: "Catat",
+        [Category.CashOut]: "Catat",
       }) satisfies Record<Category, string>
     )[category.value],
 );
@@ -274,22 +310,34 @@ async function submit() {
   try {
     let saved = false;
     if (category.value === Category.Payment) {
-      if (!paymentForm.value.memberId || paymentTotal.value <= 0) return;
+      const nonMember = isNonMemberPayment.value;
+      const borrowerMissing = nonMember
+        ? !paymentForm.value.loanId
+        : !paymentForm.value.memberId;
+      if (borrowerMissing || paymentTotal.value <= 0) return;
       saved = await postPayment(
         {
-          memberId: paymentForm.value.memberId,
+          memberId: nonMember ? "" : paymentForm.value.memberId,
+          loanId: nonMember ? paymentForm.value.loanId : "",
           principal: paymentForm.value.principal || 0,
           interest: paymentForm.value.interest || 0,
-          wajib: paymentForm.value.wajib || 0,
-          voluntary: paymentForm.value.voluntary || 0,
+          wajib: nonMember ? 0 : paymentForm.value.wajib || 0,
+          voluntary: nonMember ? 0 : paymentForm.value.voluntary || 0,
           reference: "",
         },
         options,
       );
-    } else if (category.value === Category.Savings) {
+    } else if (isSavings.value) {
       if (!savingsForm.value.memberId || savingsForm.value.amount <= 0) return;
       saved = await postSavingsTransaction(
-        { ...savingsForm.value, reference: "" },
+        {
+          ...savingsForm.value,
+          movement:
+            category.value === Category.SavingsWithdrawal
+              ? SavingsMovement.Withdrawal
+              : SavingsMovement.Deposit,
+          reference: "",
+        },
         options,
       );
     } else if (category.value === Category.Loan) {
@@ -314,7 +362,10 @@ async function submit() {
       if (!otherForm.value.description.trim()) return;
       saved = await postCashEntry(
         {
-          direction: otherForm.value.direction,
+          direction:
+            category.value === Category.CashIn
+              ? TransactionDirection.In
+              : TransactionDirection.Out,
           category: otherForm.value.category,
           description: otherForm.value.description.trim(),
           amount: otherForm.value.amount,
@@ -465,7 +516,7 @@ async function refreshPage() {
       <form class="form-stack" @submit.prevent="submit">
         <fieldset class="movement-field">
           <legend>Jenis transaksi</legend>
-          <div class="movement-options movement-options--four">
+          <div class="movement-options">
             <label class="movement-option">
               <input
                 v-model="category"
@@ -476,23 +527,43 @@ async function refreshPage() {
               <span>Setoran anggota</span>
             </label>
             <label class="movement-option">
+              <input v-model="category" type="radio" :value="Category.Loan" />
+              <HandCoins :size="18" />
+              <span>Realisasi pinjaman</span>
+            </label>
+            <label class="movement-option">
               <input
                 v-model="category"
                 type="radio"
-                :value="Category.Savings"
+                :value="Category.SavingsDeposit"
+                @change="setSavingsDefaults"
               />
               <Coins :size="18" />
-              <span>Simpanan</span>
+              <span>Setoran simpanan</span>
             </label>
             <label class="movement-option">
-              <input v-model="category" type="radio" :value="Category.Loan" />
-              <HandCoins :size="18" />
-              <span>Pencairan pinjaman</span>
+              <input
+                v-model="category"
+                type="radio"
+                :value="Category.SavingsWithdrawal"
+                @change="setSavingsDefaults"
+              />
+              <WalletMinimal :size="18" />
+              <span>Pengambilan simpanan</span>
             </label>
             <label class="movement-option">
-              <input v-model="category" type="radio" :value="Category.Other" />
-              <Wallet :size="18" />
-              <span>Kas lainnya</span>
+              <input v-model="category" type="radio" :value="Category.CashIn" />
+              <BanknoteArrowDown :size="18" />
+              <span>Kas masuk</span>
+            </label>
+            <label class="movement-option">
+              <input
+                v-model="category"
+                type="radio"
+                :value="Category.CashOut"
+              />
+              <BanknoteArrowUp :size="18" />
+              <span>Kas keluar</span>
             </label>
           </div>
         </fieldset>
@@ -504,6 +575,24 @@ async function refreshPage() {
 
         <template v-if="category === Category.Payment">
           <label class="field">
+            <span>Kelompok</span>
+            <UiSelect
+              v-model="paymentForm.loanGroup"
+              :options="loanGroupOptions"
+              aria-label="Kelompok"
+            />
+          </label>
+          <label v-if="isNonMemberPayment" class="field">
+            <span>Peminjam</span>
+            <UiSelect
+              v-model="paymentForm.loanId"
+              :options="nonMemberLoanOptions"
+              aria-label="Peminjam"
+              placeholder="Pilih pinjaman"
+              required
+            />
+          </label>
+          <label v-else class="field">
             <span>Anggota</span>
             <UiSelect
               v-model="paymentForm.memberId"
@@ -513,7 +602,12 @@ async function refreshPage() {
               required
             />
           </label>
-          <p v-if="paymentForm.memberId" class="field-hint">
+          <p
+            v-if="
+              isNonMemberPayment ? paymentForm.loanId : paymentForm.memberId
+            "
+            class="field-hint"
+          >
             {{
               paymentLoans.length
                 ? `Sisa pokok pinjaman ${formatCurrency(paymentLoanBalance)} (${paymentLoans.length} pinjaman)`
@@ -538,7 +632,7 @@ async function refreshPage() {
               />
             </label>
           </div>
-          <div class="field-row">
+          <div v-if="!isNonMemberPayment" class="field-row">
             <label class="field">
               <span>Simpanan wajib</span>
               <RupiahInput
@@ -558,32 +652,7 @@ async function refreshPage() {
           </div>
         </template>
 
-        <template v-else-if="category === Category.Savings">
-          <fieldset class="movement-field">
-            <legend>Arah</legend>
-            <div class="movement-options">
-              <label class="movement-option">
-                <input
-                  v-model="savingsForm.movement"
-                  type="radio"
-                  :value="SavingsMovement.Deposit"
-                  @change="setSavingsMovementDefaults"
-                />
-                <ArrowDownToLine :size="18" />
-                <span>Setoran</span>
-              </label>
-              <label class="movement-option">
-                <input
-                  v-model="savingsForm.movement"
-                  type="radio"
-                  :value="SavingsMovement.Withdrawal"
-                  @change="setSavingsMovementDefaults"
-                />
-                <ArrowUpFromLine :size="18" />
-                <span>Pengambilan</span>
-              </label>
-            </div>
-          </fieldset>
+        <template v-else-if="isSavings">
           <label class="field">
             <span>Anggota</span>
             <UiSelect
@@ -601,7 +670,7 @@ async function refreshPage() {
                 v-model="savingsForm.accountType"
                 :options="savingsAccountOptions"
                 aria-label="Jenis simpanan"
-                :disabled="savingsForm.movement === SavingsMovement.Withdrawal"
+                :disabled="category === Category.SavingsWithdrawal"
               />
             </label>
             <label class="field">
@@ -703,30 +772,7 @@ async function refreshPage() {
           </div>
         </template>
 
-        <template v-else>
-          <fieldset class="movement-field">
-            <legend>Mutasi</legend>
-            <div class="movement-options">
-              <label class="movement-option">
-                <input
-                  v-model="otherForm.direction"
-                  type="radio"
-                  :value="TransactionDirection.Out"
-                />
-                <ArrowUpFromLine :size="18" />
-                <span>Debet (keluar)</span>
-              </label>
-              <label class="movement-option">
-                <input
-                  v-model="otherForm.direction"
-                  type="radio"
-                  :value="TransactionDirection.In"
-                />
-                <ArrowDownToLine :size="18" />
-                <span>Kredit (masuk)</span>
-              </label>
-            </div>
-          </fieldset>
+        <template v-else-if="isCash">
           <label class="field">
             <span>Kategori</span>
             <UiSelect

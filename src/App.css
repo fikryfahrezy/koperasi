@@ -760,9 +760,9 @@ strong {
 }
 .data-table th {
   padding: 11px 15px;
-  color: var(--soft);
-  background: #f8faf9;
-  font: 700 9px/1.3 "Avenir Next";
+  color: #000;
+  background: #fff;
+  font: 700 11px/1.3 "Avenir Next";
   letter-spacing: 0.05em;
   text-align: left;
   text-transform: uppercase;
@@ -812,7 +812,7 @@ strong {
   min-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 10.5px;
+  font-size: 12px;
 }
 .sheet-table--virtual {
   table-layout: fixed;
@@ -859,30 +859,22 @@ strong {
   z-index: 2;
 }
 .sheet-table th {
-  color: var(--muted);
-  background: #f3f6f5;
-  font: 700 9px/1.3 "Avenir Next";
+  color: #000;
+  background: #fff;
+  font: 700 11px/1.3 "Avenir Next";
   letter-spacing: 0.03em;
   text-align: center;
   text-transform: uppercase;
 }
-.sheet-table .sheet-group {
-  color: var(--green-dark);
-  background: var(--green-soft);
-}
-.sheet-table .sheet-group--mutasi {
-  color: var(--violet);
-  background: var(--violet-soft);
-}
 .sheet-table td {
-  color: var(--muted);
+  color: #000;
   background: #fff;
 }
 .sheet-table tbody tr:hover td {
   background: #f7faf9;
 }
 .sheet-table td strong {
-  color: var(--ink);
+  color: #000;
 }
 .sheet-table .sheet-sticky {
   position: sticky;
@@ -893,11 +885,11 @@ strong {
 }
 .sheet-table .sheet-no {
   left: 0;
-  min-width: 40px;
+  min-width: 56px;
   text-align: right;
 }
 .sheet-table .sheet-name {
-  left: 40px;
+  left: 56px;
   min-width: 210px;
   max-width: 260px;
   overflow: hidden;
@@ -909,7 +901,7 @@ strong {
   background: #f8faf8;
 }
 .sheet-table th.sheet-total {
-  background: #eef2f0;
+  background: #fff;
 }
 .sheet-table td.sheet-negative {
   color: var(--red);
@@ -922,7 +914,7 @@ strong {
   position: sticky;
   bottom: 0;
   z-index: 1;
-  color: var(--ink);
+  color: #000;
   background: #f3f6f5;
   border-top: 1px solid var(--line-strong);
   font-weight: 700;
@@ -934,9 +926,6 @@ strong {
   padding: 28px;
   color: var(--soft);
   text-align: center;
-}
-.movement-options--four {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .field-hint {
   margin: -6px 0 0;

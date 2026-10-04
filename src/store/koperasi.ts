@@ -251,6 +251,8 @@ interface SavingsTransactionInput {
 
 interface PaymentInput {
   memberId: string;
+  /** Set to pay one loan directly (Non Anggota borrowers have no member). */
+  loanId?: string;
   principal: number;
   interest: number;
   wajib: number;
