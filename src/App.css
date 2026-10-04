@@ -825,6 +825,7 @@ strong {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.sheet-table--virtual .sheet-column-spacer,
 .sheet-table--virtual .sheet-spacer td {
   padding: 0;
   border: 0;

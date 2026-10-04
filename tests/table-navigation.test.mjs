@@ -330,3 +330,37 @@ test("virtual focus waits for rendering and is cancelled when the tab changes", 
   await pending;
   assert.equal(nav.counts.focuses, 0);
 });
+
+test("horizontal virtual navigation skips gap cells and focuses the logical destination", async (t) => {
+  let nav;
+  let requestedColumn;
+  const virtual = {
+    count: 1,
+    context: "tab",
+    rows: [],
+    columnSpans: () => Array(10).fill(1),
+    async scrollToRow(_, column) {
+      requestedColumn = column;
+      nav.grid[0].cells[1].dataset.virtualSpan = String(column - 1);
+      tableNavigation.updated(nav.table, { value: virtual });
+    },
+  };
+  nav = navigationFixture(t, [[1, 1, 1]], virtual);
+  const cells = nav.grid[0].cells;
+  cells[0].dataset = {};
+  cells[1].dataset = { virtualGap: "", virtualSpan: "8" };
+  cells[2].dataset = {};
+  tableNavigation.updated(nav.table, { value: virtual });
+  assert.equal(cells[2].dataset.virtualColumn, "9");
+  cells[2].focus();
+  nav.press("ArrowLeft");
+  await nav.flush();
+  assert.equal(requestedColumn, 8);
+  assert.equal(cells[2].dataset.virtualColumn, "8");
+  assert.equal(nav.document.activeElement, cells[2]);
+  assert.equal(
+    cells[1].tabIndex,
+    -1,
+    "spacers never become navigation targets",
+  );
+});
