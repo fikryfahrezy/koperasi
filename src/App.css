@@ -817,6 +817,20 @@ strong {
 .sheet-table--virtual {
   table-layout: fixed;
 }
+.sheet-cell-tooltip {
+  position: fixed;
+  z-index: 1000;
+  max-width: min(420px, calc(100vw - 16px));
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: break-word;
+  pointer-events: none;
+}
 .sheet-table--virtual tbody tr:not(.sheet-spacer) td,
 .sheet-table--virtual tfoot td {
   height: 32px;
