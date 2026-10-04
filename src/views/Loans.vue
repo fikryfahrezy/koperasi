@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, watch } from "vue";
 import { CalendarX2, Search } from "lucide-vue-next";
+import { useDebouncedRef } from "../composables/useDebouncedRef";
+import { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import PageHeader from "../components/PageHeader.vue";
 import UiSelect from "../components/UiSelect.vue";
-import { useProgressiveRows } from "../composables/useProgressiveRows";
 import {
   formatPeriod,
   formatPreviousPeriod,
@@ -15,12 +16,15 @@ import {
   useMonthlyLedger,
 } from "../store/koperasi";
 
+const pageState = useWorkspacePageState("/loans");
+
 const { loans, selectedYear, refresh } = useKoperasiStore();
 const { monthlyLedger, monthlyLedgerLoading } = useMonthlyLedger();
 
-const period = ref("");
-const query = ref("");
-const groupFilter = ref<LoanGroup | "">("");
+const period = pageState.field("period", () => "");
+const query = pageState.field("query", () => "");
+const debouncedQuery = useDebouncedRef(query, pageState.tabId);
+const groupFilter = pageState.field<LoanGroup | "">("groupFilter", () => "");
 const groupOptions = [
   { value: "", label: "Semua" },
   { value: LoanGroup.Member, label: "Anggota PP BRI" },
@@ -142,7 +146,7 @@ const sectionsForRows = (monthRows: MonthRow[]) =>
         .filter((row) =>
           row.loan.memberName
             .toLowerCase()
-            .includes(query.value.trim().toLowerCase()),
+            .includes(debouncedQuery.value.trim().toLowerCase()),
         );
       return { ...section, rows, totals: sumRows(rows) };
     });
@@ -190,37 +194,14 @@ const totalColumnCount = computed(
 );
 const totalColumns = (key: string) =>
   key === "openingBalance" || key === "closingBalance";
-const allRows = computed(() =>
-  sections.value.flatMap((section) => section.rows),
-);
-const { renderedRowCount, totalRowCount, renderingRows } = useProgressiveRows(
-  () => allRows.value,
-  () => totalColumnCount.value,
-);
-const renderedSections = computed(() => {
-  let remaining = renderedRowCount.value;
-  return sections.value.map((section) => {
-    const rows = section.rows.slice(0, Math.max(0, remaining));
-    remaining -= section.rows.length;
-    return { ...section, rows };
-  });
-});
 </script>
 
 <template>
   <div class="page-stack page-stack--sheet">
     <PageHeader title="Pinjaman" :refresh="refresh">
       <template #title-meta>
-        <span
-          v-if="monthlyLedgerLoading || renderingRows"
-          class="sheet-loading"
-          role="status"
-        >
-          {{
-            monthlyLedgerLoading
-              ? "Memuat pinjaman…"
-              : `Menampilkan ${renderedRowCount} dari ${totalRowCount} baris…`
-          }}
+        <span v-if="monthlyLedgerLoading" class="sheet-loading" role="status">
+          Memuat pinjaman…
         </span>
       </template>
       <template #before-actions>
@@ -237,6 +218,7 @@ const renderedSections = computed(() => {
           v-if="monthlyLedger.periods.length"
           v-model="period"
           :options="periodOptions"
+          label="Bulan"
           aria-label="Bulan"
           variant="toolbar"
         />
@@ -244,6 +226,7 @@ const renderedSections = computed(() => {
           v-if="monthlyLedger.periods.length"
           v-model="groupFilter"
           :options="groupOptions"
+          label="Kelompok pinjaman"
           aria-label="Kelompok pinjaman"
           variant="toolbar"
         />
@@ -264,7 +247,7 @@ const renderedSections = computed(() => {
       <strong>Belum ada data pinjaman untuk {{ selectedYear }}</strong>
       <p>Pilih tahun lain.</p>
     </section>
-    <section v-else class="panel table-panel" :aria-busy="renderingRows">
+    <section v-else class="panel table-panel">
       <div class="data-table-wrap sheet-wrap">
         <table v-table-navigation class="sheet-table">
           <thead>
@@ -335,7 +318,7 @@ const renderedSections = computed(() => {
               </template>
             </tr>
           </thead>
-          <tbody v-for="section in renderedSections" :key="section.group">
+          <tbody v-for="section in sections" :key="section.group">
             <tr>
               <td class="sheet-sticky sheet-no"></td>
               <td class="sheet-sticky sheet-name">

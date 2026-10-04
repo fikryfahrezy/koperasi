@@ -1,7 +1,13 @@
 import type { ObjectDirective } from "vue";
 
 type CellPosition = { cell: HTMLTableCellElement; column: number };
-type TableState = { selected: HTMLTableCellElement | null; column: number };
+type TableState = {
+  selected: HTMLTableCellElement | null;
+  column: number;
+  grid: CellPosition[][];
+  positions: Map<HTMLTableCellElement, { row: number; cell: number }>;
+  frame: number | null;
+};
 const tables = new Map<HTMLTableElement, TableState>();
 let activeTable: HTMLTableElement | null = null;
 const arrowKeys = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
@@ -38,8 +44,28 @@ function select(
   cell.tabIndex = 0;
   activeTable = table;
   if (!focus) return;
-  cell.focus({ preventScroll: true });
-  scrollTableCellIntoView(table, cell);
+  if (state.frame !== null) return;
+  const origin = document.activeElement;
+  // Keep every logical arrow step, but only focus and measure the final cell
+  // once per frame. Slow devices never accumulate a queue of scroll work.
+  state.frame = requestAnimationFrame(() => {
+    state.frame = null;
+    const selected = state.selected;
+    if (
+      !selected ||
+      !table.isConnected ||
+      activeTable !== table ||
+      document.activeElement !== origin
+    )
+      return;
+    selected.focus({ preventScroll: true });
+    scrollTableCellIntoView(table, selected);
+  });
+}
+
+function cancelFocus(state: TableState) {
+  if (state.frame !== null) cancelAnimationFrame(state.frame);
+  state.frame = null;
 }
 
 export function scrollTableCellIntoView(
@@ -112,31 +138,38 @@ function onKeydown(event: KeyboardEvent) {
     )
   )
     return;
-  const visible = Array.from(tables.keys()).filter(
-    (table) => table.isConnected && table.getClientRects().length > 0,
-  );
   const focusedTable =
-    target instanceof Element ? target.closest("table") : null;
+    target instanceof Element
+      ? target.closest<HTMLTableElement>("table")
+      : null;
+  const isVisible = (candidate: HTMLTableElement) =>
+    candidate.isConnected && candidate.getClientRects().length > 0;
+  // A focused table is already visible. Avoid layout reads on the repeat path.
   const table =
-    visible.find((candidate) => candidate === focusedTable) ??
-    visible.find((candidate) => candidate === activeTable) ??
-    visible[0];
+    focusedTable && tables.has(focusedTable)
+      ? focusedTable
+      : activeTable && isVisible(activeTable)
+        ? activeTable
+        : Array.from(tables.keys()).find(isVisible);
   if (!table) return;
-  const grid = rows(table);
   const state = tables.get(table)!;
-  const rowIndex = grid.findIndex((row) =>
-    row.some(({ cell }) => cell === state.selected),
-  );
+  const grid = state.grid;
+  const position = state.selected ? state.positions.get(state.selected) : null;
+  const rowIndex = position?.row ?? -1;
   if (!grid.length) return;
   event.preventDefault();
-  if (rowIndex < 0 || !(target instanceof Node) || !table.contains(target)) {
+  if (
+    rowIndex < 0 ||
+    (state.frame === null &&
+      (!(target instanceof Node) || !table.contains(target)))
+  ) {
     const cell = rowIndex < 0 ? grid[0]![0]!.cell : state.selected!;
     if (rowIndex < 0) state.column = 0;
     select(table, cell, true);
     return;
   }
   const row = grid[rowIndex]!;
-  const cellIndex = row.findIndex(({ cell }) => cell === state.selected);
+  const cellIndex = position!.cell;
   if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
     const next =
       row[
@@ -149,7 +182,7 @@ function onKeydown(event: KeyboardEvent) {
         )
       ]!;
     state.column = next.column;
-    select(table, next.cell, true);
+    if (next.cell !== state.selected) select(table, next.cell, true);
   } else {
     const nextRow =
       grid[
@@ -166,7 +199,7 @@ function onKeydown(event: KeyboardEvent) {
         ({ cell, column }) =>
           state.column >= column && state.column < column + cell.colSpan,
       ) ?? nextRow[nextRow.length - 1]!;
-    select(table, next.cell, true);
+    if (next.cell !== state.selected) select(table, next.cell, true);
   }
 }
 
@@ -179,12 +212,12 @@ function onCellFocus(event: Event) {
       ? target.closest<HTMLTableCellElement>("td")
       : null;
   if (!cell) return;
-  const position = rows(table)
-    .flat()
-    .find((position) => position.cell === cell);
+  const state = tables.get(table)!;
+  if (event.type === "focusin" && state.selected === cell) return;
+  const position = state.positions.get(cell);
   if (!position) return;
-  if (event.type === "focusin" && tables.get(table)!.selected === cell) return;
-  tables.get(table)!.column = position.column;
+  cancelFocus(state);
+  state.column = state.grid[position.row]![position.cell]!.column;
   select(
     table,
     cell,
@@ -195,25 +228,42 @@ function onCellFocus(event: Event) {
 
 function sync(table: HTMLTableElement) {
   const state = tables.get(table)!;
-  const cells = rows(table).flat();
-  if (!cells.some(({ cell }) => cell === state.selected)) {
+  state.grid = rows(table);
+  state.positions.clear();
+  state.grid.forEach((row, rowIndex) => {
+    row.forEach(({ cell }, cellIndex) => {
+      state.positions.set(cell, { row: rowIndex, cell: cellIndex });
+    });
+  });
+  const cells = state.grid.flat();
+  if (!state.selected || !state.positions.has(state.selected)) {
+    cancelFocus(state);
     state.selected = cells[0]?.cell ?? null;
     state.column = 0;
   }
-  for (const { cell } of cells)
-    cell.tabIndex = cell === state.selected ? 0 : -1;
+  for (const { cell } of cells) {
+    const tabIndex = cell === state.selected ? 0 : -1;
+    if (cell.tabIndex !== tabIndex) cell.tabIndex = tabIndex;
+  }
 }
 
 export const tableNavigation: ObjectDirective<HTMLTableElement> = {
   mounted(table) {
     if (!tables.size) document.addEventListener("keydown", onKeydown);
-    tables.set(table, { selected: null, column: 0 });
+    tables.set(table, {
+      selected: null,
+      column: 0,
+      grid: [],
+      positions: new Map(),
+      frame: null,
+    });
     table.addEventListener("click", onCellFocus);
     table.addEventListener("focusin", onCellFocus);
     sync(table);
   },
   updated: sync,
   unmounted(table) {
+    cancelFocus(tables.get(table)!);
     table.removeEventListener("click", onCellFocus);
     table.removeEventListener("focusin", onCellFocus);
     tables.delete(table);

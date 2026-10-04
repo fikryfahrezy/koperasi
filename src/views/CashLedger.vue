@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -13,6 +13,8 @@ import {
   Undo2,
   Wallet,
 } from "lucide-vue-next";
+import { useDebouncedRef } from "../composables/useDebouncedRef";
+import { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import PageHeader from "../components/PageHeader.vue";
 import DateInput from "../components/DateInput.vue";
 import RupiahInput from "../components/RupiahInput.vue";
@@ -38,6 +40,8 @@ import {
   useCashBook,
 } from "../store/koperasi";
 
+const pageState = useWorkspacePageState("/cash-ledger");
+
 const {
   members,
   loans,
@@ -55,16 +59,17 @@ const {
 
 // --- Cash ledger (following the daily cash ledger spreadsheet) ----------------------------
 const { cashBook, loadingBook } = useCashBook(Channel.Cash);
-const selected = ref<CashBookRow | null>(null);
+const selected = pageState.field<CashBookRow | null>("selected", () => null);
 
 onMounted(() => {
   void loadFinancialParameters();
 });
 
 const rows = computed(() => cashBook.value?.rows ?? []);
-const query = ref("");
+const query = pageState.field("query", () => "");
+const debouncedQuery = useDebouncedRef(query, pageState.tabId);
 const filteredRows = computed(() => {
-  const search = query.value.trim().toLowerCase();
+  const search = debouncedQuery.value.trim().toLowerCase();
   return rows.value.filter((row) =>
     row.description.toLowerCase().includes(search),
   );
@@ -84,24 +89,26 @@ const Category = {
   Other: "other",
 } as const;
 type Category = (typeof Category)[keyof typeof Category];
-const modalOpen = ref(false);
+const modalOpen = pageState.field("modalOpen", () => false);
 const submitting = ref(false);
-const category = ref<Category>(Category.Payment);
-const posting = reactive({ businessDate: todayIso() });
-const paymentForm = reactive({
+const category = pageState.field<Category>("category", () => Category.Payment);
+const posting = pageState.field("posting", () => ({
+  businessDate: todayIso(),
+}));
+const paymentForm = pageState.field("paymentForm", () => ({
   memberId: "",
   principal: 0,
   interest: 0,
   wajib: 50_000,
   voluntary: 0,
-});
-const savingsForm = reactive({
+}));
+const savingsForm = pageState.field("savingsForm", () => ({
   memberId: "",
   accountType: SavingsAccountType.Mandatory as SavingsAccountType,
   movement: SavingsMovement.Deposit as SavingsMovement,
   amount: 50_000,
-});
-const loanForm = reactive({
+}));
+const loanForm = pageState.field("loanForm", () => ({
   loanGroup: LoanGroup.Member as LoanGroup,
   memberId: "",
   borrowerName: "",
@@ -109,14 +116,17 @@ const loanForm = reactive({
   tenor: 24,
   interestType: InterestType.Declining as InterestType,
   loanType: LoanType.Monthly as LoanType,
-});
-const otherForm = reactive({
+}));
+const otherForm = pageState.field("otherForm", () => ({
   direction: TransactionDirection.Out as TransactionDirection,
   category: "" as CashCategory | "",
   description: "",
   amount: 0,
-});
-const loanPreview = ref<LoanPreview | null>(null);
+}));
+const loanPreview = pageState.field<LoanPreview | null>(
+  "loanPreview",
+  () => null,
+);
 
 const memberOptions = computed(() =>
   members.map((member) => ({ value: member.id, label: member.name })),
@@ -149,23 +159,24 @@ const cashCategoryOptions = [
 // The selected member's outstanding loan balance helps fill in the installment.
 const paymentLoans = computed(() =>
   loans.filter(
-    (loan) => loan.memberId === paymentForm.memberId && loan.balance > 0,
+    (loan) => loan.memberId === paymentForm.value.memberId && loan.balance > 0,
   ),
 );
 const paymentLoanBalance = computed(() =>
   paymentLoans.value.reduce((sum, loan) => sum + loan.balance, 0),
 );
 watch(
-  () => paymentForm.memberId,
-  () => {
+  [() => pageState.tabId.value, () => paymentForm.value.memberId],
+  ([tabId], [previousTabId]) => {
+    if (tabId !== previousTabId) return;
     const loan = paymentLoans.value[0];
-    paymentForm.principal = loan
+    paymentForm.value.principal = loan
       ? Math.min(
           Math.ceil(loan.plafond / loan.tenor / 1000) * 1000,
           paymentLoanBalance.value,
         )
       : 0;
-    paymentForm.interest = loan
+    paymentForm.value.interest = loan
       ? Math.round(
           ((loan.interestType === InterestType.Flat
             ? loan.plafond
@@ -179,19 +190,25 @@ watch(
 );
 const paymentTotal = computed(
   () =>
-    (paymentForm.principal || 0) +
-    (paymentForm.interest || 0) +
-    (paymentForm.wajib || 0) +
-    (paymentForm.voluntary || 0),
+    (paymentForm.value.principal || 0) +
+    (paymentForm.value.interest || 0) +
+    (paymentForm.value.wajib || 0) +
+    (paymentForm.value.voluntary || 0),
 );
 
 watch(
   loanForm,
-  async () => {
+  async (_, __, onCleanup) => {
+    const target = loanPreview.forTab(pageState.tabId.value);
+    let cancelled = false;
+    onCleanup(() => {
+      cancelled = true;
+    });
     try {
-      loanPreview.value = await previewLoan({ ...loanForm });
+      const result = await previewLoan({ ...loanForm.value });
+      if (!cancelled) target.value = result;
     } catch {
-      loanPreview.value = null;
+      if (!cancelled) target.value = null;
     }
   },
   { deep: true, immediate: true },
@@ -199,21 +216,21 @@ watch(
 
 function openModal() {
   category.value = Category.Payment;
-  posting.businessDate = todayIso();
-  Object.assign(paymentForm, {
+  posting.value.businessDate = todayIso();
+  Object.assign(paymentForm.value, {
     memberId: "",
     principal: 0,
     interest: 0,
     wajib: financialParameters.mandatorySavings || 50_000,
     voluntary: 0,
   });
-  Object.assign(savingsForm, {
+  Object.assign(savingsForm.value, {
     memberId: "",
     accountType: SavingsAccountType.Mandatory,
     movement: SavingsMovement.Deposit,
     amount: financialParameters.mandatorySavings || 50_000,
   });
-  Object.assign(loanForm, {
+  Object.assign(loanForm.value, {
     loanGroup: LoanGroup.Member,
     memberId: "",
     borrowerName: "",
@@ -222,7 +239,7 @@ function openModal() {
     interestType: InterestType.Declining,
     loanType: LoanType.Monthly,
   });
-  Object.assign(otherForm, {
+  Object.assign(otherForm.value, {
     direction: TransactionDirection.Out,
     category: "",
     description: "",
@@ -231,8 +248,8 @@ function openModal() {
   modalOpen.value = true;
 }
 function setSavingsMovementDefaults() {
-  savingsForm.accountType =
-    savingsForm.movement === SavingsMovement.Withdrawal
+  savingsForm.value.accountType =
+    savingsForm.value.movement === SavingsMovement.Withdrawal
       ? SavingsAccountType.Voluntary
       : SavingsAccountType.Mandatory;
 }
@@ -242,7 +259,7 @@ const submitLabel = computed(
     (
       ({
         [Category.Payment]: `Catat setoran ${formatCurrency(paymentTotal.value)}`,
-        [Category.Savings]: `Catat ${savingsForm.movement.toLowerCase()}`,
+        [Category.Savings]: `Catat ${savingsForm.value.movement.toLowerCase()}`,
         [Category.Loan]: "Catat pencairan",
         [Category.Other]: "Catat",
       }) satisfies Record<Category, string>
@@ -250,59 +267,62 @@ const submitLabel = computed(
 );
 
 async function submit() {
-  const options = { businessDate: posting.businessDate };
+  const submittedModal = modalOpen.forTab(pageState.tabId.value);
+  const options = { businessDate: posting.value.businessDate };
   submitting.value = true;
   try {
     let saved = false;
     if (category.value === Category.Payment) {
-      if (!paymentForm.memberId || paymentTotal.value <= 0) return;
+      if (!paymentForm.value.memberId || paymentTotal.value <= 0) return;
       saved = await postPayment(
         {
-          memberId: paymentForm.memberId,
-          principal: paymentForm.principal || 0,
-          interest: paymentForm.interest || 0,
-          wajib: paymentForm.wajib || 0,
-          voluntary: paymentForm.voluntary || 0,
+          memberId: paymentForm.value.memberId,
+          principal: paymentForm.value.principal || 0,
+          interest: paymentForm.value.interest || 0,
+          wajib: paymentForm.value.wajib || 0,
+          voluntary: paymentForm.value.voluntary || 0,
           reference: "",
         },
         options,
       );
     } else if (category.value === Category.Savings) {
-      if (!savingsForm.memberId || savingsForm.amount <= 0) return;
+      if (!savingsForm.value.memberId || savingsForm.value.amount <= 0) return;
       saved = await postSavingsTransaction(
-        { ...savingsForm, reference: "" },
+        { ...savingsForm.value, reference: "" },
         options,
       );
     } else if (category.value === Category.Loan) {
       const borrowerMissing =
-        loanForm.loanGroup === LoanGroup.Member
-          ? !loanForm.memberId
-          : !loanForm.borrowerName.trim();
-      if (borrowerMissing || loanForm.plafond <= 0) return;
+        loanForm.value.loanGroup === LoanGroup.Member
+          ? !loanForm.value.memberId
+          : !loanForm.value.borrowerName.trim();
+      if (borrowerMissing || loanForm.value.plafond <= 0) return;
       saved = await createLoan(
         {
-          ...loanForm,
+          ...loanForm.value,
           memberId:
-            loanForm.loanGroup === LoanGroup.Member ? loanForm.memberId : "",
-          borrowerName: loanForm.borrowerName.trim(),
+            loanForm.value.loanGroup === LoanGroup.Member
+              ? loanForm.value.memberId
+              : "",
+          borrowerName: loanForm.value.borrowerName.trim(),
         },
         options,
       );
     } else {
-      if (otherForm.amount <= 0) return;
-      if (!otherForm.description.trim()) return;
+      if (otherForm.value.amount <= 0) return;
+      if (!otherForm.value.description.trim()) return;
       saved = await postCashEntry(
         {
-          direction: otherForm.direction,
-          category: otherForm.category,
-          description: otherForm.description.trim(),
-          amount: otherForm.amount,
+          direction: otherForm.value.direction,
+          category: otherForm.value.category,
+          description: otherForm.value.description.trim(),
+          amount: otherForm.value.amount,
           reference: "",
         },
         options,
       );
     }
-    if (saved) modalOpen.value = false;
+    if (saved) submittedModal.value = false;
   } finally {
     submitting.value = false;
   }
@@ -310,8 +330,9 @@ async function submit() {
 
 async function reverseSelected() {
   if (!selected.value) return;
-  const reversed = await reverseTransaction(selected.value.id);
-  if (reversed) selected.value = null;
+  const submittedSelection = selected.forTab(pageState.tabId.value);
+  const reversed = await reverseTransaction(submittedSelection.value!.id);
+  if (reversed) submittedSelection.value = null;
 }
 async function refreshPage() {
   await refresh();
@@ -404,7 +425,11 @@ async function refreshPage() {
                 {{ formatSheetNumber(item.balance) }}
               </td>
             </tr>
-            <tr v-if="!loadingBook && query.trim() && !filteredRows.length">
+            <tr
+              v-if="
+                !loadingBook && debouncedQuery.trim() && !filteredRows.length
+              "
+            >
               <td colspan="5">
                 Tidak ada transaksi yang cocok dengan pencarian.
               </td>
@@ -413,7 +438,7 @@ async function refreshPage() {
           <tfoot>
             <tr>
               <td colspan="2">
-                {{ query.trim() ? "JUMLAH TAHUNAN" : "JUMLAH" }}
+                {{ debouncedQuery.trim() ? "JUMLAH TAHUNAN" : "JUMLAH" }}
               </td>
               <td class="num-cell">
                 {{ formatSheetNumber(cashBook?.totalOut ?? 0) }}
@@ -431,7 +456,7 @@ async function refreshPage() {
     </section>
 
     <UiModal
-      :open="modalOpen"
+      :open="modalOpen && pageState.active.value"
       size="lg"
       title="Catat transaksi"
       @close="modalOpen = false"
@@ -748,7 +773,7 @@ async function refreshPage() {
     </UiModal>
 
     <UiModal
-      :open="Boolean(selected)"
+      :open="Boolean(selected) && pageState.active.value"
       title="Detail transaksi"
       @close="selected = null"
       ><div v-if="selected" class="transaction-detail">
