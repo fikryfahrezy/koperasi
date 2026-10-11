@@ -42,7 +42,10 @@ describe("Member ledger", () => {
     await expect(search).toBeFocused();
 
     await $("a.member-name-link=Anggota E2E").click();
-    await expect($(".member-detail__identity h3")).toHaveText("Anggota E2E");
+    await expect($(".page-heading h1")).toHaveText("Anggota E2E");
+    await expect(
+      $('.member-detail__identity input[aria-label="Nama lengkap"]'),
+    ).toHaveValue("Anggota E2E");
     await expect($(".member-detail__breakdown strong")).toHaveText(/50\.000/);
 
     // New WebDriver session launches a fresh app process against the same test DB.
@@ -51,7 +54,10 @@ describe("Member ledger", () => {
     await expect($$(".member-name-link")).toBeElementsArrayOfSize(1);
     await expect($(".data-table tbody tr:first-child td")).toHaveText("E2E-01");
     await $("a.member-name-link=Anggota E2E").click();
-    await expect($(".member-detail__identity h3")).toHaveText("Anggota E2E");
+    await expect($(".page-heading h1")).toHaveText("Anggota E2E");
+    await expect(
+      $('.member-detail__identity input[aria-label="Nama lengkap"]'),
+    ).toHaveValue("Anggota E2E");
     await expect($(".member-detail__breakdown strong")).toHaveText(/50\.000/);
     await expect($(".runtime-banner")).not.toExist();
   });

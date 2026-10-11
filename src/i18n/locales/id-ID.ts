@@ -68,9 +68,9 @@ export default {
     paymentPostedMessage: "{amount} masuk melalui transaksi database atomik.",
     paymentFailed: "Pembayaran gagal diposting",
     parametersLoadFailed: "Parameter keuangan gagal dimuat",
-    reversalPosted: "Reversal berhasil diposting",
+    reversalPosted: "Transaksi berhasil dihapus",
     reversalPostedMessage:
-      "{id} dibalik melalui transaksi baru tanpa menghapus histori asal.",
-    reversalFailed: "Reversal gagal",
+      "{id} dihapus dari Buku Kas; histori asal tetap tersimpan.",
+    reversalFailed: "Transaksi gagal dihapus",
   },
 } as const;
