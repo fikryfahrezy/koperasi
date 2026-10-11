@@ -159,6 +159,8 @@ export interface Loan {
   realizationDate: string;
   dueDate: string;
   guarantee: string;
+  /** Rekomendasi; empty when nobody is recorded. */
+  recommender: string;
 }
 
 export interface SavingsMonth {
@@ -178,6 +180,11 @@ export interface SavingsMonth {
   principalClosing: number;
   mandatoryClosing: number;
   voluntaryClosing: number;
+  /** Ratas Simpanan from January to this month and its Insentif Simpanan
+   * 3,65% (exact and rounded up to the thousand). */
+  savingsAverage: number;
+  savingsIncentiveRaw: number;
+  savingsIncentive: number;
 }
 
 export interface LoanMonth {
@@ -194,9 +201,24 @@ export interface LoanMonth {
   arrearsPrincipal: number;
   arrearsInterest: number;
   closingBalance: number;
+  /** Kewajiban s/d bulan depan: arrears plus next month's installment. */
+  nextDuePrincipal: number;
+  nextDueInterest: number;
+  /** False for a paid-off loan whose borrower has another loan running. */
+  shown: boolean;
+  /** Interest and provisi paid from January to this month, per quarter,
+   * including those of the borrower's hidden paid-off loans. */
+  incomeInterest: number[];
+  incomeProvision: number[];
+  /** Insentif Pinjaman 10,1%: exact and rounded up to the thousand. */
+  incentiveRaw: number;
+  incentive: number;
 }
 
 export interface MonthlyLedger {
+  /** Insentif Pinjaman and Insentif Simpanan rates of the year (0.101 = 10,1%). */
+  loanIncentiveRate: number;
+  savingsIncentiveRate: number;
   periods: string[];
   savings: SavingsMonth[];
   loans: LoanMonth[];
@@ -380,6 +402,7 @@ const command = {
   postPayment: "post_payment",
   reverseTransaction: "reverse_transaction",
   getFinancialParameters: "get_financial_parameters",
+  setIncentiveRates: "set_incentive_rates",
 } as const;
 
 const backend = {
@@ -459,6 +482,15 @@ const backend = {
   getFinancialParameters: (companyId = selectedCompanyId.value) =>
     invoke<FinancialParameters>(command.getFinancialParameters, {
       companyId,
+    }),
+  setIncentiveRates: (input: {
+    year: number;
+    loanIncentiveRate?: number;
+    savingsIncentiveRate?: number;
+  }) =>
+    invoke<void>(command.setIncentiveRates, {
+      input,
+      companyId: selectedCompanyId.value,
     }),
 };
 
@@ -909,6 +941,8 @@ async function reverseTransaction(id: string) {
 }
 
 const emptyMonthlyLedger: MonthlyLedger = {
+  loanIncentiveRate: 0,
+  savingsIncentiveRate: 0,
   periods: [],
   savings: [],
   loans: [],
@@ -1012,6 +1046,33 @@ export function formatCurrency(value: number, compact = false) {
   }).format(value);
 }
 
+export type IncentiveKind = "loan" | "savings";
+
+/** Saves the Insentif Pinjaman or Insentif Simpanan rate (in percent) of a year. */
+async function setIncentiveRate(
+  kind: IncentiveKind,
+  year: number,
+  percent: number,
+) {
+  const companyId = selectedCompanyId.value;
+  const label = kind === "loan" ? "Insentif pinjaman" : "Insentif simpanan";
+  try {
+    await backend.setIncentiveRates({
+      year,
+      [kind === "loan" ? "loanIncentiveRate" : "savingsIncentiveRate"]:
+        percent / 100,
+    });
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.monthlyLedger(companyId, year),
+    });
+    notify(`${label} disimpan`, `Tahun ${year}: ${percent}%.`);
+    return true;
+  } catch (error) {
+    notify(`${label} gagal disimpan`, errorMessage(error), "warning");
+    return false;
+  }
+}
+
 export const useKoperasiStore = () => ({
   members,
   loans,
@@ -1034,6 +1095,7 @@ export const useKoperasiStore = () => ({
   notify,
   addMember,
   updateMember,
+  setIncentiveRate,
   memberNumberOwner,
   previewLoan,
   createLoan,

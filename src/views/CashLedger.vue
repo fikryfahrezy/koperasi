@@ -16,6 +16,7 @@ import {
   useKoperasiStore,
   useCashBook,
 } from "../store/koperasi";
+import { cashBookLetters } from "../sheet-columns";
 
 const pageState = useWorkspacePageState("/cash-ledger");
 
@@ -122,6 +123,12 @@ async function refreshPage() {
       <div v-else class="data-table-wrap sheet-wrap">
         <table v-table-navigation class="sheet-table cash-book-table">
           <thead>
+            <tr class="sheet-letters">
+              <th v-for="letter in cashBookLetters" :key="letter">
+                {{ letter }}
+              </th>
+              <th></th>
+            </tr>
             <tr>
               <th rowspan="2">Tanggal</th>
               <th rowspan="2" class="cash-book-table__desc">Uraian</th>

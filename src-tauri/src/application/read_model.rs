@@ -115,7 +115,7 @@ async fn snapshot(company_id: &str, pool: &SqlitePool) -> Result<AppSnapshot, St
     })
     .collect::<Result<Vec<_>, _>>()?;
 
-    let loans = sqlx::query("SELECT l.id, l.loan_group, COALESCE(l.member_id, '') member_id, l.member_name, l.plafond, b.balance, l.rate_annual, l.tenor, l.interest_type, l.loan_type, l.realization_date, l.due_date, l.guarantee FROM loans l JOIN loan_balances b ON b.company_id = l.company_id AND b.loan_id = l.id WHERE l.company_id = ? ORDER BY l.id")
+    let loans = sqlx::query("SELECT l.id, l.loan_group, COALESCE(l.member_id, '') member_id, l.member_name, l.plafond, b.balance, l.rate_annual, l.tenor, l.interest_type, l.loan_type, l.realization_date, l.due_date, l.guarantee, COALESCE(l.recommender, '') recommender FROM loans l JOIN loan_balances b ON b.company_id = l.company_id AND b.loan_id = l.id WHERE l.company_id = ? ORDER BY l.id")
         .bind(company_id)
         .fetch_all(pool)
         .await
@@ -140,6 +140,7 @@ async fn snapshot(company_id: &str, pool: &SqlitePool) -> Result<AppSnapshot, St
                 realization_date: try_column!(row, "realization_date"),
                 due_date: try_column!(row, "due_date"),
                 guarantee: try_column!(row, "guarantee"),
+                recommender: try_column!(row, "recommender"),
             })
         })
         .collect::<Result<Vec<_>, _>>()?;

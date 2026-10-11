@@ -5,10 +5,12 @@
 //! read from previously stored transactions.
 //! Payment obligations and loan arrears are calculated from loan terms.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use sqlx::{Row, SqlitePool};
 
+use super::ledger_report::{apply_loan_report, apply_savings_report};
+use super::parameters::incentive_rates;
 use crate::contracts::{LoanMonthDto, MonthlyLedgerDto, SavingsMonthDto};
 use crate::domain::{ComponentType, InterestType, LoanType, SavingsAccountType};
 
@@ -132,6 +134,16 @@ fn scheduled_installment(
     )
 }
 
+/// Keeps only the entities (by `key`) with at least one non-empty row.
+fn drop_empty<T>(rows: &mut Vec<T>, key: impl Fn(&T) -> &String, empty: impl Fn(&T) -> bool) {
+    let active: HashSet<String> = rows
+        .iter()
+        .filter(|row| !empty(row))
+        .map(|row| key(row).clone())
+        .collect();
+    rows.retain(|row| active.contains(key(row)));
+}
+
 fn track_first(firsts: &mut HashMap<String, String>, id: &str, period: &str) {
     let first = firsts
         .entry(id.to_string())
@@ -232,7 +244,11 @@ pub(crate) async fn get_monthly_ledger(
 
     let (Some(first), Some(last)) = (all_periods.first().cloned(), all_periods.last().cloned())
     else {
+        let (loan_incentive_rate, savings_incentive_rate) =
+            incentive_rates(company_id, year, pool).await?;
         return Ok(MonthlyLedgerDto {
+            loan_incentive_rate,
+            savings_incentive_rate,
             periods: Vec::new(),
             savings: Vec::new(),
             loans: Vec::new(),
@@ -289,14 +305,16 @@ pub(crate) async fn get_monthly_ledger(
                     principal_closing: balance[0],
                     mandatory_closing: balance[1],
                     voluntary_closing: balance[2],
+                    ..Default::default()
                 });
             }
         }
     }
 
     let mut loans = Vec::new();
+    let mut borrowers = HashMap::new();
     for row in sqlx::query(
-        "SELECT id, plafond, rate_annual, tenor, interest_type, loan_type, due_date FROM loans WHERE company_id = ?",
+        "SELECT id, COALESCE(NULLIF(member_id, ''), 'name:' || member_name) borrower, plafond, rate_annual, tenor, interest_type, loan_type, due_date FROM loans WHERE company_id = ?",
     )
     .bind(company_id)
     .fetch_all(pool)
@@ -304,6 +322,7 @@ pub(crate) async fn get_monthly_ledger(
     .map_err(|error| error.to_string())?
     {
         let loan_id: String = col!(row, "id");
+        borrowers.insert(loan_id.clone(), col!(row, "borrower"));
         let plafond: i64 = col!(row, "plafond");
         let rate: f64 = col!(row, "rate_annual");
         let tenor: i64 = col!(row, "tenor");
@@ -343,6 +362,21 @@ pub(crate) async fn get_monthly_ledger(
             // Arrears never exceed what is still owed, as in the sheet.
             arrears_principal = arrears_principal.min(balance.max(0));
             if period.starts_with(&year_prefix) {
+                // Next month's installment, for "Kewajiban s/d bulan depan".
+                let (next_scheduled_principal, next_scheduled_interest) = next_period(period)
+                    .map(|next| {
+                        scheduled_installment(
+                            plafond,
+                            tenor,
+                            rate,
+                            interest_type,
+                            loan_type,
+                            due_period.as_deref(),
+                            &next,
+                            balance,
+                        )
+                    })
+                    .unwrap_or((0, 0));
                 loans.push(LoanMonthDto {
                     loan_id: loan_id.clone(),
                     period: period.clone(),
@@ -357,12 +391,66 @@ pub(crate) async fn get_monthly_ledger(
                     arrears_principal,
                     arrears_interest,
                     closing_balance: balance,
+                    next_due_principal: arrears_principal + next_scheduled_principal,
+                    next_due_interest: arrears_interest + next_scheduled_interest,
+                    ..Default::default()
                 });
             }
         }
     }
 
+    // Members and loans whose history ended before this year (every month zero,
+    // e.g. loans paid off in an earlier year) are left out of the year.
+    drop_empty(
+        &mut savings,
+        |row| &row.member_id,
+        |row| {
+            [
+                row.principal_opening,
+                row.mandatory_opening,
+                row.voluntary_opening,
+                row.principal_in,
+                row.principal_out,
+                row.mandatory_in,
+                row.mandatory_out,
+                row.voluntary_in,
+                row.voluntary_out,
+                row.shu,
+                row.principal_closing,
+                row.mandatory_closing,
+                row.voluntary_closing,
+            ]
+            .iter()
+            .all(|amount| *amount == 0)
+        },
+    );
+    drop_empty(
+        &mut loans,
+        |row| &row.loan_id,
+        |row| {
+            [
+                row.opening_balance,
+                row.disbursed,
+                row.principal_paid,
+                row.interest_paid,
+                row.provision,
+                row.scheduled_principal,
+                row.scheduled_interest,
+                row.arrears_principal,
+                row.arrears_interest,
+                row.closing_balance,
+            ]
+            .iter()
+            .all(|amount| *amount == 0)
+        },
+    );
+    let (loan_incentive_rate, savings_incentive_rate) =
+        incentive_rates(company_id, year, pool).await?;
+    apply_loan_report(&mut loans, &borrowers, loan_incentive_rate);
+    apply_savings_report(&mut savings, &periods, savings_incentive_rate);
     Ok(MonthlyLedgerDto {
+        loan_incentive_rate,
+        savings_incentive_rate,
         periods,
         savings,
         loans,

@@ -133,7 +133,8 @@ function unpaidMonths(part: ArrearsPart) {
   for (const loan of memberLoans.value) {
     const rows = memberLedgerRows.value.filter((row) => row.loanId === loan.id);
     const latest = rows.find((row) => row.period === arrearsPeriod.value);
-    let remaining = latest?.[`arrears${part}`] ?? 0;
+    let remaining =
+      latest && latest.closingBalance > 0 ? latest[`arrears${part}`] : 0;
     for (let i = rows.length - 1; i >= 0 && remaining > 0; i--) {
       const unpaid = Math.min(rows[i][`scheduled${part}`], remaining);
       if (unpaid <= 0) continue;
@@ -161,8 +162,10 @@ function unpaidMonths(part: ArrearsPart) {
 }
 
 const loanSummary = computed(() => {
+  // A paid-off loan has no arrears, as in the sheet; otherwise an early
+  // payoff reads as a large "lebih bayar" that hides other loans' arrears.
   const latest = memberLedgerRows.value.filter(
-    (row) => row.period === arrearsPeriod.value,
+    (row) => row.period === arrearsPeriod.value && row.closingBalance > 0,
   );
   const per = arrearsPeriod.value
     ? `Per ${formatPeriod(arrearsPeriod.value)}`
