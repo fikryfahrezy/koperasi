@@ -40,3 +40,45 @@ const { t } = useI18n();
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(11, 21, 31, 0.48);
+  backdrop-filter: blur(5px);
+}
+.modal-card {
+  width: min(100%, 520px);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  border-radius: 17px;
+  background: #fff;
+}
+.modal-card--lg {
+  width: min(100%, 720px);
+}
+.modal-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 24px 17px;
+  border-bottom: 1px solid var(--line);
+}
+.modal-card__header h2 {
+  margin: 0 0 5px;
+  font-size: 18px;
+}
+.modal-card__header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.modal-card__body {
+  padding: 22px 24px 24px;
+}
+</style>

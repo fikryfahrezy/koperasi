@@ -13,6 +13,7 @@ describe("Member ledger", () => {
     await $("button=Tambah anggota").click();
     const dialog = $('[role="dialog"][aria-label="Tambah anggota baru"]');
     await dialog.waitForDisplayed();
+    await dialog.$('input[aria-label="ID anggota"]').setValue("E2E-01");
     await dialog.$('input[aria-label="Nama lengkap"]').setValue("Anggota E2E");
     await browser.keys("ArrowLeft");
     await expect(dialog.$('input[aria-label="Nama lengkap"]')).toBeFocused();
@@ -29,10 +30,12 @@ describe("Member ledger", () => {
     await expect(cells[1]).toBeFocused();
     await browser.keys("ArrowRight");
     await expect(cells[2]).toBeFocused();
+    await browser.keys("ArrowRight");
+    await expect(cells[3]).toBeFocused();
     await browser.keys(["ArrowRight", "ArrowDown"]);
-    await expect(cells[2]).toBeFocused();
+    await expect(cells[3]).toBeFocused();
     await browser.keys("ArrowLeft");
-    await expect(cells[1]).toBeFocused();
+    await expect(cells[2]).toBeFocused();
     const search = $(".search-field input");
     await search.click();
     await browser.keys("ArrowLeft");
@@ -46,6 +49,7 @@ describe("Member ledger", () => {
     await browser.reloadSession();
     await openMembers();
     await expect($$(".member-name-link")).toBeElementsArrayOfSize(1);
+    await expect($(".data-table tbody tr:first-child td")).toHaveText("E2E-01");
     await $("a.member-name-link=Anggota E2E").click();
     await expect($(".member-detail__identity h3")).toHaveText("Anggota E2E");
     await expect($(".member-detail__breakdown strong")).toHaveText(/50\.000/);

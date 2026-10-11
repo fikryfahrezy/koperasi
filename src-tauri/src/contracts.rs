@@ -18,6 +18,8 @@ pub(crate) struct CompanyDto {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MemberDto {
     pub(crate) id: String,
+    /// ID Anggota; empty for members registered before it was recorded.
+    pub(crate) member_number: String,
     pub(crate) name: String,
     pub(crate) joined_at: String,
     pub(crate) principal_savings: i64,
@@ -64,6 +66,8 @@ pub(crate) struct TransactionDto {
     pub(crate) date: String,
     pub(crate) time: String,
     pub(crate) member_name: String,
+    /// Current ID Anggota of the transaction's member, if any.
+    pub(crate) member_number: String,
     pub(crate) channel: Channel,
     pub(crate) description: String,
     pub(crate) reference: String,
@@ -105,6 +109,7 @@ pub(crate) struct OpeningSavingsInput {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AddMemberInput {
+    pub(crate) member_number: String,
     pub(crate) name: String,
     pub(crate) joined_at: String,
     pub(crate) opening_savings: Vec<OpeningSavingsInput>,
@@ -112,6 +117,17 @@ pub(crate) struct AddMemberInput {
     pub(crate) business_date: String,
     pub(crate) display_date: String,
     pub(crate) display_time: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UpdateMemberInput {
+    pub(crate) member_id: String,
+    pub(crate) name: String,
+    pub(crate) member_number: String,
+    /// Empty keeps the stored join date (e.g. the "Migrasi 2026" import placeholder).
+    #[serde(default)]
+    pub(crate) joined_at: String,
 }
 
 #[derive(Deserialize)]
@@ -136,6 +152,9 @@ pub(crate) struct CreateLoanInput {
     pub(crate) tenor: i64,
     pub(crate) interest_type: String,
     pub(crate) loan_type: String,
+    /// Provision fee typed by the user; empty uses the Provisi parameter rate.
+    #[serde(default)]
+    pub(crate) provision: Option<i64>,
     /// Loans are recorded when they are realised, as in PINJAMAN BULANAN.
     pub(crate) disbursement: DisbursementInput,
 }
@@ -281,6 +300,10 @@ pub(crate) struct CashBookRowDto {
     pub(crate) business_date: String,
     /// Running balance after this row; only effective transactions are counted.
     pub(crate) balance: i64,
+    /// KAS BUKU TABUNGAN columns: Tambahan Kas dari Tabungan leaves the bank book (keluar),
+    /// Transfer ke Tabungan enters it (masuk).
+    pub(crate) savings_book_out: i64,
+    pub(crate) savings_book_in: i64,
 }
 
 #[derive(Serialize)]
@@ -292,5 +315,8 @@ pub(crate) struct CashBookDto {
     pub(crate) total_in: i64,
     pub(crate) total_out: i64,
     pub(crate) closing_balance: i64,
+    /// Kas Buku Tabungan (the koperasi's bank savings book) on the opening row;
+    /// empty for years without a recorded opening balance.
+    pub(crate) savings_book_opening_balance: Option<i64>,
     pub(crate) rows: Vec<CashBookRowDto>,
 }

@@ -372,6 +372,7 @@ pub(crate) async fn get_monthly_ledger(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{Channel, TransactionDirection};
 
     #[test]
     fn schedules_installments_like_the_loan_sheet() {
@@ -434,27 +435,28 @@ mod tests {
                     "opening",
                     "2026-01-01",
                     vec![
-                        ("LOAN_OPENING", 1_000_000),
-                        ("LOAN_OPENING_ARREARS_PRINCIPAL", 50_000),
-                        ("LOAN_OPENING_PREPAID_PRINCIPAL", 20_000),
-                        ("LOAN_OPENING_ARREARS_INTEREST", 5_000),
-                        ("LOAN_OPENING_PREPAID_INTEREST", 1_000),
+                        (ComponentType::LoanOpening.as_str(), 1_000_000),
+                        (ComponentType::LoanOpeningArrearsPrincipal.as_str(), 50_000),
+                        (ComponentType::LoanOpeningPrepaidPrincipal.as_str(), 20_000),
+                        (ComponentType::LoanOpeningArrearsInterest.as_str(), 5_000),
+                        (ComponentType::LoanOpeningPrepaidInterest.as_str(), 1_000),
                     ],
                 ),
                 (
                     "payment",
                     "2026-02-10",
                     vec![
-                        ("LOAN_DISBURSEMENT", 200_000),
-                        ("LOAN_PRINCIPAL", 100_000),
-                        ("LOAN_INTEREST", 10_000),
-                        ("LOAN_PROVISION", 2_000),
+                        (ComponentType::LoanDisbursement.as_str(), 200_000),
+                        (ComponentType::LoanPrincipal.as_str(), 100_000),
+                        (ComponentType::LoanInterest.as_str(), 10_000),
+                        (ComponentType::LoanProvision.as_str(), 2_000),
                     ],
                 ),
             ] {
                 let amount: i64 = components.iter().map(|(_, amount)| amount).sum();
-                sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, channel, description, reference, direction, amount, actor) VALUES (?, 'default', ?, ?, '00:00', 'Imported member', 'NON_KAS', 'Imported', ?, 'Masuk', ?, 'Import')")
-                    .bind(id).bind(date).bind(date).bind(id).bind(amount)
+                sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, channel, description, reference, direction, amount, actor) VALUES (?, 'default', ?, ?, '00:00', 'Imported member', ?, 'Imported', ?, ?, ?, 'Import')")
+                    .bind(id).bind(date).bind(date).bind(Channel::NonCash.as_str()).bind(id)
+                    .bind(TransactionDirection::In.as_str()).bind(amount)
                     .execute(&pool).await.unwrap();
                 for (component_type, amount) in components {
                     sqlx::query("INSERT INTO transaction_components (company_id, transaction_id, component_type, label, amount, loan_id) VALUES ('default', ?, ?, 'Imported', ?, 'imported')")

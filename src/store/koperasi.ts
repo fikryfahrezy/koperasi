@@ -51,6 +51,8 @@ export type SavingsMovement =
 export const Channel = {
   Cash: "KAS",
   NonCash: "NON_KAS",
+  // Kas Buku Tabungan in/out that does not touch cash.
+  SavingsBook: "TABUNGAN",
 } as const;
 export type Channel = (typeof Channel)[keyof typeof Channel];
 
@@ -61,23 +63,65 @@ export const InterestType = {
 } as const;
 export type InterestType = (typeof InterestType)[keyof typeof InterestType];
 
-// Category columns of Buku Kas TAHUN 2026, in sheet order.
-export const cashCategories = [
-  { value: "KAS_BUKU_TABUNGAN", label: "KAS BUKU TABUNGAN" },
-  { value: "BIAYA_PENGURUS", label: "Biaya Pengurus" },
-  { value: "BIAYA_ATK", label: "Biaya ATK" },
-  { value: "TRANSFORTASI", label: "Transfortasi" },
-  { value: "BIAYA_BUNGA", label: "Biaya Bunga" },
-  { value: "HUMAS", label: "Humas" },
-  { value: "PEMELIHARAAN_AT", label: "Pemeliharaan AT" },
-  { value: "BIAYA_RAT", label: "Biaya RAT" },
-  { value: "SEWA_KANTOR", label: "Sewa Kantor" },
-  { value: "DANSOS", label: "Dansos" },
-  { value: "LAINNYA", label: "Lainnya" },
-  { value: "DEKOPINDA", label: "Dekopinda" },
-  { value: "PARCEL", label: "Parcel" },
-] as const;
-export type CashCategory = (typeof cashCategories)[number]["value"];
+// Buku Kas category codes (the backend's component types).
+export const CashCategory = {
+  CashTopUp: "TAMBAHAN_KAS",
+  CashTopUpFromSavingsBook: "TAMBAHAN_KAS_TABUNGAN",
+  TransferToSavingsBook: "TRANSFER_KE_TABUNGAN",
+  BoardExpense: "BIAYA_PENGURUS",
+  StationeryExpense: "BIAYA_ATK",
+  Transport: "TRANSFORTASI",
+  InterestExpense: "BIAYA_BUNGA",
+  PublicRelations: "HUMAS",
+  AssetMaintenance: "PEMELIHARAAN_AT",
+  AnnualMeetingExpense: "BIAYA_RAT",
+  OfficeRent: "SEWA_KANTOR",
+  SocialFund: "DANSOS",
+  Other: "LAINNYA",
+  Dekopinda: "DEKOPINDA",
+  Parcel: "PARCEL",
+} as const;
+export type CashCategory = (typeof CashCategory)[keyof typeof CashCategory];
+
+// Buku Kas categories: the cash transfers (each for one direction, with the
+// sheet's Uraian text), then the expense columns of Buku Kas TAHUN 2026 in sheet order.
+export const cashCategories: readonly {
+  value: CashCategory;
+  label: string;
+  direction?: TransactionDirection;
+  description?: string;
+}[] = [
+  {
+    value: CashCategory.CashTopUp,
+    label: "Tambahan Kas",
+    direction: TransactionDirection.In,
+    description: "TAMBAHAN KAS",
+  },
+  {
+    value: CashCategory.CashTopUpFromSavingsBook,
+    label: "Tambahan Kas dari Tabungan",
+    direction: TransactionDirection.In,
+    description: "TAMBAHAN KAS",
+  },
+  {
+    value: CashCategory.TransferToSavingsBook,
+    label: "Transfer ke Tabungan",
+    direction: TransactionDirection.Out,
+    description: "Transfer ke Tabungan",
+  },
+  { value: CashCategory.BoardExpense, label: "Biaya Pengurus" },
+  { value: CashCategory.StationeryExpense, label: "Biaya ATK" },
+  { value: CashCategory.Transport, label: "Transfortasi" },
+  { value: CashCategory.InterestExpense, label: "Biaya Bunga" },
+  { value: CashCategory.PublicRelations, label: "Humas" },
+  { value: CashCategory.AssetMaintenance, label: "Pemeliharaan AT" },
+  { value: CashCategory.AnnualMeetingExpense, label: "Biaya RAT" },
+  { value: CashCategory.OfficeRent, label: "Sewa Kantor" },
+  { value: CashCategory.SocialFund, label: "Dansos" },
+  { value: CashCategory.Other, label: "Lainnya" },
+  { value: CashCategory.Dekopinda, label: "Dekopinda" },
+  { value: CashCategory.Parcel, label: "Parcel" },
+];
 
 export interface Company {
   id: string;
@@ -86,6 +130,8 @@ export interface Company {
 
 export interface Member {
   id: string;
+  /** ID Anggota; empty for members registered before it was recorded. */
+  memberNumber: string;
   name: string;
   joinedAt: string;
   principalSavings: number;
@@ -161,6 +207,8 @@ export interface Transaction {
   date: string;
   time: string;
   memberName: string;
+  /** Current ID Anggota of the transaction's member, if any. */
+  memberNumber: string;
   channel: Channel;
   description: string;
   reference: string;
@@ -176,6 +224,10 @@ export interface Transaction {
 export interface CashBookRow extends Transaction {
   businessDate: string;
   balance: number;
+  /** KAS BUKU TABUNGAN: Tambahan Kas dari Tabungan leaves the bank book (keluar). */
+  savingsBookOut: number;
+  /** KAS BUKU TABUNGAN: Transfer ke Tabungan enters the bank book (masuk). */
+  savingsBookIn: number;
 }
 
 export interface CashBook {
@@ -185,6 +237,8 @@ export interface CashBook {
   totalIn: number;
   totalOut: number;
   closingBalance: number;
+  /** Kas Buku Tabungan on the opening row; null for years without one. */
+  savingsBookOpeningBalance: number | null;
   rows: CashBookRow[];
 }
 
@@ -220,6 +274,7 @@ export interface FinancialParameters {
 }
 
 interface AddMemberInput {
+  memberNumber: string;
   name: string;
   joinedAt: string;
   openingSavings: {
@@ -237,6 +292,8 @@ interface CreateLoanInput {
   tenor: number;
   interestType: InterestType;
   loanType: LoanType;
+  /** Typed provision fee; omitted uses the Provisi parameter rate. */
+  provision?: number;
 }
 
 type ChannelInput = { channel: Channel };
@@ -284,6 +341,8 @@ export interface ToastMessage {
 
 const members = reactive<Member[]>([]);
 const loans = reactive<Loan[]>([]);
+/** Wajib and Manasuka balances; Pokok is on each member. */
+const savingsBalances = reactive<SavingsBalance[]>([]);
 const transactions = reactive<Transaction[]>([]);
 const totals = {
   cash: ref(0),
@@ -314,6 +373,7 @@ const command = {
   getCashBook: "get_cash_book",
   postCashEntry: "post_cash_entry",
   addMember: "add_member",
+  updateMember: "update_member",
   previewLoan: "preview_loan",
   createLoan: "create_loan",
   postSavingsTransaction: "post_savings_transaction",
@@ -352,6 +412,16 @@ const backend = {
     }),
   addMember: (input: AddMemberInput & ChannelInput & OperationalTimestamp) =>
     invoke<AppSnapshot>(command.addMember, {
+      input,
+      companyId: selectedCompanyId.value,
+    }),
+  updateMember: (input: {
+    memberId: string;
+    name: string;
+    memberNumber: string;
+    joinedAt: string;
+  }) =>
+    invoke<AppSnapshot>(command.updateMember, {
       input,
       companyId: selectedCompanyId.value,
     }),
@@ -428,6 +498,11 @@ function applySnapshot(
   if (companyId !== selectedCompanyId.value) return;
   members.splice(0, members.length, ...snapshot.members);
   loans.splice(0, loans.length, ...snapshot.loans);
+  savingsBalances.splice(
+    0,
+    savingsBalances.length,
+    ...snapshot.savingsBalances,
+  );
   transactions.splice(0, transactions.length, ...snapshot.transactions);
   totals.cash.value = snapshot.totals.cash;
   totals.savings.value = snapshot.totals.savings;
@@ -584,6 +659,57 @@ async function addMember(input: AddMemberInput, options: PostingOptions = {}) {
     );
     return false;
   }
+}
+
+/** The member already using an ID Anggota (case-insensitive), other than `exceptId`. */
+function memberNumberOwner(memberNumber: string, exceptId = "") {
+  const value = memberNumber.trim().toLocaleLowerCase(DEFAULT_LOCALE);
+  if (!value) return undefined;
+  return members.find(
+    (member) =>
+      member.id !== exceptId &&
+      member.memberNumber.toLocaleLowerCase(DEFAULT_LOCALE) === value,
+  );
+}
+
+async function updateMember(
+  memberId: string,
+  name: string,
+  memberNumber: string,
+  joinedAt: string,
+) {
+  const companyId = selectedCompanyId.value;
+  try {
+    applyMutationSnapshot(
+      await backend.updateMember({ memberId, name, memberNumber, joinedAt }),
+      companyId,
+    );
+    notify(
+      translate("notifications.memberSaved"),
+      translate("notifications.memberSavedMessage", {
+        name: name.trim(),
+        memberNumber: memberNumber.trim(),
+      }),
+    );
+    return true;
+  } catch (error) {
+    notify(
+      translate("notifications.memberSaveFailed"),
+      errorMessage(error),
+      "warning",
+    );
+    return false;
+  }
+}
+
+/** Search text matched against a member's name and ID Anggota. */
+export function matchesMember(search: string, name: string, memberNumber = "") {
+  const value = search.trim().toLocaleLowerCase(DEFAULT_LOCALE);
+  return (
+    !value ||
+    name.toLocaleLowerCase(DEFAULT_LOCALE).includes(value) ||
+    memberNumber.toLocaleLowerCase(DEFAULT_LOCALE).includes(value)
+  );
 }
 
 async function previewLoan(input: CreateLoanInput) {
@@ -889,6 +1015,7 @@ export function formatCurrency(value: number, compact = false) {
 export const useKoperasiStore = () => ({
   members,
   loans,
+  savingsBalances,
   transactions,
   totals,
   loading,
@@ -906,6 +1033,8 @@ export const useKoperasiStore = () => ({
   refresh,
   notify,
   addMember,
+  updateMember,
+  memberNumberOwner,
   previewLoan,
   createLoan,
   postSavingsTransaction,

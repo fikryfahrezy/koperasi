@@ -100,7 +100,7 @@ try {
   await send("Page.enable");
   await send("Page.addScriptToEvaluateOnNewDocument", {
     source: `
-    const members=Array.from({length:1000},(_,i)=>({id:'M'+String(i+1).padStart(4,'0'),name:'Member '+String(i+1).padStart(4,'0'),joinedAt:'2026-01-01',principalSavings:50000}));
+    const members=Array.from({length:1000},(_,i)=>({id:'M'+String(i+1).padStart(4,'0'),memberNumber:'K'+String(i+1).padStart(4,'0'),name:'Member '+String(i+1).padStart(4,'0'),joinedAt:'2026-01-01',principalSavings:50000}));
     const loans=members.slice(0,800).map((m,i)=>({id:'L'+String(i+1).padStart(4,'0'),loanGroup:i<400?'Anggota PP BRI':'Non Anggota PP BRI',memberId:m.id,memberName:m.name,plafond:10000000,balance:9000000,rate:12,tenor:24,interestType:'Menurun',loanType:'Bulanan',realizationDate:'2026-01-01',dueDate:'2028-01-01',guarantee:'Sertifikat rumah dan tanah'}));
     const periods=Array.from({length:12},(_,i)=>'2026-'+String(i+1).padStart(2,'0'));
     const ledger={periods,savings:periods.flatMap(period=>members.map(m=>({memberId:m.id,period,transactionDate:period+'-01',principalOpening:50000,mandatoryOpening:100000,voluntaryOpening:0,principalIn:Number(period.slice(-2)),principalOut:0,mandatoryIn:50000,mandatoryOut:0,voluntaryIn:0,voluntaryOut:0,shu:0,principalClosing:50000,mandatoryClosing:150000,voluntaryClosing:0}))),loans:periods.flatMap(period=>loans.map(l=>({loanId:l.id,period,transactionDate:period+'-01',openingBalance:10000000,disbursed:0,principalPaid:100000,interestPaid:10000,provision:0,scheduledPrincipal:100000,scheduledInterest:10000,arrearsPrincipal:0,arrearsInterest:0,closingBalance:9900000})))};
@@ -205,7 +205,7 @@ try {
   assert(!horizontal.periods.includes("2026-01"));
   assert.equal(horizontal.scrollWidth, originalScrollWidth);
   assert(
-    Math.abs(horizontal.pinnedLeft - horizontal.viewportLeft - 40) < 2,
+    Math.abs(horizontal.pinnedLeft - horizontal.viewportLeft - 56) < 2,
     JSON.stringify(horizontal),
   );
   assert.equal(
@@ -409,7 +409,7 @@ try {
   assert(horizontal.cells < 55, JSON.stringify(horizontal));
   assert(!horizontal.periods.includes("2026-01"));
   assert(
-    Math.abs(horizontal.pinnedLeft - horizontal.viewportLeft - 40) < 2,
+    Math.abs(horizontal.pinnedLeft - horizontal.viewportLeft - 56) < 2,
     JSON.stringify(horizontal),
   );
   assert(

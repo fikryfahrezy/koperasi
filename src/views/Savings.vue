@@ -12,6 +12,7 @@ import {
   formatPreviousPeriod,
   formatSheetDate,
   formatSheetNumber,
+  matchesMember,
   type SavingsMonth,
   useKoperasiStore,
   useMonthlyLedger,
@@ -42,8 +43,8 @@ watch(
   { immediate: true },
 );
 
-const memberNames = computed(
-  () => new Map(members.map((member) => [member.id, member.name])),
+const memberById = computed(
+  () => new Map(members.map((member) => [member.id, member])),
 );
 
 // Spreadsheet rows follow member numbers (M001, M002, ...).
@@ -54,12 +55,14 @@ const rowsForPeriod = (selectedPeriod: string) =>
     .map((row, index) => ({
       ...row,
       no: index + 1,
-      name: memberNames.value.get(row.memberId) ?? row.memberId,
+      name: memberById.value.get(row.memberId)?.name ?? row.memberId,
     }))
     .filter((row) =>
-      row.name
-        .toLowerCase()
-        .includes(debouncedQuery.value.trim().toLowerCase()),
+      matchesMember(
+        debouncedQuery.value,
+        row.name,
+        memberById.value.get(row.memberId)?.memberNumber,
+      ),
     );
 type NumericKey = {
   [K in keyof SavingsMonth]: SavingsMonth[K] extends number ? K : never;
@@ -201,8 +204,8 @@ const navigation = computed(() => ({
           <input
             v-model="query"
             type="search"
-            aria-label="Cari nama pensiunan"
-            placeholder="Cari nama pensiunan..."
+            aria-label="Cari nama atau ID anggota"
+            placeholder="Cari nama atau ID anggota..."
           />
         </label>
         <UiSelect

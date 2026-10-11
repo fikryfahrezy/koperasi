@@ -75,3 +75,12 @@ onMounted(async () => {
     </RouterView>
   </div>
 </template>
+
+<style scoped>
+.workspace-tab-pages {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0%;
+  min-height: 0;
+}
+</style>

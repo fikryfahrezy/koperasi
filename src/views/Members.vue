@@ -5,13 +5,12 @@ import { useRoute } from "vue-router";
 import { useDebouncedRef } from "../composables/useDebouncedRef";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import PageHeader from "../components/PageHeader.vue";
-import RupiahInput from "../components/RupiahInput.vue";
-import UiModal from "../components/UiModal.vue";
-import { SavingsAccountType, useKoperasiStore } from "../store/koperasi";
+import AddMemberDialog from "../components/AddMemberDialog.vue";
+import { matchesMember, useKoperasiStore } from "../store/koperasi";
 
 const pageState = useWorkspacePageState("/members");
 
-const { members, totals, addMember, refresh } = useKoperasiStore();
+const { members, totals, refresh } = useKoperasiStore();
 const route = useRoute();
 const query = pageState.field("query", () =>
   route.path === "/members" ? String(route.query.q ?? "") : "",
@@ -25,15 +24,9 @@ watch(
   },
 );
 const open = pageState.field("open", () => false);
-const form = pageState.field("form", () => ({
-  name: "",
-  joinedAt: "2026-09-13",
-  principalSavings: 50_000,
-}));
-
 const filteredMembers = computed(() =>
   members.filter((member) =>
-    member.name.toLowerCase().includes(debouncedQuery.value.toLowerCase()),
+    matchesMember(debouncedQuery.value, member.name, member.memberNumber),
   ),
 );
 const joinedAtFormatter = new Intl.DateTimeFormat("id-ID", {
@@ -50,34 +43,6 @@ function formatJoinedAt(value: string) {
   );
   return Number.isNaN(date.getTime()) ? "—" : joinedAtFormatter.format(date);
 }
-async function submit() {
-  const tabId = pageState.tabId.value;
-  const submittedForm = form.forTab(tabId);
-  const submittedOpen = open.forTab(tabId);
-  if (
-    !form.value.name ||
-    !Number.isFinite(form.value.principalSavings) ||
-    form.value.principalSavings < 50_000
-  )
-    return;
-  const saved = await addMember({
-    name: form.value.name,
-    joinedAt: form.value.joinedAt,
-    openingSavings: [
-      {
-        accountType: SavingsAccountType.Principal,
-        amount: form.value.principalSavings,
-      },
-    ],
-  });
-  if (!saved) return;
-  submittedOpen.value = false;
-  Object.assign(submittedForm.value, {
-    name: "",
-    joinedAt: "2026-09-13",
-    principalSavings: 50_000,
-  });
-}
 </script>
 
 <template>
@@ -93,8 +58,8 @@ async function submit() {
           <Search :size="18" />
           <input
             v-model="query"
-            aria-label="Cari nama anggota"
-            placeholder="Cari nama anggota..."
+            aria-label="Cari nama atau ID anggota"
+            placeholder="Cari nama atau ID anggota..."
           />
         </label>
       </template>
@@ -113,6 +78,7 @@ async function submit() {
         <table v-table-navigation class="data-table">
           <thead>
             <tr>
+              <th>ID Anggota</th>
               <th>Anggota</th>
               <th>Bergabung</th>
               <th class="action-cell"></th>
@@ -120,6 +86,7 @@ async function submit() {
           </thead>
           <tbody>
             <tr v-for="member in filteredMembers" :key="member.id">
+              <td>{{ member.memberNumber || "—" }}</td>
               <td>
                 <div class="person-cell">
                   <span><UserRound :size="19" /></span>
@@ -148,45 +115,68 @@ async function submit() {
         </table>
       </div>
     </section>
-    <UiModal
-      :open="open && pageState.active.value"
-      title="Tambah anggota baru"
-      @close="open = false"
-    >
-      <form class="form-stack" @submit.prevent="submit">
-        <label class="field"
-          ><span>Nama lengkap</span
-          ><input
-            v-model="form.name"
-            aria-label="Nama lengkap"
-            required
-            placeholder="Contoh: Nani Suryani"
-        /></label>
-        <label class="field"
-          ><span>Tanggal bergabung</span
-          ><input v-model="form.joinedAt" type="date" required
-        /></label>
-        <label class="field"
-          ><span>Simpanan pokok</span
-          ><RupiahInput
-            v-model="form.principalSavings"
-            :min="50000"
-            min-message="Simpanan pokok minimal Rp50.000."
-            aria-label="Simpanan pokok dalam Rupiah"
-            required
-        /></label>
-        <div class="modal-actions">
-          <button
-            class="button button--secondary"
-            type="button"
-            @click="open = false"
-          >
-            Batal</button
-          ><button class="button button--primary" type="submit">
-            Simpan anggota
-          </button>
-        </div>
-      </form>
-    </UiModal>
+    <AddMemberDialog :page-state="pageState" />
   </div>
 </template>
+
+<style scoped>
+.page-heading__meta {
+  color: var(--soft);
+  font-size: 10.5px;
+}
+.page-heading__meta strong {
+  color: var(--ink);
+}
+.row-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--green);
+  background: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+.member-name-link {
+  color: var(--green);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.data-table th {
+  padding: 11px 15px;
+  color: #000;
+  background: #fff;
+  font: 700 11px/1.3 "Avenir Next";
+  letter-spacing: 0.05em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.data-table td {
+  padding: 13px 15px;
+  border-top: 1px solid #edf1ef;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.data-table tbody tr:hover {
+  background: #fbfcfb;
+}
+.data-table td strong {
+  color: var(--ink);
+  font-size: 10.5px;
+}
+.data-table .action-cell {
+  text-align: right;
+}
+.data-table code {
+  color: #475461;
+  font: 500 9.5px/1.4 monospace;
+}
+</style>

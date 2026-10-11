@@ -44,3 +44,39 @@ async function handleRefresh() {
     </div>
   </header>
 </template>
+
+<style scoped>
+.page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  padding: 2px 0;
+}
+.page-heading__title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.page-heading h1 {
+  margin: 0;
+  font-size: clamp(23px, 2vw, 28px);
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+}
+.page-heading__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+@media (max-width: 780px) {
+  .page-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .page-heading__actions {
+    width: 100%;
+  }
+}
+</style>
