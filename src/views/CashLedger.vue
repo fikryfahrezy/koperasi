@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { CalendarX2, Plus, Search, Undo2 } from "lucide-vue-next";
+import { CalendarX2, Plus, Search, Trash2 } from "lucide-vue-next";
 import { useDebouncedRef } from "../composables/useDebouncedRef";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import PageHeader from "../components/PageHeader.vue";
@@ -24,7 +24,10 @@ const { selectedYear, loadFinancialParameters, reverseTransaction, refresh } =
 
 // --- Cash ledger (following the daily cash ledger spreadsheet) ----------------------------
 const { cashBook, loadingBook } = useCashBook(Channel.Cash);
-const selected = pageState.field<CashBookRow | null>("selected", () => null);
+const pendingDelete = pageState.field<CashBookRow | null>(
+  "pendingDelete",
+  () => null,
+);
 
 onMounted(() => {
   void loadFinancialParameters();
@@ -33,12 +36,14 @@ onMounted(() => {
 const rows = computed(() => cashBook.value?.rows ?? []);
 const query = pageState.field("query", () => "");
 const debouncedQuery = useDebouncedRef(query, pageState.tabId);
+// Users see a reversal as a deletion: the reversed row and its reversal are never shown.
 const filteredRows = computed(() => {
   const search = debouncedQuery.value.trim().toLowerCase();
   return rows.value.filter(
     (row) =>
-      row.description.toLowerCase().includes(search) ||
-      (search !== "" && row.memberNumber.toLowerCase().includes(search)),
+      !isExcluded(row) &&
+      (row.description.toLowerCase().includes(search) ||
+        (search !== "" && row.memberNumber.toLowerCase().includes(search))),
   );
 });
 // As in the spreadsheet, the date appears only on the first row of each day.
@@ -68,11 +73,11 @@ const isExcluded = (item: CashBookRow) =>
 
 const entryDialog = ref<InstanceType<typeof CashEntryDialog> | null>(null);
 
-async function reverseSelected() {
-  if (!selected.value) return;
-  const submittedSelection = selected.forTab(pageState.tabId.value);
-  const reversed = await reverseTransaction(submittedSelection.value!.id);
-  if (reversed) submittedSelection.value = null;
+async function deletePending() {
+  if (!pendingDelete.value) return;
+  const submitted = pendingDelete.forTab(pageState.tabId.value);
+  const reversed = await reverseTransaction(submitted.value!.id);
+  if (reversed) submitted.value = null;
 }
 async function refreshPage() {
   await refresh();
@@ -124,6 +129,11 @@ async function refreshPage() {
               <th rowspan="2" class="sheet-total">Jumlah Saldo Kas</th>
               <th colspan="2" class="sheet-group">KAS BUKU TABUNGAN</th>
               <th rowspan="2" class="sheet-total">Kas + Tabungan</th>
+              <th
+                rowspan="2"
+                class="cash-book-table__actions"
+                aria-label="Aksi"
+              ></th>
             </tr>
             <tr>
               <th>Debet</th>
@@ -158,13 +168,12 @@ async function refreshPage() {
                   )
                 }}</strong>
               </td>
+              <td class="cash-book-table__actions"></td>
             </tr>
             <tr
               v-for="(item, index) in filteredRows"
               :key="item.id"
               class="cash-book-table__row"
-              :class="{ 'is-excluded': isExcluded(item) }"
-              @click="selected = item"
             >
               <td>{{ showDate(index) ? item.date : "" }}</td>
               <td class="cash-book-table__desc">{{ item.description }}</td>
@@ -202,13 +211,23 @@ async function refreshPage() {
                 }}
               </td>
               <td class="sheet-total"></td>
+              <td class="cash-book-table__actions">
+                <button
+                  class="cash-book-table__delete"
+                  type="button"
+                  :aria-label="`Hapus ${item.description}`"
+                  @click.stop="pendingDelete = item"
+                >
+                  Hapus
+                </button>
+              </td>
             </tr>
             <tr
               v-if="
                 !loadingBook && debouncedQuery.trim() && !filteredRows.length
               "
             >
-              <td colspan="8">
+              <td colspan="9">
                 Tidak ada transaksi yang cocok dengan pencarian.
               </td>
             </tr>
@@ -234,6 +253,7 @@ async function refreshPage() {
                 {{ formatSheetNumber(savingsBookTotals.in) }}
               </td>
               <td class="sheet-total"></td>
+              <td class="cash-book-table__actions"></td>
             </tr>
           </tfoot>
         </table>
@@ -243,39 +263,21 @@ async function refreshPage() {
     <CashEntryDialog ref="entryDialog" :page-state="pageState" />
 
     <UiModal
-      :open="Boolean(selected) && pageState.active.value"
-      title="Detail transaksi"
-      @close="selected = null"
-      ><div v-if="selected" class="transaction-detail">
+      :open="Boolean(pendingDelete) && pageState.active.value"
+      title="Hapus transaksi?"
+      @close="pendingDelete = null"
+      ><div v-if="pendingDelete" class="transaction-detail">
         <div class="transaction-detail__head">
           <div>
-            <strong>{{ selected.description }}</strong
-            ><span>{{ selected.date }}</span>
+            <strong>{{ pendingDelete.description }}</strong
+            ><span>{{ pendingDelete.date }}</span>
           </div>
-          <strong>{{ formatCurrency(selected.amount) }}</strong>
-        </div>
-        <div class="component-list">
-          <div v-for="(component, index) in selected.components" :key="index">
-            <span>{{ component.label }}</span
-            ><strong>{{ formatCurrency(component.amount) }}</strong>
-          </div>
-        </div>
-        <div v-if="isExcluded(selected)" class="audit-note">
-          {{
-            selected.isReversal
-              ? "Baris ini adalah reversal."
-              : "Transaksi ini sudah dibalik."
-          }}
+          <strong>{{ formatCurrency(pendingDelete.amount) }}</strong>
         </div>
         <div class="modal-actions">
-          <button
-            class="button button--danger"
-            :disabled="isExcluded(selected)"
-            @click="reverseSelected"
-          >
-            <Undo2 :size="17" /> Buat reversal</button
-          ><button class="button button--primary" @click="selected = null">
-            Selesai
+          <button class="button" @click="pendingDelete = null">Batal</button
+          ><button class="button button--danger" @click="deletePending">
+            <Trash2 :size="17" /> Hapus
           </button>
         </div>
       </div>
@@ -298,12 +300,23 @@ async function refreshPage() {
   white-space: normal;
   text-align: left;
 }
-.cash-book-table__row {
+.cash-book-table .cash-book-table__actions {
+  width: 1%;
+  padding: 2px 6px;
+  text-align: center;
+}
+.cash-book-table__delete {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--red);
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
   cursor: pointer;
 }
-.cash-book-table tr.is-excluded td {
-  color: var(--soft);
-  text-decoration: line-through;
+.cash-book-table__delete:hover {
+  background: var(--red-soft);
 }
 .transaction-detail__head {
   display: flex;
@@ -320,12 +333,5 @@ async function refreshPage() {
 .transaction-detail__head span {
   color: var(--soft);
   font-size: 9px;
-}
-.transaction-detail .audit-note {
-  margin-top: 16px;
-}
-.audit-note {
-  color: var(--muted);
-  background: #f3f6f4;
 }
 </style>

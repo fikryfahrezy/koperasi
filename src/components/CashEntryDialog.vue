@@ -444,17 +444,26 @@ defineExpose({ open: openModal });
       <fieldset class="movement-field">
         <legend>Jenis transaksi</legend>
         <div class="movement-options">
-          <label class="movement-option">
+          <label
+            class="movement-option"
+            :class="{ 'is-selected': category === Category.Payment }"
+          >
             <input v-model="category" type="radio" :value="Category.Payment" />
             <ReceiptText :size="18" />
             <span>Setoran anggota</span>
           </label>
-          <label class="movement-option">
+          <label
+            class="movement-option"
+            :class="{ 'is-selected': category === Category.Loan }"
+          >
             <input v-model="category" type="radio" :value="Category.Loan" />
             <HandCoins :size="18" />
             <span>Realisasi pinjaman</span>
           </label>
-          <label class="movement-option">
+          <label
+            class="movement-option"
+            :class="{ 'is-selected': category === Category.SavingsDeposit }"
+          >
             <input
               v-model="category"
               type="radio"
@@ -464,7 +473,10 @@ defineExpose({ open: openModal });
             <Coins :size="18" />
             <span>Setoran simpanan</span>
           </label>
-          <label class="movement-option">
+          <label
+            class="movement-option"
+            :class="{ 'is-selected': category === Category.SavingsWithdrawal }"
+          >
             <input
               v-model="category"
               type="radio"
@@ -474,12 +486,18 @@ defineExpose({ open: openModal });
             <WalletMinimal :size="18" />
             <span>Pengambilan simpanan</span>
           </label>
-          <label class="movement-option">
+          <label
+            class="movement-option"
+            :class="{ 'is-selected': category === Category.CashIn }"
+          >
             <input v-model="category" type="radio" :value="Category.CashIn" />
             <BanknoteArrowDown :size="18" />
             <span>Kas masuk</span>
           </label>
-          <label class="movement-option">
+          <label
+            class="movement-option"
+            :class="{ 'is-selected': category === Category.CashOut }"
+          >
             <input v-model="category" type="radio" :value="Category.CashOut" />
             <BanknoteArrowUp :size="18" />
             <span>Kas keluar</span>
@@ -811,7 +829,7 @@ defineExpose({ open: openModal });
   font-size: 12px;
   font-weight: 700;
 }
-.movement-option:has(input:checked) {
+.movement-option.is-selected {
   border-color: #91acbd;
   color: var(--primary);
   background: rgba(1, 82, 156, 0.05);
@@ -820,7 +838,6 @@ defineExpose({ open: openModal });
   width: 15px;
   min-height: auto;
   margin: 0;
-  accent-color: var(--primary);
 }
 .movement-option svg {
   flex: 0 0 auto;
