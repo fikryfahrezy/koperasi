@@ -91,6 +91,9 @@ impl TransactionDirection {
 string_enum!(Channel {
     Cash => "KAS",
     NonCash => "NON_KAS",
+    // Kas Buku Tabungan movements that do not touch cash; listed in Buku Kas
+    // under the KAS BUKU TABUNGAN columns only.
+    SavingsBook => "TABUNGAN",
 });
 
 string_enum!(TransactionStatus {
@@ -114,8 +117,17 @@ string_enum!(ComponentType {
     LoanProvision => "LOAN_PROVISION",
     // A Buku Kas row with no category column filled in.
     Cash => "CASH",
-    // Category columns of Buku Kas TAHUN 2026.
-    CashSavingsBook => "KAS_BUKU_TABUNGAN",
+    // TAMBAHAN KAS rows: extra cash from any source, or taken out of Kas Buku Tabungan.
+    CashTopUp => "TAMBAHAN_KAS",
+    CashTopUpFromSavingsBook => "TAMBAHAN_KAS_TABUNGAN",
+    // Cash moved into Kas Buku Tabungan.
+    TransferToSavingsBook => "TRANSFER_KE_TABUNGAN",
+    // Kas Buku Tabungan in/out that does not touch cash (TABUNGAN channel).
+    SavingsBookIn => "TABUNGAN_MASUK",
+    SavingsBookOut => "TABUNGAN_KELUAR",
+    // Kas Buku Tabungan balance at the start of tracking (NON_KAS, outside Buku Kas).
+    SavingsBookOpening => "SAVINGS_BOOK_OPENING",
+    // Expense category columns of Buku Kas TAHUN 2026.
     BoardExpense => "BIAYA_PENGURUS",
     StationeryExpense => "BIAYA_ATK",
     Transport => "TRANSFORTASI",
@@ -131,9 +143,15 @@ string_enum!(ComponentType {
     Reversal => "REVERSAL",
 });
 
-/// Buku Kas category columns, in sheet order, with their column headers.
-pub(crate) const CASH_CATEGORIES: [(ComponentType, &str); 13] = [
-    (ComponentType::CashSavingsBook, "KAS BUKU TABUNGAN"),
+/// Buku Kas categories: the two cash transfers, then the sheet's expense columns
+/// in sheet order with their column headers.
+pub(crate) const CASH_CATEGORIES: [(ComponentType, &str); 15] = [
+    (ComponentType::CashTopUp, "Tambahan Kas"),
+    (
+        ComponentType::CashTopUpFromSavingsBook,
+        "Tambahan Kas dari Tabungan",
+    ),
+    (ComponentType::TransferToSavingsBook, "Transfer ke Tabungan"),
     (ComponentType::BoardExpense, "Biaya Pengurus"),
     (ComponentType::StationeryExpense, "Biaya ATK"),
     (ComponentType::Transport, "Transfortasi"),
@@ -178,6 +196,7 @@ string_enum!(AuditEntityType {
 string_enum!(AuditAction {
     Posted => "POSTED",
     Created => "CREATED",
+    Updated => "UPDATED",
     Disbursed => "DISBURSED",
     Reversed => "REVERSED",
 });

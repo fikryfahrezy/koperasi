@@ -35,6 +35,7 @@ pub(crate) fn run() {
             crate::commands::get_cash_book,
             crate::commands::post_cash_entry,
             crate::commands::add_member,
+            crate::commands::update_member,
             crate::commands::preview_loan,
             crate::commands::create_loan,
             crate::commands::post_savings_transaction,

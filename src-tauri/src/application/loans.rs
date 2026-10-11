@@ -98,6 +98,12 @@ pub(crate) async fn create_loan(
     if input.plafond <= 0 || input.tenor <= 0 {
         return Err("Data pinjaman tidak valid.".into());
     }
+    if input
+        .provision
+        .is_some_and(|provision| provision < 0 || provision > input.plafond)
+    {
+        return Err("Provisi harus antara nol dan plafond pinjaman.".into());
+    }
     let loan_group = LoanGroup::try_from(input.loan_group.as_str())?;
     let loan_type = LoanType::try_from(input.loan_type.as_str())?;
     let interest_type = InterestType::try_from(input.interest_type.as_str())?;
@@ -136,7 +142,8 @@ pub(crate) async fn create_loan(
         &disbursement.business_date,
     )
     .await?;
-    let provision = calculate_rate_amount(input.plafond, provision_rate)?;
+    let rate_provision = calculate_rate_amount(input.plafond, provision_rate)?;
+    let provision = input.provision.unwrap_or(rate_provision);
     let due_date = add_months(&disbursement.business_date, input.tenor)?;
 
     let id = timestamp_id("LOAN");
@@ -182,11 +189,15 @@ pub(crate) async fn create_loan(
                 member_id,
                 member_name: &borrower_name,
                 channel,
-                description: &format!(
-                    "Provisi {} % x Rp. {}",
-                    format_rate(provision_rate * 100.0),
-                    format_thousands(input.plafond)
-                ),
+                description: &if provision == rate_provision {
+                    format!(
+                        "Provisi {} % x Rp. {}",
+                        format_rate(provision_rate * 100.0),
+                        format_thousands(input.plafond)
+                    )
+                } else {
+                    format!("Provisi pinjaman Rp. {}", format_thousands(input.plafond))
+                },
                 reference: &format!("KBS/PROV/{id}/{provision_id}"),
                 direction: TransactionDirection::In,
                 actor: APP_ACTOR,

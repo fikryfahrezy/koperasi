@@ -6,8 +6,8 @@ use sqlx::{sqlite::SqliteRow, Row, SqlitePool};
 
 use crate::contracts::*;
 use crate::domain::{
-    Channel, InterestType, LoanGroup, LoanType, SavingsAccountType, TransactionDirection,
-    TransactionStatus,
+    Channel, ComponentType, InterestType, LoanGroup, LoanType, SavingsAccountType,
+    TransactionDirection, TransactionStatus,
 };
 macro_rules! try_column {
     ($row:expr, $column:literal, $ty:ty) => {
@@ -19,7 +19,7 @@ macro_rules! try_column {
     };
 }
 
-const TRANSACTION_COLUMNS: &str = "t.id, t.business_date, t.display_date, t.display_time, t.member_name, t.channel, t.description, t.reference, t.direction, t.amount, t.actor, t.reversed_transaction_id IS NOT NULL AS is_reversal, (t.reversed_transaction_id IS NOT NULL OR EXISTS (SELECT 1 FROM transactions r WHERE r.company_id = t.company_id AND r.reversed_transaction_id = t.id)) AS excluded, EXISTS (SELECT 1 FROM transactions r WHERE r.company_id = t.company_id AND r.reversed_transaction_id = t.id) AS reversed";
+const TRANSACTION_COLUMNS: &str = "t.id, t.business_date, t.display_date, t.display_time, t.member_name, COALESCE((SELECT m.member_number FROM members m WHERE m.id = t.member_id), '') AS member_number, t.channel, t.description, t.reference, t.direction, t.amount, t.actor, t.reversed_transaction_id IS NOT NULL AS is_reversal, (t.reversed_transaction_id IS NOT NULL OR EXISTS (SELECT 1 FROM transactions r WHERE r.company_id = t.company_id AND r.reversed_transaction_id = t.id)) AS excluded, EXISTS (SELECT 1 FROM transactions r WHERE r.company_id = t.company_id AND r.reversed_transaction_id = t.id) AS reversed";
 
 /// Derived status: reversed transactions are marked as reversed.
 fn transaction_dto(
@@ -34,6 +34,7 @@ fn transaction_dto(
         date: try_column!(row, "display_date"),
         time: try_column!(row, "display_time"),
         member_name: try_column!(row, "member_name"),
+        member_number: try_column!(row, "member_number"),
         channel: Channel::try_from(try_column!(row, "channel", String).as_str())?,
         description: try_column!(row, "description"),
         reference: try_column!(row, "reference"),
@@ -80,13 +81,14 @@ async fn components_for(
 
 async fn snapshot(company_id: &str, pool: &SqlitePool) -> Result<AppSnapshot, String> {
     let member_rows = sqlx::query(
-        "SELECT m.id, m.name, m.joined_at, COALESCE(SUM(CASE WHEN b.account_type = ? THEN b.balance ELSE 0 END), 0) principal_savings FROM members m LEFT JOIN savings_balances b ON b.company_id = m.company_id AND b.member_id = m.id WHERE m.company_id = ? GROUP BY m.id ORDER BY m.name"
+        "SELECT m.id, COALESCE(m.member_number, '') member_number, m.name, m.joined_at, COALESCE(SUM(CASE WHEN b.account_type = ? THEN b.balance ELSE 0 END), 0) principal_savings FROM members m LEFT JOIN savings_balances b ON b.company_id = m.company_id AND b.member_id = m.id WHERE m.company_id = ? GROUP BY m.id ORDER BY m.name"
     ).bind(SavingsAccountType::Principal.as_str()).bind(company_id).fetch_all(pool).await.map_err(|error| error.to_string())?;
     let members = member_rows
         .into_iter()
         .map(|row| -> Result<MemberDto, String> {
             Ok(MemberDto {
                 id: try_column!(row, "id"),
+                member_number: try_column!(row, "member_number"),
                 name: try_column!(row, "name"),
                 joined_at: try_column!(row, "joined_at"),
                 principal_savings: try_column!(row, "principal_savings"),
@@ -235,12 +237,19 @@ pub(crate) async fn get_cash_book(
         .await
         .map_err(|error| error.to_string())?;
 
-    let filter = "t.channel = ? AND t.business_date >= ? AND t.business_date < ?";
+    // Buku Kas also lists Kas Buku Tabungan movements; they never change Saldo Kas.
+    let listed_channel = if channel == Channel::Cash {
+        Channel::SavingsBook
+    } else {
+        channel
+    };
+    let filter = "t.channel IN (?, ?) AND t.business_date >= ? AND t.business_date < ?";
     let rows = sqlx::query(&format!(
         "SELECT {TRANSACTION_COLUMNS} FROM transactions t WHERE t.company_id = ? AND {filter} ORDER BY t.business_date, t.rowid"
     ))
     .bind(company_id)
     .bind(channel.as_str())
+    .bind(listed_channel.as_str())
     .bind(&year_start)
     .bind(&next_year_start)
     .fetch_all(pool)
@@ -249,10 +258,48 @@ pub(crate) async fn get_cash_book(
     let mut components = components_for(
         company_id,
         filter,
-        &[channel.as_str(), &year_start, &next_year_start],
+        &[
+            channel.as_str(),
+            listed_channel.as_str(),
+            &year_start,
+            &next_year_start,
+        ],
         pool,
     )
     .await?;
+
+    // Kas Buku Tabungan (bank savings book): only its opening balance, as on the
+    // sheet's opening row. Its later balance can't be derived from Buku Kas, since
+    // money also reaches the bank from outside it (e.g. salary deductions).
+    let savings_book_opening_balance: Option<i64> = sqlx::query_scalar(
+        "SELECT SUM(amount) FROM effective_components WHERE company_id = ? AND component_type = ? AND business_date = ?",
+    )
+    .bind(company_id)
+    .bind(ComponentType::SavingsBookOpening.as_str())
+    .bind(&year_start)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    let savings_book_moves: HashMap<String, (i64, i64)> =
+        sqlx::query_as::<_, (String, i64, i64)>(&format!(
+            "SELECT c.transaction_id, SUM(CASE WHEN c.component_type IN (?, ?) THEN c.amount ELSE 0 END), SUM(CASE WHEN c.component_type IN (?, ?) THEN c.amount ELSE 0 END) FROM transaction_components c JOIN transactions t ON t.company_id = c.company_id AND t.id = c.transaction_id WHERE c.company_id = ? AND {filter} GROUP BY c.transaction_id"
+        ))
+        .bind(ComponentType::CashTopUpFromSavingsBook.as_str())
+        .bind(ComponentType::SavingsBookOut.as_str())
+        .bind(ComponentType::TransferToSavingsBook.as_str())
+        .bind(ComponentType::SavingsBookIn.as_str())
+        .bind(company_id)
+        .bind(channel.as_str())
+        .bind(listed_channel.as_str())
+        .bind(&year_start)
+        .bind(&next_year_start)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|(id, out, into)| (id, (out, into)))
+        .collect();
 
     let (mut balance, mut total_in, mut total_out) = (opening_balance, 0_i64, 0_i64);
     let mut cash_rows = Vec::with_capacity(rows.len());
@@ -260,7 +307,7 @@ pub(crate) async fn get_cash_book(
         let excluded: bool = try_column!(row, "excluded");
         let business_date: String = try_column!(row, "business_date");
         let transaction = transaction_dto(row, &mut components)?;
-        if !excluded {
+        if !excluded && transaction.channel == channel {
             if transaction.direction == TransactionDirection::In {
                 balance += transaction.amount;
                 total_in += transaction.amount;
@@ -269,10 +316,16 @@ pub(crate) async fn get_cash_book(
                 total_out += transaction.amount;
             }
         }
+        let (savings_book_out, savings_book_in) = savings_book_moves
+            .get(&transaction.id)
+            .copied()
+            .unwrap_or_default();
         cash_rows.push(CashBookRowDto {
             transaction,
             business_date,
             balance,
+            savings_book_out,
+            savings_book_in,
         });
     }
     Ok(CashBookDto {
@@ -282,6 +335,7 @@ pub(crate) async fn get_cash_book(
         total_in,
         total_out,
         closing_balance: balance,
+        savings_book_opening_balance,
         rows: cash_rows,
     })
 }
@@ -291,19 +345,91 @@ mod tests {
     use super::*;
 
     #[test]
+    fn shows_kas_buku_tabungan_opening_balance_for_its_year() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+            sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, channel, description, reference, direction, amount, actor) VALUES ('opening', 'default', '2026-01-01', '01-Jan-2026', '00:00', '-', ?, 'Saldo awal', 'opening', ?, 10000, 'Test')")
+                .bind(Channel::NonCash.as_str()).bind(TransactionDirection::In.as_str())
+                .execute(&pool).await.unwrap();
+            sqlx::query("INSERT INTO transaction_components (company_id, transaction_id, component_type, label, amount) VALUES ('default', 'opening', ?, 'Saldo', 10000)")
+                .bind(ComponentType::SavingsBookOpening.as_str())
+                .execute(&pool).await.unwrap();
+            let book = get_cash_book("default", 2026, Channel::Cash.as_str(), &pool)
+                .await
+                .unwrap();
+            assert_eq!(book.savings_book_opening_balance, Some(10_000));
+            assert!(book.rows.is_empty());
+            for (id, direction, component) in [
+                (
+                    "from-bank",
+                    TransactionDirection::In.as_str(),
+                    ComponentType::CashTopUpFromSavingsBook.as_str(),
+                ),
+                (
+                    "other-source",
+                    TransactionDirection::In.as_str(),
+                    ComponentType::CashTopUp.as_str(),
+                ),
+                (
+                    "to-bank",
+                    TransactionDirection::Out.as_str(),
+                    ComponentType::TransferToSavingsBook.as_str(),
+                ),
+            ] {
+                sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, channel, description, reference, direction, amount, actor) VALUES (?, 'default', '2026-02-01', '01-Feb-2026', '00:00', '-', ?, ?, ?, ?, 500, 'Test')")
+                    .bind(id).bind(Channel::Cash.as_str()).bind(id).bind(id).bind(direction)
+                    .execute(&pool).await.unwrap();
+                sqlx::query("INSERT INTO transaction_components (company_id, transaction_id, component_type, label, amount) VALUES ('default', ?, ?, ?, 500)")
+                    .bind(id).bind(component).bind(component)
+                    .execute(&pool).await.unwrap();
+            }
+            let book = get_cash_book("default", 2026, Channel::Cash.as_str(), &pool)
+                .await
+                .unwrap();
+            let moves: Vec<_> = book
+                .rows
+                .iter()
+                .map(|row| {
+                    (
+                        row.transaction.id.as_str(),
+                        row.savings_book_out,
+                        row.savings_book_in,
+                    )
+                })
+                .collect();
+            assert_eq!(
+                moves,
+                vec![
+                    ("from-bank", 500, 0),
+                    ("other-source", 0, 0),
+                    ("to-bank", 0, 500)
+                ]
+            );
+            for year in [2025, 2027] {
+                let other = get_cash_book("default", year, Channel::Cash.as_str(), &pool)
+                    .await
+                    .unwrap();
+                assert_eq!(other.savings_book_opening_balance, None);
+            }
+        });
+    }
+
+    #[test]
     fn cash_book_only_lists_kas_transactions() {
         tauri::async_runtime::block_on(async {
             let pool = crate::database::memory_pool().await;
             for (id, channel) in [
-                ("savings", "NON_KAS"),
-                ("cash", "KAS"),
-                ("opening", "NON_KAS"),
+                ("savings", Channel::NonCash.as_str()),
+                ("cash", Channel::Cash.as_str()),
+                ("opening", Channel::NonCash.as_str()),
             ] {
-                sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, channel, description, reference, direction, amount, actor) VALUES (?, 'default', '2026-09-01', '01 Sep 2026', '00:00', '-', ?, 'Existing import', ?, 'Masuk', 1000, 'Import Excel 2026')")
-                    .bind(id).bind(channel).bind(id)
+                sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, channel, description, reference, direction, amount, actor) VALUES (?, 'default', '2026-09-01', '01 Sep 2026', '00:00', '-', ?, 'Existing import', ?, ?, 1000, 'Import Excel 2026')")
+                    .bind(id).bind(channel).bind(id).bind(TransactionDirection::In.as_str())
                     .execute(&pool).await.unwrap();
             }
-            let book = get_cash_book("default", 2026, "KAS", &pool).await.unwrap();
+            let book = get_cash_book("default", 2026, Channel::Cash.as_str(), &pool)
+                .await
+                .unwrap();
             assert_eq!(book.rows.len(), 1);
             assert_eq!(book.rows[0].transaction.id, "cash");
             let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transactions")

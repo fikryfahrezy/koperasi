@@ -149,6 +149,13 @@ function closeModal() {
       <div v-else-if="phase === 'up-to-date'" class="update-checker__state">
         <p>{{ t("update.upToDate") }}</p>
         <div class="modal-actions">
+          <button
+            class="button button--secondary"
+            @click="checkForUpdate(false)"
+          >
+            <RefreshCw :size="16" />
+            {{ t("update.checkLabel") }}
+          </button>
           <button class="button button--primary" @click="open = false">
             {{ t("common.close") }}
           </button>
@@ -179,3 +186,53 @@ function closeModal() {
     </div>
   </UiModal>
 </template>
+
+<style scoped>
+.update-checker-button {
+  position: relative;
+}
+.update-checker-button i {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+  background: var(--green);
+}
+.update-checker {
+  display: grid;
+  gap: 16px;
+}
+.update-checker__state {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 8px 4px 4px;
+  text-align: center;
+}
+.update-checker__state h3 {
+  margin: 0;
+}
+.update-checker__state p {
+  margin: 0;
+  color: var(--muted);
+}
+.update-checker__progress {
+  width: 100%;
+  max-width: 320px;
+  height: 8px;
+  border-radius: 5px;
+  background: var(--surface-soft);
+  overflow: hidden;
+}
+.update-checker__progress-bar {
+  height: 100%;
+  border-radius: 5px;
+  background: var(--green);
+}
+.update-checker__error {
+  color: #e06b55;
+}
+</style>

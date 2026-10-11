@@ -66,9 +66,6 @@ pub(crate) async fn post_savings_transaction(
     let account_type = SavingsAccountType::try_from(input.account_type.as_str())?;
     let movement = SavingsMovement::try_from(input.movement.as_str())?;
     let channel = Channel::try_from(input.channel.as_str())?;
-    if movement == SavingsMovement::Withdrawal && account_type != SavingsAccountType::Voluntary {
-        return Err("Hanya simpanan manasuka yang dapat ditarik pada versi ini.".into());
-    }
     validate_business_date(&input.business_date)?;
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
     let member_name = member_name(&mut db, company_id, &input.member_id).await?;
@@ -76,7 +73,7 @@ pub(crate) async fn post_savings_transaction(
         savings_account_id(&mut db, company_id, &input.member_id, account_type).await?;
     let is_deposit = movement == SavingsMovement::Deposit;
     if !is_deposit && savings_balance(&mut db, company_id, &account_id).await? < input.amount {
-        return Err("Saldo manasuka tidak mencukupi.".into());
+        return Err("Saldo simpanan tidak mencukupi.".into());
     }
 
     let id = timestamp_id(if is_deposit { "SAV-IN" } else { "SAV-OUT" });

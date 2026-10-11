@@ -14,13 +14,14 @@ import {
   formatSheetNumber,
   type Loan,
   LoanGroup,
+  matchesMember,
   useKoperasiStore,
   useMonthlyLedger,
 } from "../store/koperasi";
 
 const pageState = useWorkspacePageState("/loans");
 
-const { loans, selectedYear, refresh } = useKoperasiStore();
+const { loans, members, selectedYear, refresh } = useKoperasiStore();
 const { monthlyLedger, monthlyLedgerLoading } = useMonthlyLedger();
 
 const period = pageState.field("period", () => "");
@@ -50,6 +51,9 @@ watch(
 );
 
 const loanById = computed(() => new Map(loans.map((loan) => [loan.id, loan])));
+const memberNumbers = computed(
+  () => new Map(members.map((member) => [member.id, member.memberNumber])),
+);
 
 // Spreadsheet rows follow loan numbers (L001, L002, ...). Derived columns:
 // opening arrears = closing arrears - this month's payment obligation + amount paid;
@@ -146,9 +150,11 @@ const sectionsForRows = (monthRows: MonthRow[]) =>
         .filter((row) => row.loan.loanGroup === section.group)
         .map((row, index) => ({ ...row, no: index + 1 }))
         .filter((row) =>
-          row.loan.memberName
-            .toLowerCase()
-            .includes(debouncedQuery.value.trim().toLowerCase()),
+          matchesMember(
+            debouncedQuery.value,
+            row.loan.memberName,
+            memberNumbers.value.get(row.loan.memberId),
+          ),
         );
       return { ...section, rows, totals: sumRows(rows) };
     });
@@ -276,8 +282,8 @@ const navigation = computed(() => ({
           <input
             v-model="query"
             type="search"
-            aria-label="Cari nama peminjam"
-            placeholder="Cari nama peminjam..."
+            aria-label="Cari nama peminjam atau ID anggota"
+            placeholder="Cari nama peminjam atau ID anggota..."
           />
         </label>
         <UiSelect
