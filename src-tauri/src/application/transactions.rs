@@ -31,7 +31,7 @@ pub(crate) async fn reverse_transaction(
         .fetch_optional(&mut *db)
         .await
         .map_err(|error| error.to_string())?
-        .ok_or("Transaksi tidak ditemukan atau sudah dibalik.")?;
+        .ok_or("Transaksi tidak ditemukan atau sudah dihapus.")?;
     let get = |column: &str| -> Result<String, String> {
         original.try_get(column).map_err(|error| error.to_string())
     };
@@ -60,24 +60,24 @@ pub(crate) async fn reverse_transaction(
             if component_type != ComponentType::SavingsWithdrawal
                 && savings_balance(&mut db, company_id, account_id).await? < amount
             {
-                return Err("Reversal ditolak karena saldo simpanan tidak mencukupi.".into());
+                return Err("Transaksi tidak dapat dihapus karena saldo simpanan tidak mencukupi.".into());
             }
         }
         if let Some(loan_id) = &loan_id {
             if matches!(component_type, ComponentType::LoanDisbursement | ComponentType::LoanOpening)
                 && loan_balance(&mut db, company_id, loan_id).await? < amount
             {
-                return Err("Reversal ditolak karena pinjaman sudah memiliki angsuran.".into());
+                return Err("Transaksi tidak dapat dihapus karena pinjaman sudah memiliki angsuran.".into());
             }
         }
-        let mut reversal = Component::new(ComponentType::Reversal, format!("Reversal · {label}"), amount);
+        let mut reversal = Component::new(ComponentType::Reversal, format!("Hapus · {label}"), amount);
         reversal.loan_id = loan_id;
         reversal.savings_account_id = savings_account_id;
         components.push(reversal);
     }
 
     let reversal_id = timestamp_id("REV");
-    let description = format!("Reversal · {}", get("description")?);
+    let description = format!("Hapus · {}", get("description")?);
     let reference = format!("{}/REV/{reversal_id}", get("reference")?);
     append(
         &mut db,
