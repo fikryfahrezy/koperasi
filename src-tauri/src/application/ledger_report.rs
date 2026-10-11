@@ -33,18 +33,19 @@ fn is_closed(row: &LoanMonthDto) -> bool {
 /// Income is interest and provisi paid from January up to that month. A loan
 /// paid off before the month is hidden once its borrower (`borrowers`: loan id
 /// to member id, or name for Non Anggota) has another loan still running; its
-/// income moves to the running loan disbursed last, so it still counts toward
-/// the SHU. Borrowers with only paid-off loans keep those rows.
+/// income moves to the running loan realized last (`realized`: loan id to
+/// realization date, `YYYY-MM-DD`), so it still counts toward the SHU.
+/// Borrowers with only paid-off loans keep those rows.
 pub(crate) fn apply_loan_report(
     loans: &mut [LoanMonthDto],
     borrowers: &HashMap<String, String>,
+    realized: &HashMap<String, String>,
     incentive_rate: f64,
 ) {
     let mut order: Vec<usize> = (0..loans.len()).collect();
     order.sort_by(|&a, &b| {
         (&loans[a].loan_id, &loans[a].period).cmp(&(&loans[b].loan_id, &loans[b].period))
     });
-    let mut latest_disbursement: HashMap<String, String> = HashMap::new();
     let mut running: Option<(String, [i64; 4], [i64; 4])> = None;
     for &index in &order {
         let row = &mut loans[index];
@@ -63,12 +64,6 @@ pub(crate) fn apply_loan_report(
         row.income_interest = *interest;
         row.income_provision = *provision;
         row.shown = true;
-        if row.disbursed > 0 {
-            let latest = latest_disbursement.entry(row.loan_id.clone()).or_default();
-            if row.period > *latest {
-                *latest = row.period.clone();
-            }
-        }
     }
 
     let mut groups: HashMap<(String, String), Vec<usize>> = HashMap::new();
@@ -83,9 +78,9 @@ pub(crate) fn apply_loan_report(
         let (closed, open): (Vec<usize>, Vec<usize>) =
             group.iter().partition(|&&index| is_closed(&loans[index]));
         let Some(&host) = open.iter().max_by(|&&a, &&b| {
-            let latest = |index: usize| latest_disbursement.get(&loans[index].loan_id);
-            latest(a)
-                .cmp(&latest(b))
+            let realized = |index: usize| realized.get(&loans[index].loan_id);
+            realized(a)
+                .cmp(&realized(b))
                 .then_with(|| loans[b].loan_id.cmp(&loans[a].loan_id))
         }) else {
             continue;
@@ -184,7 +179,11 @@ mod tests {
             ("old".to_string(), "M043".to_string()),
             ("new".to_string(), "M043".to_string()),
         ]);
-        apply_loan_report(&mut loans, &borrowers, 0.101);
+        let realized = HashMap::from([
+            ("old".to_string(), "2025-12-10".to_string()),
+            ("new".to_string(), "2026-01-28".to_string()),
+        ]);
+        apply_loan_report(&mut loans, &borrowers, &realized, 0.101);
 
         // January: both rows shown, each with its own income.
         assert!(loans[0].shown && loans[1].shown);
@@ -206,8 +205,36 @@ mod tests {
         paid.interest_paid = 0;
         let mut loans = vec![paid];
         let borrowers = HashMap::from([("paid".to_string(), "M001".to_string())]);
-        apply_loan_report(&mut loans, &borrowers, 0.101);
+        apply_loan_report(&mut loans, &borrowers, &HashMap::new(), 0.101);
         assert!(loans[0].shown);
+    }
+
+    #[test]
+    fn carries_income_to_the_running_loan_realized_last() {
+        // Both running loans were realized before the book year, the later
+        // one under the larger id.
+        let mut paid_jan = loan("c", "2026-01", 1_000_000, 0);
+        paid_jan.interest_paid = 20_000;
+        let mut loans = vec![
+            paid_jan,
+            loan("c", "2026-02", 0, 0),
+            loan("a", "2026-02", 5_000_000, 5_000_000),
+            loan("b", "2026-02", 5_000_000, 5_000_000),
+        ];
+        let borrowers = HashMap::from([
+            ("a".to_string(), "M001".to_string()),
+            ("b".to_string(), "M001".to_string()),
+            ("c".to_string(), "M001".to_string()),
+        ]);
+        let realized = HashMap::from([
+            ("a".to_string(), "2024-03-01".to_string()),
+            ("b".to_string(), "2025-06-01".to_string()),
+            ("c".to_string(), "2023-01-01".to_string()),
+        ]);
+        apply_loan_report(&mut loans, &borrowers, &realized, 0.101);
+        assert!(!loans[1].shown);
+        assert_eq!(loans[2].income_interest, [0; 4]);
+        assert_eq!(loans[3].income_interest, [20_000, 0, 0, 0]);
     }
 
     #[test]

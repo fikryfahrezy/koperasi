@@ -77,18 +77,24 @@ fn period_range(first: &str, last: &str) -> Vec<String> {
 
 /// `YYYY-MM` of a stored date: `2026-04-05` or `05-Apr-2026` (as in the sheet).
 fn date_period(value: &str) -> Option<String> {
+    iso_date(value).map(|date| date[..7].to_string())
+}
+
+/// `YYYY-MM-DD` for a date stored as `YYYY-MM-DD` or `DD-Mon-YYYY`.
+fn iso_date(value: &str) -> Option<String> {
     const MONTHS: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
     let bytes = value.as_bytes();
     if value.len() == 10 && bytes[4] == b'-' && bytes[7] == b'-' {
-        return Some(value[..7].to_string());
+        return Some(value.to_string());
     }
     let mut parts = value.split('-');
-    let (_day, month, year) = (parts.next()?, parts.next()?, parts.next()?);
+    let (day, month, year) = (parts.next()?, parts.next()?, parts.next()?);
+    let day: u32 = day.parse().ok()?;
     let month = MONTHS.iter().position(|name| *name == month)? + 1;
     (year.len() == 4 && year.chars().all(|ch| ch.is_ascii_digit()))
-        .then(|| format!("{year}-{month:02}"))
+        .then(|| format!("{year}-{month:02}-{day:02}"))
 }
 
 /// Scheduled principal and interest installments for a month with an `opening` balance,
@@ -313,8 +319,9 @@ pub(crate) async fn get_monthly_ledger(
 
     let mut loans = Vec::new();
     let mut borrowers = HashMap::new();
+    let mut realized = HashMap::new();
     for row in sqlx::query(
-        "SELECT id, COALESCE(NULLIF(member_id, ''), 'name:' || member_name) borrower, plafond, rate_annual, tenor, interest_type, loan_type, due_date FROM loans WHERE company_id = ?",
+        "SELECT id, COALESCE(NULLIF(member_id, ''), 'name:' || member_name) borrower, plafond, rate_annual, tenor, interest_type, loan_type, realization_date, due_date FROM loans WHERE company_id = ?",
     )
     .bind(company_id)
     .fetch_all(pool)
@@ -323,6 +330,10 @@ pub(crate) async fn get_monthly_ledger(
     {
         let loan_id: String = col!(row, "id");
         borrowers.insert(loan_id.clone(), col!(row, "borrower"));
+        let realization_date: String = col!(row, "realization_date");
+        if let Some(date) = iso_date(&realization_date) {
+            realized.insert(loan_id.clone(), date);
+        }
         let plafond: i64 = col!(row, "plafond");
         let rate: f64 = col!(row, "rate_annual");
         let tenor: i64 = col!(row, "tenor");
@@ -446,7 +457,7 @@ pub(crate) async fn get_monthly_ledger(
     );
     let (loan_incentive_rate, savings_incentive_rate) =
         incentive_rates(company_id, year, pool).await?;
-    apply_loan_report(&mut loans, &borrowers, loan_incentive_rate);
+    apply_loan_report(&mut loans, &borrowers, &realized, loan_incentive_rate);
     apply_savings_report(&mut savings, &periods, savings_incentive_rate);
     Ok(MonthlyLedgerDto {
         loan_incentive_rate,
@@ -467,6 +478,7 @@ mod tests {
         assert_eq!(date_period("05-Apr-2026").as_deref(), Some("2026-04"));
         assert_eq!(date_period("2026-04-05").as_deref(), Some("2026-04"));
         assert_eq!(date_period("-"), None);
+        assert_eq!(iso_date("5-Apr-2026").as_deref(), Some("2026-04-05"));
         let monthly = |period, opening| {
             scheduled_installment(
                 20_000_000,
