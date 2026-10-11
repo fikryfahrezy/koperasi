@@ -41,7 +41,8 @@ pub(crate) fn run() {
             crate::commands::post_savings_transaction,
             crate::commands::post_payment,
             crate::commands::reverse_transaction,
-            crate::commands::get_financial_parameters
+            crate::commands::get_financial_parameters,
+            crate::commands::set_incentive_rates
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

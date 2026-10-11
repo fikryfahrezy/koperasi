@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, watch } from "vue";
-import { CalendarX2, Search } from "lucide-vue-next";
+import { computed, nextTick, ref, watch } from "vue";
+import { CalendarX2, Percent, Search } from "lucide-vue-next";
 import { useDebouncedRef } from "../composables/useDebouncedRef";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import { useVirtualSheetColumns } from "../composables/useVirtualSheetColumns";
 import { useVirtualSheet } from "../composables/useVirtualSheet";
+import IncentiveRatesDialog from "../components/IncentiveRatesDialog.vue";
 import PageHeader from "../components/PageHeader.vue";
 import UiSelect from "../components/UiSelect.vue";
 import {
@@ -17,8 +18,16 @@ import {
   useKoperasiStore,
   useMonthlyLedger,
 } from "../store/koperasi";
+import {
+  savingsLeadingLetters,
+  savingsMonthLetters,
+  savingsTailLetters,
+} from "../sheet-columns";
 
 const pageState = useWorkspacePageState("/savings");
+const formatRate = (rate: number) =>
+  `${(rate * 100).toLocaleString("id-ID", { maximumFractionDigits: 2 })}%`;
+const ratesOpen = ref(false);
 
 const { members, selectedYear, refresh } = useKoperasiStore();
 const { monthlyLedger, monthlyLedgerLoading } = useMonthlyLedger();
@@ -135,6 +144,43 @@ const periodTables = computed(() =>
     };
   }),
 );
+// Ratas Simpanan (kolom DA) and Insentif Simpanan 3,65% (DC, DD) as of the last
+// month shown, computed by the backend (rules 2.3a).
+const lastPeriod = computed(
+  () => visiblePeriods.value[visiblePeriods.value.length - 1] ?? "",
+);
+const incentiveById = computed(
+  () =>
+    new Map(
+      monthlyLedger.value.savings
+        .filter((row) => row.period === lastPeriod.value)
+        .map((row) => [
+          row.memberId,
+          {
+            average: row.savingsAverage,
+            incentiveRaw: row.savingsIncentiveRaw,
+            incentive: row.savingsIncentive,
+          },
+        ]),
+    ),
+);
+const incentiveKeys = ["average", "incentiveRaw", "incentive"] as const;
+// The month groups, then Ratas and Insentif Simpanan once at the end.
+const columnGroups = computed(() => [
+  ...periodTables.value.map((table) => ({ ...table, kind: "month" as const })),
+  ...(periodTables.value.length
+    ? [
+        {
+          ...periodTables.value[periodTables.value.length - 1]!,
+          kind: "tail" as const,
+          period: "tail",
+        },
+      ]
+    : []),
+]);
+const groupColumns = (group: (typeof columnGroups.value)[number]) =>
+  group.kind === "tail" ? incentiveKeys.length : group.hasShu ? 16 : 15;
+
 const monthRows = computed(() => {
   const rowsById = new Map<string, ReturnType<typeof rowsForPeriod>[number]>();
   for (const table of periodTables.value) {
@@ -147,11 +193,17 @@ const monthRows = computed(() => {
 const totalColumnCount = computed(
   () =>
     2 +
-    periodTables.value.reduce(
-      (count, table) => count + (table.hasShu ? 16 : 15),
-      0,
-    ),
+    columnGroups.value.reduce((count, group) => count + groupColumns(group), 0),
 );
+const incentiveTotals = computed(() => {
+  const sum = { average: 0, incentiveRaw: 0, incentive: 0 };
+  for (const row of monthRows.value) {
+    const value = incentiveById.value.get(row.memberId);
+    if (!value) continue;
+    for (const key of incentiveKeys) sum[key] += value[key];
+  }
+  return sum;
+});
 const {
   scroller,
   table,
@@ -174,8 +226,8 @@ const {
   totalWidth,
   scrollToColumn,
 } = useVirtualSheetColumns(
-  periodTables,
-  (group) => (group.hasShu ? 16 : 15),
+  columnGroups,
+  groupColumns,
   [56, 240],
   scroller,
   pageState.active,
@@ -216,6 +268,14 @@ const navigation = computed(() => ({
           aria-label="Bulan"
           variant="toolbar"
         />
+        <button
+          v-if="monthlyLedger.periods.length"
+          class="button button--secondary"
+          type="button"
+          @click="ratesOpen = true"
+        >
+          <Percent :size="16" /> Insentif {{ selectedYear }}
+        </button>
       </template>
     </PageHeader>
     <section
@@ -243,7 +303,7 @@ const navigation = computed(() => ({
             width: `${totalWidth}px`,
           }"
           :aria-colcount="totalColumnCount"
-          :aria-rowcount="monthRows.length + 5"
+          :aria-rowcount="monthRows.length + 6"
         >
           <colgroup>
             <col
@@ -253,6 +313,49 @@ const navigation = computed(() => ({
             />
           </colgroup>
           <thead>
+            <tr class="sheet-letters">
+              <th class="sheet-sticky sheet-no">
+                {{ savingsLeadingLetters[0] }}
+              </th>
+              <th class="sheet-sticky sheet-name">
+                {{ savingsLeadingLetters[1] }}
+              </th>
+              <th
+                v-if="leftColumns"
+                class="sheet-column-spacer"
+                aria-hidden="true"
+              ></th>
+              <template
+                v-for="{ period, hasShu, kind } in renderedPeriodTables"
+                :key="period"
+              >
+                <template v-if="kind === 'month'">
+                  <th
+                    v-for="(letter, index) in savingsMonthLetters(
+                      period,
+                      hasShu,
+                      selectedYear,
+                    )"
+                    :key="index"
+                  >
+                    {{ letter }}
+                  </th>
+                </template>
+                <template v-else>
+                  <th
+                    v-for="(letter, index) in savingsTailLetters(selectedYear)"
+                    :key="index"
+                  >
+                    {{ letter }}
+                  </th>
+                </template>
+              </template>
+              <th
+                v-if="rightColumns"
+                class="sheet-column-spacer"
+                aria-hidden="true"
+              ></th>
+            </tr>
             <tr>
               <th rowspan="4" class="sheet-sticky sheet-no">No</th>
               <th rowspan="4" class="sheet-sticky sheet-name">
@@ -265,16 +368,26 @@ const navigation = computed(() => ({
                 aria-hidden="true"
               ></th>
               <template
-                v-for="{ period, hasShu } in renderedPeriodTables"
+                v-for="{ period, hasShu, kind } in renderedPeriodTables"
                 :key="period"
               >
-                <th
-                  :colspan="hasShu ? 16 : 15"
-                  class="sheet-group"
-                  :data-period="period"
-                >
-                  {{ formatPeriod(period) }}
-                </th>
+                <template v-if="kind === 'month'">
+                  <th
+                    :colspan="hasShu ? 16 : 15"
+                    class="sheet-group"
+                    :data-period="period"
+                  >
+                    {{ formatPeriod(period) }}
+                  </th>
+                </template>
+                <template v-else>
+                  <th rowspan="4">
+                    Ratas simpanan<br />s/d {{ formatPeriod(lastPeriod) }}
+                  </th>
+                  <th colspan="2" rowspan="2" class="sheet-group">
+                    Insentif simpanan
+                  </th>
+                </template>
               </template>
               <th
                 v-if="rightColumns"
@@ -285,60 +398,72 @@ const navigation = computed(() => ({
             </tr>
             <tr>
               <template
-                v-for="{ period, hasShu } in renderedPeriodTables"
+                v-for="{ period, hasShu, kind } in renderedPeriodTables"
                 :key="period"
               >
-                <th colspan="3" class="sheet-group">
-                  Saldo bulan {{ formatPreviousPeriod(period) }}
-                </th>
-                <th rowspan="3" class="sheet-total">
-                  Total simpanan<br />{{ formatPreviousPeriod(period) }}
-                </th>
-                <th
-                  :colspan="hasShu ? 8 : 7"
-                  class="sheet-group sheet-group--mutasi"
-                >
-                  Mutasi bulan {{ formatPeriod(period) }}
-                </th>
-                <th colspan="3" class="sheet-group">
-                  Saldo simpanan bulan {{ formatPeriod(period) }}
-                </th>
-                <th rowspan="3" class="sheet-total">
-                  Total simpanan<br />{{ formatPeriod(period) }}
-                </th>
+                <template v-if="kind === 'month'">
+                  <th colspan="3" class="sheet-group">
+                    Saldo bulan {{ formatPreviousPeriod(period) }}
+                  </th>
+                  <th rowspan="3" class="sheet-total">
+                    Total simpanan<br />{{ formatPreviousPeriod(period) }}
+                  </th>
+                  <th
+                    :colspan="hasShu ? 8 : 7"
+                    class="sheet-group sheet-group--mutasi"
+                  >
+                    Mutasi bulan {{ formatPeriod(period) }}
+                  </th>
+                  <th colspan="3" class="sheet-group">
+                    Saldo simpanan bulan {{ formatPeriod(period) }}
+                  </th>
+                  <th rowspan="3" class="sheet-total">
+                    Total simpanan<br />{{ formatPeriod(period) }}
+                  </th>
+                </template>
               </template>
             </tr>
             <tr>
               <template
-                v-for="{ period, hasShu } in renderedPeriodTables"
+                v-for="{ period, hasShu, kind } in renderedPeriodTables"
                 :key="period"
               >
-                <th rowspan="2">Pokok</th>
-                <th rowspan="2">Wajib</th>
-                <th rowspan="2">Manasuka</th>
-                <th rowspan="2">Tanggal</th>
-                <th colspan="2">Simpanan Pokok</th>
-                <th colspan="2">Simpanan Wajib</th>
-                <th colspan="2">Manasuka</th>
-                <th v-if="hasShu" rowspan="2">
-                  SHU Tahun Buku {{ selectedYear - 1 }}
-                </th>
-                <th rowspan="2">Pokok</th>
-                <th rowspan="2">Wajib</th>
-                <th rowspan="2">Manasuka</th>
+                <template v-if="kind === 'month'">
+                  <th rowspan="2">Pokok</th>
+                  <th rowspan="2">Wajib</th>
+                  <th rowspan="2">Manasuka</th>
+                  <th rowspan="2">Tanggal</th>
+                  <th colspan="2">Simpanan Pokok</th>
+                  <th colspan="2">Simpanan Wajib</th>
+                  <th colspan="2">Manasuka</th>
+                  <th v-if="hasShu" rowspan="2">
+                    SHU Tahun Buku {{ selectedYear - 1 }}
+                  </th>
+                  <th rowspan="2">Pokok</th>
+                  <th rowspan="2">Wajib</th>
+                  <th rowspan="2">Manasuka</th>
+                </template>
+                <template v-else>
+                  <th rowspan="2">
+                    {{ formatRate(monthlyLedger.savingsIncentiveRate) }}
+                  </th>
+                  <th rowspan="2">Pembulatan</th>
+                </template>
               </template>
             </tr>
             <tr>
               <template
-                v-for="{ period, hasShu } in renderedPeriodTables"
+                v-for="{ period, hasShu, kind } in renderedPeriodTables"
                 :key="period"
               >
-                <th>Debet</th>
-                <th>Kredit</th>
-                <th>Debet</th>
-                <th>Kredit</th>
-                <th>Debet</th>
-                <th>Kredit</th>
+                <template v-if="kind === 'month'">
+                  <th>Debet</th>
+                  <th>Kredit</th>
+                  <th>Debet</th>
+                  <th>Kredit</th>
+                  <th>Debet</th>
+                  <th>Kredit</th>
+                </template>
               </template>
             </tr>
           </thead>
@@ -353,7 +478,7 @@ const navigation = computed(() => ({
               v-for="{ row, index } in renderedRows"
               :key="row.memberId"
               :data-virtual-row="index"
-              :aria-rowindex="index + 5"
+              :aria-rowindex="index + 6"
             >
               <td class="sheet-sticky sheet-no">{{ row.no }}</td>
               <td class="sheet-sticky sheet-name">
@@ -370,8 +495,19 @@ const navigation = computed(() => ({
                 v-for="table in renderedPeriodTables"
                 :key="table.period"
               >
+                <template v-if="table.kind === 'tail'">
+                  <td v-for="key in incentiveKeys" :key="key" class="num-cell">
+                    {{
+                      formatSheetNumber(
+                        incentiveById.get(row.memberId)?.[key] ?? 0,
+                      )
+                    }}
+                  </td>
+                </template>
                 <template
-                  v-for="monthRow in [table.rowsById.get(row.memberId)]"
+                  v-for="monthRow in table.kind === 'month'
+                    ? [table.rowsById.get(row.memberId)]
+                    : []"
                   :key="table.period"
                 >
                   <td v-for="key in openingKeys" :key="key" class="num-cell">
@@ -424,7 +560,7 @@ const navigation = computed(() => ({
           <tfoot>
             <tr
               :data-virtual-row="monthRows.length"
-              :aria-rowindex="monthRows.length + 5"
+              :aria-rowindex="monthRows.length + 6"
             >
               <td class="sheet-sticky sheet-no"></td>
               <td class="sheet-sticky sheet-name">JUMLAH</td>
@@ -439,26 +575,33 @@ const navigation = computed(() => ({
                 v-for="table in renderedPeriodTables"
                 :key="table.period"
               >
-                <td v-for="key in openingKeys" :key="key" class="num-cell">
-                  {{ formatSheetNumber(table.totals[key]) }}
-                </td>
-                <td class="num-cell sheet-total">
-                  {{ formatSheetNumber(openingTotal(table.totals)) }}
-                </td>
-                <td></td>
-                <td
-                  v-for="key in table.movementKeys"
-                  :key="key"
-                  class="num-cell"
-                >
-                  {{ formatSheetNumber(table.totals[key]) }}
-                </td>
-                <td v-for="key in closingKeys" :key="key" class="num-cell">
-                  {{ formatSheetNumber(table.totals[key]) }}
-                </td>
-                <td class="num-cell sheet-total">
-                  {{ formatSheetNumber(closingTotal(table.totals)) }}
-                </td>
+                <template v-if="table.kind === 'tail'">
+                  <td v-for="key in incentiveKeys" :key="key" class="num-cell">
+                    {{ formatSheetNumber(incentiveTotals[key]) }}
+                  </td>
+                </template>
+                <template v-else>
+                  <td v-for="key in openingKeys" :key="key" class="num-cell">
+                    {{ formatSheetNumber(table.totals[key]) }}
+                  </td>
+                  <td class="num-cell sheet-total">
+                    {{ formatSheetNumber(openingTotal(table.totals)) }}
+                  </td>
+                  <td></td>
+                  <td
+                    v-for="key in table.movementKeys"
+                    :key="key"
+                    class="num-cell"
+                  >
+                    {{ formatSheetNumber(table.totals[key]) }}
+                  </td>
+                  <td v-for="key in closingKeys" :key="key" class="num-cell">
+                    {{ formatSheetNumber(table.totals[key]) }}
+                  </td>
+                  <td class="num-cell sheet-total">
+                    {{ formatSheetNumber(closingTotal(table.totals)) }}
+                  </td>
+                </template>
               </template>
               <td
                 v-if="rightColumns"
@@ -472,5 +615,6 @@ const navigation = computed(() => ({
         </table>
       </div>
     </section>
+    <IncentiveRatesDialog v-model:open="ratesOpen" kind="savings" />
   </div>
 </template>

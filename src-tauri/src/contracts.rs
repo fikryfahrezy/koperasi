@@ -50,6 +50,8 @@ pub(crate) struct LoanDto {
     pub(crate) realization_date: String,
     pub(crate) due_date: String,
     pub(crate) guarantee: String,
+    /// Rekomendasi; empty when nobody is recorded.
+    pub(crate) recommender: String,
 }
 
 #[derive(Serialize)]
@@ -209,6 +211,15 @@ pub(crate) struct ReverseTransactionInput {
     pub(crate) display_time: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SetIncentiveRatesInput {
+    pub(crate) year: i32,
+    /// Fractions: 0.101 = 10,1%. A rate left out is not changed.
+    pub(crate) loan_incentive_rate: Option<f64>,
+    pub(crate) savings_incentive_rate: Option<f64>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FinancialParametersDto {
@@ -229,7 +240,7 @@ pub(crate) struct LoanPreview {
     pub(crate) annual_rate: f64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SavingsMonthDto {
     pub(crate) member_id: String,
@@ -248,9 +259,14 @@ pub(crate) struct SavingsMonthDto {
     pub(crate) principal_closing: i64,
     pub(crate) mandatory_closing: i64,
     pub(crate) voluntary_closing: i64,
+    /// Ratas Simpanan from January to this month, and its Insentif Simpanan
+    /// (exact and rounded up to the thousand).
+    pub(crate) savings_average: i64,
+    pub(crate) savings_incentive_raw: i64,
+    pub(crate) savings_incentive: i64,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LoanMonthDto {
     pub(crate) loan_id: String,
@@ -266,11 +282,26 @@ pub(crate) struct LoanMonthDto {
     pub(crate) arrears_principal: i64,
     pub(crate) arrears_interest: i64,
     pub(crate) closing_balance: i64,
+    /// Kewajiban s/d bulan depan: arrears plus next month's installment.
+    pub(crate) next_due_principal: i64,
+    pub(crate) next_due_interest: i64,
+    /// False for a paid-off loan whose borrower has another loan running.
+    pub(crate) shown: bool,
+    /// Interest and provisi paid from January to this month, per quarter,
+    /// including those of the borrower's hidden paid-off loans.
+    pub(crate) income_interest: [i64; 4],
+    pub(crate) income_provision: [i64; 4],
+    /// Insentif Pinjaman: 10,1% of the income, exact and rounded up.
+    pub(crate) incentive_raw: i64,
+    pub(crate) incentive: i64,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MonthlyLedgerDto {
+    /// Insentif Pinjaman and Insentif Simpanan rates of the book year (0.101 = 10,1%).
+    pub(crate) loan_incentive_rate: f64,
+    pub(crate) savings_incentive_rate: f64,
     pub(crate) periods: Vec<String>,
     pub(crate) savings: Vec<SavingsMonthDto>,
     pub(crate) loans: Vec<LoanMonthDto>,

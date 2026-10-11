@@ -11,7 +11,8 @@ use crate::{
     contracts::{
         AddMemberInput, AppSnapshot, CashBookDto, CashEntryInput, CompanyDto, CreateLoanInput,
         FinancialParametersDto, LoanPreview, MonthlyLedgerDto, PaymentInput, PreviewLoanInput,
-        ReverseTransactionInput, SavingsTransactionInput, UpdateMemberInput,
+        ReverseTransactionInput, SavingsTransactionInput, SetIncentiveRatesInput,
+        UpdateMemberInput,
     },
     state::AppState,
 };
@@ -126,4 +127,13 @@ pub(crate) async fn get_financial_parameters(
     state: State<'_, AppState>,
 ) -> Result<FinancialParametersDto, String> {
     application::get_financial_parameters(&company_id, &state.db).await
+}
+
+#[tauri::command]
+pub(crate) async fn set_incentive_rates(
+    input: SetIncentiveRatesInput,
+    company_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    application::set_incentive_rates(input, &company_id, &state.db).await
 }

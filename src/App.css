@@ -1,11 +1,11 @@
 :root {
   font-family: "Avenir Next", Inter, "Segoe UI", sans-serif;
-  color: #172321;
+  color: var(--ink);
   background: #f5f7f4;
   font-synthesis: none;
-  --ink: #172321;
-  --muted: #66736f;
-  --soft: #8b9793;
+  --ink: #000000;
+  --muted: #4f5a57;
+  --soft: #6d7874;
   --line: #dde4e0;
   --line-strong: #cbd6d1;
   --surface: #ffffff;
@@ -462,6 +462,9 @@ strong {
   z-index: 2;
 }
 .sheet-table th {
+  /* Fixed-width columns: long titles such as "Total simpanan September 2026"
+     wrap instead of being clipped. */
+  white-space: normal;
   color: #000;
   background: #fff;
   font: 700 11px/1.3 "Avenir Next";
@@ -482,6 +485,15 @@ strong {
 .sheet-table .sheet-sticky {
   position: sticky;
   z-index: 1;
+}
+.sheet-table .sheet-letters th {
+  padding: 3px 10px;
+  color: var(--muted);
+  background: #f1f4f2;
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0;
+  text-align: center;
 }
 .sheet-table th.sheet-sticky {
   z-index: 3;
