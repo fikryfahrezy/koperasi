@@ -1062,8 +1062,10 @@ async function setIncentiveRate(
       [kind === "loan" ? "loanIncentiveRate" : "savingsIncentiveRate"]:
         percent / 100,
     });
+    // Later years without their own rate inherit this one.
     await queryClient.invalidateQueries({
-      queryKey: queryKeys.monthlyLedger(companyId, year),
+      queryKey: ["company", companyId, "monthly-ledger"],
+      predicate: (query) => Number(query.queryKey[3]) >= year,
     });
     notify(`${label} disimpan`, `Tahun ${year}: ${percent}%.`);
     return true;
