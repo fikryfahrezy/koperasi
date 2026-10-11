@@ -12,9 +12,12 @@ import DateInput from "../components/DateInput.vue";
 import PageHeader from "../components/PageHeader.vue";
 import StatusPill from "../components/StatusPill.vue";
 import {
+  currentPeriod,
   formatCurrency,
+  formatLoanLabel,
   formatPeriod,
   formatPreviousPeriod,
+  type Loan,
   SavingsAccountType,
   TransactionDirection,
   useKoperasiStore,
@@ -103,11 +106,10 @@ const savingsBreakdown = computed(() => [
   },
 ]);
 
-// Arrears come from the monthly ledger of the selected year: the current
-// month when it is in that ledger, otherwise its latest month.
+// Arrears run through the current month, even before its transactions are
+// recorded; for an earlier year, through that year's latest month.
+const thisPeriod = currentPeriod();
 const { monthlyLedger } = useMonthlyLedger();
-const today = new Date();
-const thisPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 const arrearsPeriod = computed(() => {
   const periods = monthlyLedger.value.periods.filter(
     (period) => period <= thisPeriod,
@@ -126,11 +128,11 @@ const memberLedgerRows = computed(() => {
 /** Unpaid amount per month, oldest first: the arrears are matched against
  * the latest installments, walking back month by month. Arrears reaching
  * past the selected year are reported as "s/d" the month before it. */
-function unpaidMonths(part: ArrearsPart) {
+function unpaidMonths(part: ArrearsPart, loanList: Loan[]) {
   const byPeriod = new Map<string, number>();
   let earlier = 0;
   let firstPeriod = "";
-  for (const loan of memberLoans.value) {
+  for (const loan of loanList) {
     const rows = memberLedgerRows.value.filter((row) => row.loanId === loan.id);
     const latest = rows.find((row) => row.period === arrearsPeriod.value);
     let remaining =
@@ -161,34 +163,66 @@ function unpaidMonths(part: ArrearsPart) {
   return months;
 }
 
-const loanSummary = computed(() => {
-  // A paid-off loan has no arrears, as in the sheet; otherwise an early
-  // payoff reads as a large "lebih bayar" that hides other loans' arrears.
+const arrearsNote = computed(() =>
+  arrearsPeriod.value ? `Per ${formatPeriod(arrearsPeriod.value)}` : "",
+);
+
+/** Tunggakan pokok and bunga of the given loans. A paid-off loan has no
+ * arrears, as in the sheet; otherwise an early payoff reads as a large
+ * "lebih bayar" that hides other loans' arrears. */
+function arrearsOf(loanList: Loan[], withMonths: boolean) {
+  const ids = new Set(loanList.map((loan) => loan.id));
   const latest = memberLedgerRows.value.filter(
-    (row) => row.period === arrearsPeriod.value && row.closingBalance > 0,
+    (row) =>
+      ids.has(row.loanId) &&
+      row.period === arrearsPeriod.value &&
+      row.closingBalance > 0,
   );
-  const per = arrearsPeriod.value
-    ? `Per ${formatPeriod(arrearsPeriod.value)}`
-    : "";
-  const arrears = (part: ArrearsPart) => {
-    const amount = latest.reduce((sum, row) => sum + row[`arrears${part}`], 0);
+  const part = (label: string, key: ArrearsPart) => {
+    const amount = latest.reduce((sum, row) => sum + row[`arrears${key}`], 0);
     return {
+      label,
       amount,
-      note: amount < 0 ? [per, "Lebih bayar"].filter(Boolean).join(" · ") : per,
-      months: amount > 0 ? unpaidMonths(part) : [],
+      note:
+        amount < 0
+          ? [arrearsNote.value, "Lebih bayar"].filter(Boolean).join(" · ")
+          : arrearsNote.value,
+      months: withMonths && amount > 0 ? unpaidMonths(key, loanList) : [],
     };
   };
   return [
-    {
-      label: "Saldo pinjaman",
-      amount: memberLoans.value.reduce((sum, loan) => sum + loan.balance, 0),
-      note: "",
-      months: [],
-    },
-    { label: "Tunggakan pokok", ...arrears("Principal") },
-    { label: "Tunggakan bunga", ...arrears("Interest") },
+    part("Tunggakan pokok", "Principal"),
+    part("Tunggakan bunga", "Interest"),
   ];
-});
+}
+
+// Totals on top; each loan below lists its own arrears per month.
+const loanSummary = computed(() => [
+  {
+    label: "Total saldo pinjaman",
+    amount: memberLoans.value.reduce((sum, loan) => sum + loan.balance, 0),
+    note: "",
+    months: [],
+  },
+  ...arrearsOf(memberLoans.value, false).map((item) => ({
+    ...item,
+    label: `Total ${item.label.toLocaleLowerCase("id-ID")}`,
+  })),
+]);
+// Totals only add something when more than one loan is still running.
+const showLoanTotals = computed(
+  () => memberLoans.value.filter((loan) => loan.balance > 0).length > 1,
+);
+const loanDetails = computed(() =>
+  memberLoans.value.map((loan) => {
+    const arrears = arrearsOf([loan], true);
+    return {
+      loan,
+      arrears,
+      behind: arrears.some((item) => item.amount > 0),
+    };
+  }),
+);
 
 // "Aktivitas terbaru" is hidden for now.
 const showRecentActivity = false;
@@ -286,7 +320,7 @@ const memberTransactions = computed(() => {
           <Landmark :size="17" />
           <h3>Pinjaman</h3>
         </div>
-        <div v-if="memberLoans.length" class="loan-summary">
+        <div v-if="showLoanTotals" class="loan-summary">
           <div v-for="item in loanSummary" :key="item.label">
             <div class="loan-summary__row">
               <div>
@@ -303,23 +337,47 @@ const memberTransactions = computed(() => {
             </ul>
           </div>
         </div>
-        <div v-if="memberLoans.length" class="member-detail__list">
-          <div v-for="loan in memberLoans" :key="loan.id">
-            <div>
-              <strong>{{ loan.id }}</strong>
-              <small
-                >{{ loan.loanType ? `${loan.loanType} · ` : ""
-                }}{{ loan.interestType }} · {{ loan.tenor }} bulan</small
-              >
+        <div v-if="memberLoans.length" class="loan-details">
+          <div v-for="item in loanDetails" :key="item.loan.id">
+            <div class="loan-details__head">
+              <div>
+                <strong>{{ formatLoanLabel(item.loan) }}</strong>
+                <small
+                  >{{ item.loan.tenor }} bulan · jatuh tempo
+                  {{ item.loan.dueDate }}</small
+                >
+              </div>
+              <div class="member-detail__list-value">
+                <strong>{{ formatCurrency(item.loan.balance) }}</strong>
+                <StatusPill
+                  v-if="item.loan.balance < 0"
+                  label="Lebih bayar"
+                  tone="warning"
+                />
+                <StatusPill v-else-if="item.loan.balance === 0" label="Lunas" />
+                <StatusPill
+                  v-else-if="item.behind"
+                  label="Menunggak"
+                  tone="warning"
+                />
+              </div>
             </div>
-            <div class="member-detail__list-value">
-              <strong>{{ formatCurrency(loan.balance) }}</strong>
-              <StatusPill
-                v-if="loan.balance < 0"
-                label="Lebih bayar"
-                tone="warning"
-              />
-              <StatusPill v-else-if="loan.balance === 0" label="Lunas" />
+            <div v-if="item.loan.balance > 0" class="loan-summary">
+              <div v-for="part in item.arrears" :key="part.label">
+                <div class="loan-summary__row">
+                  <div>
+                    <span>{{ part.label }}</span>
+                    <small v-if="part.note">{{ part.note }}</small>
+                  </div>
+                  <strong>{{ formatCurrency(part.amount) }}</strong>
+                </div>
+                <ul v-if="part.months.length" class="loan-summary__months">
+                  <li v-for="month in part.months" :key="month.label">
+                    <span>{{ month.label }}</span>
+                    <span>{{ formatCurrency(month.amount) }}</span>
+                  </li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>
@@ -451,6 +509,33 @@ const memberTransactions = computed(() => {
   border-left: 2px solid var(--line);
   list-style: none;
   font-size: 10.5px;
+}
+.loan-details {
+  border: 1px solid var(--line);
+}
+.loan-details > div + div {
+  border-top: 1px solid var(--line);
+}
+.loan-details__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px;
+}
+.loan-details__head > div:first-child {
+  flex: 1;
+  display: grid;
+  gap: 3px;
+}
+.loan-details__head strong {
+  font-size: 10.5px;
+}
+.loan-details__head small {
+  color: var(--soft);
+  font-size: 9.5px;
+}
+.loan-details .loan-summary {
+  margin: 0 13px 12px;
 }
 .member-detail__breakdown {
   display: grid;
