@@ -150,7 +150,10 @@ pub(crate) async fn post_payment(
     }
     let channel = Channel::try_from(input.channel.as_str())?;
     validate_business_date(&input.business_date)?;
-    if !input.loan_id.trim().is_empty() {
+    // A loan without a member is a Non Anggota installment; with a member, the
+    // principal and interest go to that loan and the savings to the member.
+    let loan_id = input.loan_id.trim();
+    if !loan_id.is_empty() && input.member_id.trim().is_empty() {
         return post_loan_payment(input, channel, company_id, pool).await;
     }
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
@@ -159,15 +162,18 @@ pub(crate) async fn post_payment(
     let reference = reference_or(&input.reference, format!("KBS/RCPT/{id}"));
     ensure_reference_unused(&mut db, company_id, &reference).await?;
 
-    // Principal is allocated to the oldest outstanding loan first.
+    // Principal is allocated to the chosen loan, or else to the oldest
+    // outstanding loan first.
     let mut components = Vec::new();
     let mut remaining_principal = input.principal;
     let mut first_loan: Option<String> = None;
     let loan_ids: Vec<String> = sqlx::query(
-        "SELECT l.id FROM loans l JOIN loan_balances b ON b.company_id = l.company_id AND b.loan_id = l.id WHERE l.company_id = ? AND l.member_id = ? AND b.balance > 0 ORDER BY l.realization_date, l.id",
+        "SELECT l.id FROM loans l JOIN loan_balances b ON b.company_id = l.company_id AND b.loan_id = l.id WHERE l.company_id = ? AND l.member_id = ? AND b.balance > 0 AND (? = '' OR l.id = ?) ORDER BY l.realization_date, l.id",
     )
     .bind(company_id)
     .bind(&input.member_id)
+    .bind(loan_id)
+    .bind(loan_id)
     .fetch_all(&mut *db)
     .await
     .map_err(|error| error.to_string())?

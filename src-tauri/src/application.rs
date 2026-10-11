@@ -573,6 +573,18 @@ mod tests {
                 "Pembayaran pokok melebihi saldo pinjaman berjalan."
             );
 
+            // A member's payment can name the loan it pays.
+            let loan_id = loan_snapshot.loans[0].id.clone();
+            let mut targeted = payment(50_000, "TARGETED", Channel::NonCash.as_str());
+            targeted.loan_id = loan_id.clone();
+            (targeted.interest, targeted.wajib, targeted.voluntary) = (0, 0, 0);
+            let paid = post_payment(targeted, "testing", &pool).await.unwrap();
+            let loan = paid.loans.iter().find(|loan| loan.id == loan_id).unwrap();
+            assert_eq!(loan.balance, 950_000);
+            let mut other = payment(50_000, "OTHER-LOAN", Channel::NonCash.as_str());
+            other.loan_id = "not-this-member".into();
+            assert!(post_payment(other, "testing", &pool).await.is_err());
+
             let expense = post_cash_entry(
                 CashEntryInput {
                     direction: TransactionDirection::Out.as_str().into(),

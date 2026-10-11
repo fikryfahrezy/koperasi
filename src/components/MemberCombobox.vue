@@ -39,6 +39,10 @@ const query = ref("");
 const activeIndex = ref(-1);
 const popupStyle = ref<Record<string, string>>({});
 
+// The code column is left out when no option has one (e.g. Non Anggota loans).
+const hasCodes = computed(() =>
+  props.options.some((option) => option.code !== undefined),
+);
 const selected = computed(() =>
   props.options.find((option) => option.value === props.modelValue),
 );
@@ -261,7 +265,7 @@ onBeforeUnmount(closeList);
               @mousemove="activeIndex = item.index"
               @click="choose(filtered[item.index])"
             >
-              <span class="combobox__code">{{
+              <span v-if="hasCodes" class="combobox__code">{{
                 filtered[item.index].code || "—"
               }}</span>
               <span class="combobox__label">{{
