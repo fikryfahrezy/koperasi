@@ -1,16 +1,127 @@
 //! Application use cases for members.
 
-use sqlx::SqlitePool;
+use sqlx::{Row, SqliteConnection, SqlitePool};
 
 use super::posting::{append, audit, Component, Entry, APP_ACTOR};
 use super::read_model::get_app_snapshot;
 use crate::{
-    contracts::{AddMemberInput, AppSnapshot},
+    contracts::{AddMemberInput, AppSnapshot, UpdateMemberInput},
     domain::{
         timestamp_id, validate_business_date, AuditAction, AuditEntityType, Channel, ComponentType,
         SavingsAccountType, TransactionDirection,
     },
 };
+
+/// Validates an ID Anggota: required and not used by another member of the company.
+async fn check_member_number(
+    db: &mut SqliteConnection,
+    company_id: &str,
+    member_number: &str,
+    member_id: Option<&str>,
+) -> Result<(), String> {
+    if member_number.is_empty() {
+        return Err("ID anggota wajib diisi.".into());
+    }
+    let owner: Option<String> = sqlx::query_scalar(
+        "SELECT name FROM members WHERE company_id = ? AND member_number = ? COLLATE NOCASE AND id <> ?",
+    )
+    .bind(company_id)
+    .bind(member_number)
+    .bind(member_id.unwrap_or(""))
+    .fetch_optional(&mut *db)
+    .await
+    .map_err(|error| error.to_string())?;
+    match owner {
+        Some(name) => Err(format!(
+            "ID anggota {member_number} sudah dipakai oleh {name}."
+        )),
+        None => Ok(()),
+    }
+}
+
+pub(crate) async fn update_member(
+    input: UpdateMemberInput,
+    company_id: &str,
+    pool: &SqlitePool,
+) -> Result<AppSnapshot, String> {
+    let name = input.name.trim();
+    if name.is_empty() {
+        return Err("Nama anggota wajib diisi.".into());
+    }
+    let member_number = input.member_number.trim();
+    let mut db = pool.begin().await.map_err(|error| error.to_string())?;
+    let previous = sqlx::query(
+        "SELECT name, COALESCE(member_number, '') member_number, joined_at FROM members WHERE company_id = ? AND id = ?",
+    )
+    .bind(company_id)
+    .bind(&input.member_id)
+    .fetch_optional(&mut *db)
+    .await
+    .map_err(|error| error.to_string())?
+    .ok_or("Anggota tidak ditemukan.")?;
+    let previous_name: String = previous
+        .try_get("name")
+        .map_err(|error| error.to_string())?;
+    let previous_number: String = previous
+        .try_get("member_number")
+        .map_err(|error| error.to_string())?;
+    let previous_joined_at: String = previous
+        .try_get("joined_at")
+        .map_err(|error| error.to_string())?;
+    let joined_at = match input.joined_at.trim() {
+        "" => previous_joined_at.as_str(),
+        value => {
+            validate_business_date(value)?;
+            value
+        }
+    };
+    check_member_number(&mut db, company_id, member_number, Some(&input.member_id)).await?;
+    if previous_name == name && previous_number == member_number && previous_joined_at == joined_at
+    {
+        db.commit().await.map_err(|error| error.to_string())?;
+        return get_app_snapshot(company_id, pool).await;
+    }
+    sqlx::query(
+        "UPDATE members SET name = ?, member_number = ?, joined_at = ? WHERE company_id = ? AND id = ?",
+    )
+        .bind(name)
+        .bind(member_number)
+        .bind(joined_at)
+        .bind(company_id)
+        .bind(&input.member_id)
+        .execute(&mut *db)
+        .await
+        .map_err(|error| error.to_string())?;
+    // Loans show the borrower's current name; posted transactions keep the name
+    // they were recorded under.
+    if previous_name != name {
+        sqlx::query("UPDATE loans SET member_name = ? WHERE company_id = ? AND member_id = ?")
+            .bind(name)
+            .bind(company_id)
+            .bind(&input.member_id)
+            .execute(&mut *db)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    audit(
+        &mut db,
+        company_id,
+        AuditEntityType::Member,
+        &input.member_id,
+        AuditAction::Updated,
+        serde_json::json!({
+            "name": name,
+            "previousName": previous_name,
+            "memberNumber": member_number,
+            "previousMemberNumber": previous_number,
+            "joinedAt": joined_at,
+            "previousJoinedAt": previous_joined_at,
+        }),
+    )
+    .await?;
+    db.commit().await.map_err(|error| error.to_string())?;
+    get_app_snapshot(company_id, pool).await
+}
 
 pub(crate) async fn add_member(
     input: AddMemberInput,
@@ -48,7 +159,9 @@ pub(crate) async fn add_member(
     }
 
     validate_business_date(&input.business_date)?;
+    let member_number = input.member_number.trim();
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
+    check_member_number(&mut db, company_id, member_number, None).await?;
     let next: i64 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(CAST(SUBSTR(id, INSTR(id, '-M') + 2) AS INTEGER)), 0) + 1 FROM members WHERE company_id = ?",
     )
@@ -58,9 +171,12 @@ pub(crate) async fn add_member(
     .map_err(|error| error.to_string())?;
     let id = format!("{company_id}-M{next:03}");
     let name = input.name.trim();
-    sqlx::query("INSERT INTO members (id, company_id, name, joined_at) VALUES (?, ?, ?, ?)")
+    sqlx::query(
+        "INSERT INTO members (id, company_id, member_number, name, joined_at) VALUES (?, ?, ?, ?, ?)",
+    )
         .bind(&id)
         .bind(company_id)
+        .bind(member_number)
         .bind(name)
         .bind(input.joined_at.trim())
         .execute(&mut *db)
@@ -133,7 +249,7 @@ pub(crate) async fn add_member(
         AuditEntityType::Member,
         &id,
         AuditAction::Created,
-        serde_json::json!({"name": name}),
+        serde_json::json!({"name": name, "memberNumber": member_number}),
     )
     .await?;
     db.commit().await.map_err(|error| error.to_string())?;

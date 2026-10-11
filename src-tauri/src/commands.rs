@@ -11,7 +11,7 @@ use crate::{
     contracts::{
         AddMemberInput, AppSnapshot, CashBookDto, CashEntryInput, CompanyDto, CreateLoanInput,
         FinancialParametersDto, LoanPreview, MonthlyLedgerDto, PaymentInput, PreviewLoanInput,
-        ReverseTransactionInput, SavingsTransactionInput,
+        ReverseTransactionInput, SavingsTransactionInput, UpdateMemberInput,
     },
     state::AppState,
 };
@@ -64,6 +64,15 @@ pub(crate) async fn add_member(
     state: State<'_, AppState>,
 ) -> Result<AppSnapshot, String> {
     application::add_member(input, &company_id, &state.db).await
+}
+
+#[tauri::command]
+pub(crate) async fn update_member(
+    input: UpdateMemberInput,
+    company_id: String,
+    state: State<'_, AppState>,
+) -> Result<AppSnapshot, String> {
+    application::update_member(input, &company_id, &state.db).await
 }
 
 #[tauri::command]

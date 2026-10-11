@@ -121,8 +121,18 @@ pub(crate) async fn post_cash_entry(
     if input.amount <= 0 {
         return Err("Nominal transaksi harus lebih dari nol.".into());
     }
+    let direction = TransactionDirection::try_from(input.direction.as_str())?;
+    let channel = Channel::try_from(input.channel.as_str())?;
     // Optional Buku Kas category column; rows without one are plain cash movements.
+    // Kas Buku Tabungan movements have no category.
     let (component_type, label) = match input.category.trim() {
+        "" if channel == Channel::SavingsBook => match direction {
+            TransactionDirection::In => (ComponentType::SavingsBookIn, "Tabungan masuk"),
+            TransactionDirection::Out => (ComponentType::SavingsBookOut, "Tabungan keluar"),
+        },
+        _ if channel == Channel::SavingsBook => {
+            return Err("Mutasi Kas Buku Tabungan tidak memakai kategori.".into())
+        }
         "" => (ComponentType::Cash, "Mutasi kas"),
         code => {
             let component_type = ComponentType::try_from(code)?;
@@ -133,8 +143,16 @@ pub(crate) async fn post_cash_entry(
                 .ok_or("Kategori Buku Kas tidak valid.")?
         }
     };
-    let direction = TransactionDirection::try_from(input.direction.as_str())?;
-    let channel = Channel::try_from(input.channel.as_str())?;
+    match (component_type, direction) {
+        (
+            ComponentType::CashTopUp | ComponentType::CashTopUpFromSavingsBook,
+            TransactionDirection::Out,
+        ) => return Err("Tambahan Kas hanya untuk kas masuk.".into()),
+        (ComponentType::TransferToSavingsBook, TransactionDirection::In) => {
+            return Err("Transfer ke Tabungan hanya untuk kas keluar.".into())
+        }
+        _ => {}
+    }
     validate_business_date(&input.business_date)?;
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
     let id = timestamp_id("CASH");

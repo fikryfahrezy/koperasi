@@ -54,6 +54,8 @@ export default {
     memberAddedMessage:
       "{name} dan tiga rekening simpanannya tersimpan di SQLite.",
     memberSaveFailed: "Anggota gagal disimpan",
+    memberSaved: "Data anggota diperbarui",
+    memberSavedMessage: "{name} kini memakai ID anggota {memberNumber}.",
     loanSaveFailed: "Pinjaman gagal disimpan",
     loanDisbursed: "Pinjaman berhasil dicairkan",
     loanDisbursedMessage:

@@ -22,3 +22,47 @@ const { toasts } = useKoperasiStore();
     </article>
   </div>
 </template>
+
+<style scoped>
+.toast-stack {
+  position: fixed;
+  z-index: 200;
+  right: 24px;
+  bottom: 24px;
+  width: min(380px, calc(100vw - 32px));
+  display: grid;
+  gap: 9px;
+}
+.toast-card {
+  display: grid;
+  grid-template-columns: 21px 1fr;
+  gap: 11px;
+  padding: 14px 15px;
+  border: 1px solid #b6ccd8;
+  border-radius: 11px;
+  color: var(--green);
+  background: #fff;
+}
+.toast-card > div {
+  display: grid;
+  gap: 3px;
+}
+.toast-card strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+.toast-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+.toast-card--warning {
+  color: var(--amber);
+  border-color: #ebd0a6;
+}
+.toast-card--info {
+  color: var(--blue);
+  border-color: #c7d6f7;
+}
+</style>
