@@ -187,24 +187,42 @@ watch([() => otherForm.value.category, cashDirection], () => {
 const isNonMemberPayment = computed(
   () => paymentForm.value.loanGroup === LoanGroup.NonMember,
 );
-// Non Anggota borrowers have no member, so their payment picks the loan itself.
-const nonMemberLoanOptions = computed(() =>
+// A payment picks the loan it pays: for Anggota the list shows only members
+// with a running loan, and the member follows from the loan.
+const memberNumbers = computed(
+  () => new Map(members.map((member) => [member.id, member.memberNumber])),
+);
+const paymentLoanOptions = computed(() =>
   loans
     .filter(
-      (loan) => loan.loanGroup === LoanGroup.NonMember && loan.balance > 0,
+      (loan) =>
+        loan.loanGroup === paymentForm.value.loanGroup &&
+        loan.balance > 0 &&
+        (isNonMemberPayment.value || loan.memberId),
     )
     .map((loan) => ({
       value: loan.id,
       label: `${loan.memberName} · ${formatCurrency(loan.plafond)} · ${loan.realizationDate}`,
-    })),
+      code: isNonMemberPayment.value
+        ? undefined
+        : (memberNumbers.value.get(loan.memberId) ?? ""),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label, "id-ID")),
+);
+watch(
+  () => paymentForm.value.loanGroup,
+  () => {
+    if (
+      !paymentLoanOptions.value.some(
+        (option) => option.value === paymentForm.value.loanId,
+      )
+    )
+      paymentForm.value.loanId = "";
+  },
 );
 // The outstanding loan balance helps fill in the installment.
 const paymentLoans = computed(() =>
-  loans.filter((loan) =>
-    isNonMemberPayment.value
-      ? loan.id === paymentForm.value.loanId
-      : loan.memberId === paymentForm.value.memberId && loan.balance > 0,
-  ),
+  loans.filter((loan) => loan.id === paymentForm.value.loanId),
 );
 const paymentLoanBalance = computed(() =>
   paymentLoans.value.reduce((sum, loan) => sum + loan.balance, 0),
@@ -348,14 +366,12 @@ async function submit() {
     let saved = false;
     if (category.value === Category.Payment) {
       const nonMember = isNonMemberPayment.value;
-      const borrowerMissing = nonMember
-        ? !paymentForm.value.loanId
-        : !paymentForm.value.memberId;
-      if (borrowerMissing || paymentTotal.value <= 0) return;
+      const loan = paymentLoans.value[0];
+      if (!loan || paymentTotal.value <= 0) return;
       saved = await postPayment(
         {
-          memberId: nonMember ? "" : paymentForm.value.memberId,
-          loanId: nonMember ? paymentForm.value.loanId : "",
+          memberId: nonMember ? "" : loan.memberId,
+          loanId: loan.id,
           principal: paymentForm.value.principal || 0,
           interest: paymentForm.value.interest || 0,
           wajib: nonMember ? 0 : paymentForm.value.wajib || 0,
@@ -521,33 +537,27 @@ defineExpose({ open: openModal });
         </label>
         <label v-if="isNonMemberPayment" class="field">
           <span>Peminjam</span>
-          <UiSelect
+          <MemberCombobox
             v-model="paymentForm.loanId"
-            :options="nonMemberLoanOptions"
+            :options="paymentLoanOptions"
             aria-label="Peminjam"
-            placeholder="Pilih pinjaman"
+            placeholder="Cari nama peminjam"
             required
           />
         </label>
         <label v-else class="field">
           <span>Anggota</span>
           <MemberCombobox
-            v-model="paymentForm.memberId"
-            :options="memberOptions"
+            v-model="paymentForm.loanId"
+            :options="paymentLoanOptions"
             aria-label="Anggota"
             placeholder="Cari nama atau ID anggota"
+            empty-text="Tidak ada anggota dengan pinjaman berjalan yang cocok."
             required
           />
         </label>
-        <p
-          v-if="isNonMemberPayment ? paymentForm.loanId : paymentForm.memberId"
-          class="field-hint"
-        >
-          {{
-            paymentLoans.length
-              ? `Sisa pokok pinjaman ${formatCurrency(paymentLoanBalance)} (${paymentLoans.length} pinjaman)`
-              : "Tidak ada pinjaman berjalan."
-          }}
+        <p v-if="paymentLoans.length" class="field-hint">
+          Sisa pokok pinjaman {{ formatCurrency(paymentLoanBalance) }}
         </p>
         <div class="field-row">
           <label class="field">
