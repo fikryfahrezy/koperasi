@@ -20,8 +20,8 @@ export const queryKeys = {
   snapshot: (companyId: string) => ["company", companyId, "snapshot"] as const,
   parameters: (companyId: string) =>
     ["company", companyId, "parameters"] as const,
-  monthlyLedger: (companyId: string, year: number) =>
-    ["company", companyId, "monthly-ledger", year] as const,
+  monthlyLedger: (companyId: string, year: number, through = "") =>
+    ["company", companyId, "monthly-ledger", year, through] as const,
   cashBook: (companyId: string, year: number, channel: string) =>
     ["company", companyId, "cash-book", year, channel] as const,
 };

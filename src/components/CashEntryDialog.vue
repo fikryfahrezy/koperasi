@@ -20,6 +20,7 @@ import {
   cashCategories,
   Channel,
   formatCurrency,
+  formatLoanLabel,
   InterestType,
   LoanGroup,
   LoanType,
@@ -202,7 +203,7 @@ const paymentLoanOptions = computed(() =>
     )
     .map((loan) => ({
       value: loan.id,
-      label: `${loan.memberName} · ${formatCurrency(loan.plafond)} · ${loan.realizationDate}`,
+      label: `${loan.memberName} · ${formatLoanLabel(loan)}`,
       code: isNonMemberPayment.value
         ? undefined
         : (memberNumbers.value.get(loan.memberId) ?? ""),

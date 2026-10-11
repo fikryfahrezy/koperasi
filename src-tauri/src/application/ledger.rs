@@ -159,9 +159,12 @@ fn track_first(firsts: &mut HashMap<String, String>, id: &str, period: &str) {
     }
 }
 
+/// `through` (`YYYY-MM`) extends the months past the last recorded one, so
+/// installments falling due since then count toward arrears.
 pub(crate) async fn get_monthly_ledger(
     company_id: &str,
     year: i32,
+    through: Option<&str>,
     pool: &SqlitePool,
 ) -> Result<MonthlyLedgerDto, String> {
     let year_prefix = format!("{year:04}-");
@@ -259,6 +262,10 @@ pub(crate) async fn get_monthly_ledger(
             savings: Vec::new(),
             loans: Vec::new(),
         });
+    };
+    let last = match through {
+        Some(through) if through > last.as_str() => through.to_string(),
+        _ => last,
     };
     let timeline = period_range(&first, &last);
     let periods: Vec<String> = timeline
@@ -565,7 +572,9 @@ mod tests {
                 }
             }
 
-            let ledger = get_monthly_ledger("default", 2026, &pool).await.unwrap();
+            let ledger = get_monthly_ledger("default", 2026, None, &pool)
+                .await
+                .unwrap();
             let opening = &ledger.loans[0];
             assert_eq!(opening.opening_balance, 1_000_000);
             assert_eq!(opening.transaction_date, "");
@@ -593,7 +602,7 @@ mod tests {
             // Unknown types must fail instead of silently disappearing from the ledger.
             sqlx::query("INSERT INTO transaction_components (company_id, transaction_id, component_type, label, amount, loan_id) VALUES ('default', 'payment', 'UNKNOWN_COMPONENT', 'Invalid import', 1, 'imported')")
                 .execute(&pool).await.unwrap();
-            let error = get_monthly_ledger("default", 2026, &pool)
+            let error = get_monthly_ledger("default", 2026, None, &pool)
                 .await
                 .err()
                 .unwrap();
