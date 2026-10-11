@@ -1,6 +1,7 @@
 //! Framework-independent application-service facade.
 
 mod ledger;
+mod ledger_report;
 mod loans;
 mod members;
 mod parameters;
@@ -12,7 +13,7 @@ mod transactions;
 pub(crate) use ledger::get_monthly_ledger;
 pub(crate) use loans::{create_loan, preview_loan};
 pub(crate) use members::{add_member, update_member};
-pub(crate) use parameters::get_financial_parameters;
+pub(crate) use parameters::{get_financial_parameters, set_incentive_rates};
 pub(crate) use read_model::{get_app_snapshot, get_cash_book};
 pub(crate) use savings::{post_payment, post_savings_transaction};
 pub(crate) use transactions::{post_cash_entry, reverse_transaction};

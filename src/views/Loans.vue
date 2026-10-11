@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, watch } from "vue";
-import { CalendarX2, Search } from "lucide-vue-next";
+import { computed, nextTick, ref, watch } from "vue";
+import { CalendarX2, Percent, Search } from "lucide-vue-next";
 import { useDebouncedRef } from "../composables/useDebouncedRef";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import { useVirtualSheetColumns } from "../composables/useVirtualSheetColumns";
 import { useVirtualSheet } from "../composables/useVirtualSheet";
+import IncentiveRatesDialog from "../components/IncentiveRatesDialog.vue";
 import PageHeader from "../components/PageHeader.vue";
 import UiSelect from "../components/UiSelect.vue";
 import {
@@ -18,8 +19,16 @@ import {
   useKoperasiStore,
   useMonthlyLedger,
 } from "../store/koperasi";
+import {
+  loanTailLetters,
+  loanLeadingLetters,
+  loanMonthLetters,
+} from "../sheet-columns";
 
 const pageState = useWorkspacePageState("/loans");
+const formatRate = (rate: number) =>
+  `${(rate * 100).toLocaleString("id-ID", { maximumFractionDigits: 2 })}%`;
+const ratesOpen = ref(false);
 
 const { loans, members, selectedYear, refresh } = useKoperasiStore();
 const { monthlyLedger, monthlyLedgerLoading } = useMonthlyLedger();
@@ -58,7 +67,7 @@ const memberNumbers = computed(
 // Spreadsheet rows follow loan numbers (L001, L002, ...). Derived columns:
 // opening arrears = closing arrears - this month's payment obligation + amount paid;
 // payment obligation through this month = opening arrears + this month's payment obligation.
-const rowsForPeriod = (selectedPeriod: string) =>
+const monthRowsForPeriod = (selectedPeriod: string) =>
   monthlyLedger.value.loans
     .filter((row) => row.period === selectedPeriod)
     .map((row) => ({ ...row, loan: loanById.value.get(row.loanId) }))
@@ -85,6 +94,64 @@ const rowsForPeriod = (selectedPeriod: string) =>
           row.scheduledInterest,
         cashIn: row.principalPaid + row.interestPaid + row.provision,
         arrearsTotal: row.arrearsPrincipal + row.arrearsInterest,
+      };
+    });
+
+// Jumlah pemasukan per triwulan and Insentif Pinjaman (kolom EJ–EW) come from
+// the backend, which also hides paid-off loans whose borrower has another loan
+// running and moves their income to that loan (rules 1.10).
+const quarterLabels = [
+  "Jan s/d Mar",
+  "Apr s/d Jun",
+  "Jul s/d Sep",
+  "Okt s/d Des",
+] as const;
+const incomeKeys = [
+  ...quarterLabels.flatMap(
+    (_, quarter) =>
+      [
+        `q${quarter + 1}Interest`,
+        `q${quarter + 1}Provision`,
+        `q${quarter + 1}Total`,
+      ] as const,
+  ),
+  "incentiveRaw",
+  "incentive",
+] as const;
+type IncomeKey = (typeof incomeKeys)[number];
+// Kewajiban s/d bulan depan (kolom EE–EG after September): arrears plus next
+// month's installment.
+const nextDueKeys = [
+  "nextDuePrincipal",
+  "nextDueInterest",
+  "nextDueTotal",
+] as const;
+// Kewajiban s/d bulan depan, Rekomendasi, then the Pemasukan columns.
+const tailColumnCount = nextDueKeys.length + 1 + incomeKeys.length;
+const nextPeriod = (period: string) => {
+  const [year, month] = period.split("-").map(Number);
+  return month === 12
+    ? `${year + 1}-01`
+    : `${year}-${String(month + 1).padStart(2, "0")}`;
+};
+
+const rowsForPeriod = (selectedPeriod: string) =>
+  monthRowsForPeriod(selectedPeriod)
+    .filter((row) => row.shown)
+    .map((row) => {
+      const income = {} as Record<IncomeKey, number>;
+      row.incomeInterest.forEach((amount, quarter) => {
+        const provision = row.incomeProvision[quarter] ?? 0;
+        income[`q${quarter + 1}Interest` as IncomeKey] = amount;
+        income[`q${quarter + 1}Provision` as IncomeKey] = provision;
+        income[`q${quarter + 1}Total` as IncomeKey] = amount + provision;
+      });
+      income.incentiveRaw = row.incentiveRaw;
+      income.incentive = row.incentive;
+      return {
+        ...row,
+        ...income,
+        nextDueTotal: row.nextDuePrincipal + row.nextDueInterest,
       };
     });
 type MonthRow = ReturnType<typeof rowsForPeriod>[number];
@@ -119,13 +186,17 @@ type TotalKey =
   | "plafond"
   | (typeof beforeMutation)[number]
   | (typeof mutation)[number]
-  | (typeof afterMutation)[number];
+  | (typeof afterMutation)[number]
+  | IncomeKey
+  | (typeof nextDueKeys)[number];
 function sumRows(rows: MonthRow[]) {
   const keys: TotalKey[] = [
     "plafond",
     ...beforeMutation,
     ...mutation,
     ...afterMutation,
+    ...incomeKeys,
+    ...nextDueKeys,
   ];
   const sum = Object.fromEntries(keys.map((key) => [key, 0])) as Record<
     TotalKey,
@@ -186,8 +257,23 @@ const sections = computed(() => {
 const plafondTotal = computed(() =>
   sections.value.reduce((sum, section) => sum + section.totals.plafond, 0),
 );
+// The month groups, then one "Pemasukan" group as of the last month shown
+// (JUMLAH PEMASUKAN per triwulan and Insentif Pinjaman in the sheet).
+const columnGroups = computed(() => {
+  const months = periodTables.value.map((table) => ({
+    ...table,
+    kind: "month" as const,
+  }));
+  const last = periodTables.value[periodTables.value.length - 1];
+  return last
+    ? [...months, { ...last, kind: "tail" as const, period: "tail" }]
+    : months;
+});
+const incomePeriod = computed(
+  () => periodTables.value[periodTables.value.length - 1]?.period ?? "",
+);
 const sectionTotals = (
-  table: (typeof periodTables.value)[number],
+  table: (typeof columnGroups.value)[number],
   group: LoanGroup,
 ) => table.sections.find((section) => section.group === group)!.totals;
 
@@ -198,7 +284,10 @@ const monthlyRate = (loan: Loan) =>
 const monthColumnCount =
   beforeMutation.length + 1 + mutation.length + afterMutation.length;
 const totalColumnCount = computed(
-  () => 10 + monthColumnCount * periodTables.value.length,
+  () =>
+    10 +
+    monthColumnCount * periodTables.value.length +
+    (periodTables.value.length ? tailColumnCount : 0),
 );
 const totalColumns = (key: string) =>
   key === "openingBalance" || key === "closingBalance";
@@ -251,8 +340,8 @@ const {
   totalWidth,
   scrollToColumn,
 } = useVirtualSheetColumns(
-  periodTables,
-  () => monthColumnCount,
+  columnGroups,
+  (group) => (group.kind === "month" ? monthColumnCount : tailColumnCount),
   [56, 240, 120, 80, 80, 80, 100, 120, 120, 90],
   scroller,
   pageState.active,
@@ -302,6 +391,14 @@ const navigation = computed(() => ({
           aria-label="Kelompok pinjaman"
           variant="toolbar"
         />
+        <button
+          v-if="monthlyLedger.periods.length"
+          class="button button--secondary"
+          type="button"
+          @click="ratesOpen = true"
+        >
+          <Percent :size="16" /> Insentif {{ selectedYear }}
+        </button>
       </template>
     </PageHeader>
     <section
@@ -329,7 +426,7 @@ const navigation = computed(() => ({
             width: `${totalWidth}px`,
           }"
           :aria-colcount="totalColumnCount"
-          :aria-rowcount="sheetRows.length + 5"
+          :aria-rowcount="sheetRows.length + 6"
         >
           <colgroup>
             <col
@@ -339,6 +436,42 @@ const navigation = computed(() => ({
             />
           </colgroup>
           <thead>
+            <tr class="sheet-letters">
+              <th
+                v-for="(letter, index) in loanLeadingLetters"
+                :key="index"
+                :class="{
+                  'sheet-sticky': index < 2,
+                  'sheet-no': index === 0,
+                  'sheet-name': index === 1,
+                }"
+              >
+                {{ letter }}
+              </th>
+              <th
+                v-if="leftColumns"
+                class="sheet-column-spacer"
+                aria-hidden="true"
+              ></th>
+              <template
+                v-for="{ period, kind } in renderedPeriodTables"
+                :key="period"
+              >
+                <th
+                  v-for="(letter, index) in kind === 'month'
+                    ? loanMonthLetters(period)
+                    : loanTailLetters(nextPeriod(incomePeriod))"
+                  :key="index"
+                >
+                  {{ letter }}
+                </th>
+              </template>
+              <th
+                v-if="rightColumns"
+                class="sheet-column-spacer"
+                aria-hidden="true"
+              ></th>
+            </tr>
             <tr>
               <th rowspan="4" class="sheet-sticky sheet-no">No</th>
               <th rowspan="4" class="sheet-sticky sheet-name">Nama</th>
@@ -356,16 +489,26 @@ const navigation = computed(() => ({
                 aria-hidden="true"
               ></th>
               <template
-                v-for="{ period } in renderedPeriodTables"
+                v-for="{ period, kind } in renderedPeriodTables"
                 :key="period"
               >
                 <th
+                  v-if="kind === 'month'"
                   :colspan="monthColumnCount"
                   class="sheet-group"
                   :data-period="period"
                 >
                   {{ formatPeriod(period) }}
                 </th>
+                <template v-else>
+                  <th colspan="3" rowspan="3" class="sheet-group">
+                    Kewajiban s/d {{ formatPeriod(nextPeriod(incomePeriod)) }}
+                  </th>
+                  <th rowspan="4">Rekomendasi</th>
+                  <th :colspan="incomeKeys.length" class="sheet-group">
+                    Pemasukan s/d {{ formatPeriod(incomePeriod) }}
+                  </th>
+                </template>
               </template>
               <th
                 v-if="rightColumns"
@@ -376,61 +519,100 @@ const navigation = computed(() => ({
             </tr>
             <tr>
               <template
-                v-for="{ period } in renderedPeriodTables"
+                v-for="{ period, kind } in renderedPeriodTables"
                 :key="period"
               >
-                <th rowspan="3" class="sheet-total">
-                  Saldo Posisi<br />{{ formatPreviousPeriod(period) }}
-                </th>
-                <th colspan="3" rowspan="2" class="sheet-group">
-                  Kewajiban setor tiap bulan
-                </th>
-                <th colspan="3" rowspan="2" class="sheet-group">
-                  Tunggakan s/d {{ formatPreviousPeriod(period) }}
-                </th>
-                <th colspan="3" rowspan="2" class="sheet-group">
-                  Kewajiban setor s/d {{ formatPeriod(period) }}
-                </th>
-                <th colspan="6" class="sheet-group sheet-group--mutasi">
-                  Bulan {{ formatPeriod(period) }}
-                </th>
-                <th rowspan="3" class="sheet-total">
-                  Saldo Posisi<br />{{ formatPeriod(period) }}
-                </th>
-                <th colspan="3" rowspan="2" class="sheet-group">
-                  Tunggakan s/d {{ formatPeriod(period) }}
-                </th>
+                <template v-if="kind === 'tail'">
+                  <th
+                    v-for="label in quarterLabels"
+                    :key="label"
+                    colspan="3"
+                    rowspan="2"
+                    class="sheet-group"
+                  >
+                    Jumlah pemasukan {{ label }}
+                  </th>
+                  <th colspan="2" rowspan="2" class="sheet-group">
+                    Insentif Pinjaman
+                  </th>
+                </template>
+                <template v-else>
+                  <th rowspan="3" class="sheet-total">
+                    Saldo Posisi<br />{{ formatPreviousPeriod(period) }}
+                  </th>
+                  <th colspan="3" rowspan="2" class="sheet-group">
+                    Kewajiban setor tiap bulan
+                  </th>
+                  <th colspan="3" rowspan="2" class="sheet-group">
+                    Tunggakan s/d {{ formatPreviousPeriod(period) }}
+                  </th>
+                  <th colspan="3" rowspan="2" class="sheet-group">
+                    Kewajiban setor s/d {{ formatPeriod(period) }}
+                  </th>
+                  <th colspan="6" class="sheet-group sheet-group--mutasi">
+                    Bulan {{ formatPeriod(period) }}
+                  </th>
+                  <th rowspan="3" class="sheet-total">
+                    Saldo Posisi<br />{{ formatPeriod(period) }}
+                  </th>
+                  <th colspan="3" rowspan="2" class="sheet-group">
+                    Tunggakan s/d {{ formatPeriod(period) }}
+                  </th>
+                </template>
               </template>
             </tr>
             <tr>
               <template
-                v-for="{ period } in renderedPeriodTables"
+                v-for="{ period, kind } in renderedPeriodTables"
                 :key="period"
               >
-                <th colspan="6" class="sheet-group sheet-group--mutasi">
+                <th
+                  v-if="kind === 'month'"
+                  colspan="6"
+                  class="sheet-group sheet-group--mutasi"
+                >
                   Mutasi bulan {{ formatPeriod(period) }}
                 </th>
               </template>
             </tr>
             <tr>
               <template
-                v-for="{ period } in renderedPeriodTables"
+                v-for="{ period, kind } in renderedPeriodTables"
                 :key="period"
               >
-                <template v-for="block in 3" :key="block">
+                <template v-if="kind === 'tail'">
+                  <th>Pokok</th>
+                  <th>Bunga</th>
+                  <th>Jumlah</th>
+                  <template v-for="label in quarterLabels" :key="label">
+                    <th>Bunga</th>
+                    <th>Provisi</th>
+                    <th>Jumlah</th>
+                  </template>
+                  <th>
+                    {{ formatRate(monthlyLedger.loanIncentiveRate) }}
+                  </th>
+                  <th>Pembulatan</th>
+                </template>
+                <template
+                  v-for="block in kind === 'month' ? 3 : 0"
+                  :key="block"
+                >
                   <th>Pokok</th>
                   <th>Bunga</th>
                   <th>Jumlah</th>
                 </template>
-                <th>Tanggal</th>
-                <th>Jumlah</th>
-                <th>Pokok Debet</th>
-                <th>Pokok Kredit</th>
-                <th>Bunga</th>
-                <th>Provisi</th>
-                <th>Pokok</th>
-                <th>Bunga</th>
-                <th>Jumlah</th>
+                <template v-if="kind === 'month'">
+                  <th>Tanggal</th>
+                  <th>Jumlah</th>
+                  <th>Pokok Debet</th>
+                  <th>Pokok Kredit</th>
+                  <th>Bunga</th>
+                  <th>Provisi</th>
+                  <th>Pokok</th>
+                  <th>Bunga</th>
+                  <th>Jumlah</th>
+                </template>
               </template>
             </tr>
           </thead>
@@ -448,7 +630,7 @@ const navigation = computed(() => ({
               <tr
                 v-if="item.kind === 'heading'"
                 :data-virtual-row="index"
-                :aria-rowindex="index + 5"
+                :aria-rowindex="index + 6"
               >
                 <td class="sheet-sticky sheet-no"></td>
                 <td class="sheet-sticky sheet-name">
@@ -462,7 +644,7 @@ const navigation = computed(() => ({
               <tr
                 v-else-if="item.kind === 'loan'"
                 :data-virtual-row="index"
-                :aria-rowindex="index + 5"
+                :aria-rowindex="index + 6"
               >
                 <td class="sheet-sticky sheet-no">{{ item.row.no }}</td>
                 <td class="sheet-sticky sheet-name">
@@ -493,32 +675,47 @@ const navigation = computed(() => ({
                     v-for="monthRow in [table.rowsById.get(item.row.loanId)]"
                     :key="table.period"
                   >
-                    <td
-                      v-for="key in beforeMutation"
-                      :key="key"
-                      class="num-cell"
-                      :class="{ 'sheet-total': totalColumns(key) }"
-                    >
-                      {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
-                    </td>
-                    <td>
-                      {{
-                        monthRow
-                          ? formatSheetDate(monthRow.transactionDate)
-                          : "-"
-                      }}
-                    </td>
-                    <td v-for="key in mutation" :key="key" class="num-cell">
-                      {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
-                    </td>
-                    <td
-                      v-for="key in afterMutation"
-                      :key="key"
-                      class="num-cell"
-                      :class="{ 'sheet-total': totalColumns(key) }"
-                    >
-                      {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
-                    </td>
+                    <template v-if="table.kind === 'tail'">
+                      <td
+                        v-for="key in nextDueKeys"
+                        :key="key"
+                        class="num-cell"
+                      >
+                        {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
+                      </td>
+                      <td>{{ item.row.loan.recommender }}</td>
+                      <td v-for="key in incomeKeys" :key="key" class="num-cell">
+                        {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
+                      </td>
+                    </template>
+                    <template v-else>
+                      <td
+                        v-for="key in beforeMutation"
+                        :key="key"
+                        class="num-cell"
+                        :class="{ 'sheet-total': totalColumns(key) }"
+                      >
+                        {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
+                      </td>
+                      <td>
+                        {{
+                          monthRow
+                            ? formatSheetDate(monthRow.transactionDate)
+                            : "-"
+                        }}
+                      </td>
+                      <td v-for="key in mutation" :key="key" class="num-cell">
+                        {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
+                      </td>
+                      <td
+                        v-for="key in afterMutation"
+                        :key="key"
+                        class="num-cell"
+                        :class="{ 'sheet-total': totalColumns(key) }"
+                      >
+                        {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
+                      </td>
+                    </template>
                   </template>
                 </template>
                 <td
@@ -529,7 +726,7 @@ const navigation = computed(() => ({
                   :data-virtual-span="rightColumns"
                 ></td>
               </tr>
-              <tr v-else :data-virtual-row="index" :aria-rowindex="index + 5">
+              <tr v-else :data-virtual-row="index" :aria-rowindex="index + 6">
                 <td class="sheet-sticky sheet-no"></td>
                 <td class="sheet-sticky sheet-name">SUB JUMLAH</td>
                 <td class="num-cell">
@@ -547,38 +744,57 @@ const navigation = computed(() => ({
                   v-for="table in renderedPeriodTables"
                   :key="table.period"
                 >
-                  <td
-                    v-for="key in beforeMutation"
-                    :key="key"
-                    class="num-cell"
-                    :class="{ 'sheet-total': totalColumns(key) }"
-                  >
-                    {{
-                      formatSheetNumber(
-                        sectionTotals(table, item.section.group)[key],
-                      )
-                    }}
-                  </td>
-                  <td></td>
-                  <td v-for="key in mutation" :key="key" class="num-cell">
-                    {{
-                      formatSheetNumber(
-                        sectionTotals(table, item.section.group)[key],
-                      )
-                    }}
-                  </td>
-                  <td
-                    v-for="key in afterMutation"
-                    :key="key"
-                    class="num-cell"
-                    :class="{ 'sheet-total': totalColumns(key) }"
-                  >
-                    {{
-                      formatSheetNumber(
-                        sectionTotals(table, item.section.group)[key],
-                      )
-                    }}
-                  </td>
+                  <template v-if="table.kind === 'tail'">
+                    <td v-for="key in nextDueKeys" :key="key" class="num-cell">
+                      {{
+                        formatSheetNumber(
+                          sectionTotals(table, item.section.group)[key],
+                        )
+                      }}
+                    </td>
+                    <td></td>
+                    <td v-for="key in incomeKeys" :key="key" class="num-cell">
+                      {{
+                        formatSheetNumber(
+                          sectionTotals(table, item.section.group)[key],
+                        )
+                      }}
+                    </td>
+                  </template>
+                  <template v-else>
+                    <td
+                      v-for="key in beforeMutation"
+                      :key="key"
+                      class="num-cell"
+                      :class="{ 'sheet-total': totalColumns(key) }"
+                    >
+                      {{
+                        formatSheetNumber(
+                          sectionTotals(table, item.section.group)[key],
+                        )
+                      }}
+                    </td>
+                    <td></td>
+                    <td v-for="key in mutation" :key="key" class="num-cell">
+                      {{
+                        formatSheetNumber(
+                          sectionTotals(table, item.section.group)[key],
+                        )
+                      }}
+                    </td>
+                    <td
+                      v-for="key in afterMutation"
+                      :key="key"
+                      class="num-cell"
+                      :class="{ 'sheet-total': totalColumns(key) }"
+                    >
+                      {{
+                        formatSheetNumber(
+                          sectionTotals(table, item.section.group)[key],
+                        )
+                      }}
+                    </td>
+                  </template>
                 </template>
                 <td
                   v-if="rightColumns"
@@ -599,7 +815,7 @@ const navigation = computed(() => ({
           <tfoot>
             <tr
               :data-virtual-row="sheetRows.length"
-              :aria-rowindex="sheetRows.length + 5"
+              :aria-rowindex="sheetRows.length + 6"
             >
               <td class="sheet-sticky sheet-no"></td>
               <td class="sheet-sticky sheet-name">JUMLAH TOTAL</td>
@@ -618,26 +834,37 @@ const navigation = computed(() => ({
                 v-for="table in renderedPeriodTables"
                 :key="table.period"
               >
-                <td
-                  v-for="key in beforeMutation"
-                  :key="key"
-                  class="num-cell"
-                  :class="{ 'sheet-total': totalColumns(key) }"
-                >
-                  {{ formatSheetNumber(table.totals[key]) }}
-                </td>
-                <td></td>
-                <td v-for="key in mutation" :key="key" class="num-cell">
-                  {{ formatSheetNumber(table.totals[key]) }}
-                </td>
-                <td
-                  v-for="key in afterMutation"
-                  :key="key"
-                  class="num-cell"
-                  :class="{ 'sheet-total': totalColumns(key) }"
-                >
-                  {{ formatSheetNumber(table.totals[key]) }}
-                </td>
+                <template v-if="table.kind === 'tail'">
+                  <td v-for="key in nextDueKeys" :key="key" class="num-cell">
+                    {{ formatSheetNumber(table.totals[key]) }}
+                  </td>
+                  <td></td>
+                  <td v-for="key in incomeKeys" :key="key" class="num-cell">
+                    {{ formatSheetNumber(table.totals[key]) }}
+                  </td>
+                </template>
+                <template v-else>
+                  <td
+                    v-for="key in beforeMutation"
+                    :key="key"
+                    class="num-cell"
+                    :class="{ 'sheet-total': totalColumns(key) }"
+                  >
+                    {{ formatSheetNumber(table.totals[key]) }}
+                  </td>
+                  <td></td>
+                  <td v-for="key in mutation" :key="key" class="num-cell">
+                    {{ formatSheetNumber(table.totals[key]) }}
+                  </td>
+                  <td
+                    v-for="key in afterMutation"
+                    :key="key"
+                    class="num-cell"
+                    :class="{ 'sheet-total': totalColumns(key) }"
+                  >
+                    {{ formatSheetNumber(table.totals[key]) }}
+                  </td>
+                </template>
               </template>
               <td
                 v-if="rightColumns"
@@ -651,5 +878,6 @@ const navigation = computed(() => ({
         </table>
       </div>
     </section>
+    <IncentiveRatesDialog v-model:open="ratesOpen" kind="loan" />
   </div>
 </template>
