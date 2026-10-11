@@ -411,10 +411,15 @@ const backend = {
     invoke<AppSnapshot>(command.getAppSnapshot, {
       companyId,
     }),
-  getMonthlyLedger: (year: number, companyId = selectedCompanyId.value) =>
+  getMonthlyLedger: (
+    year: number,
+    companyId = selectedCompanyId.value,
+    through?: string,
+  ) =>
     invoke<MonthlyLedger>(command.getMonthlyLedger, {
       companyId,
       year,
+      through: through || null,
     }),
   getCashBook: (
     year: number,
@@ -948,15 +953,23 @@ const emptyMonthlyLedger: MonthlyLedger = {
   loans: [],
 };
 
-/** Shared reports are cached separately for each company and reporting year. */
+/** This month as `YYYY-MM`. */
+export function currentPeriod(today = new Date()) {
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Shared reports are cached separately for each company and reporting year.
+ * The months run through the current one, even before its transactions are
+ * recorded, so its installments count toward arrears. */
 export function useMonthlyLedger() {
+  const through = currentPeriod();
   const query = useQuery(
     computed(() => {
       const companyId = selectedCompanyId.value;
       const year = selectedYear.value;
       return {
-        queryKey: queryKeys.monthlyLedger(companyId, year),
-        queryFn: () => backend.getMonthlyLedger(year, companyId),
+        queryKey: queryKeys.monthlyLedger(companyId, year, through),
+        queryFn: () => backend.getMonthlyLedger(year, companyId, through),
       };
     }),
   );
@@ -1018,6 +1031,39 @@ export function formatPreviousPeriod(period: string) {
   return month === 1
     ? `${monthNames[11]} ${year - 1}`
     : `${monthNames[month - 2]} ${year}`;
+}
+
+const shortMonthNames = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/** "Pinjaman Bulanan Menurun · Januari 2026 · Rp 25.000.000". Realization
+ * dates are "28-Jan-2026" (imported) or "2026-01-28" (entered in the app). */
+export function formatLoanLabel(loan: Loan) {
+  const iso = loan.realizationDate.match(/^(\d{4})-(\d{2})/);
+  const sheet = loan.realizationDate.match(/^\d{1,2}-([A-Za-z]{3})-(\d{4})$/);
+  const month = iso
+    ? formatPeriod(`${iso[1]}-${iso[2]}`)
+    : sheet && shortMonthNames.includes(sheet[1])
+      ? formatPeriod(`${sheet[2]}-${shortMonthNames.indexOf(sheet[1]) + 1}`)
+      : loan.realizationDate;
+  const kind = ["Pinjaman", loan.loanType, loan.interestType]
+    .filter(Boolean)
+    .join(" ");
+  return [kind, month, formatCurrency(loan.plafond)]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /** "2026-09-02" -> "02-09-2026"; empty input becomes "". */

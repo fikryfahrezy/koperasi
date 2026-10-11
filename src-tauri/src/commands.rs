@@ -34,9 +34,10 @@ pub(crate) async fn get_app_snapshot(
 pub(crate) async fn get_monthly_ledger(
     company_id: String,
     year: i32,
+    through: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<MonthlyLedgerDto, String> {
-    application::get_monthly_ledger(&company_id, year, &state.db).await
+    application::get_monthly_ledger(&company_id, year, through.as_deref(), &state.db).await
 }
 
 #[tauri::command]

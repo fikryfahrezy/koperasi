@@ -287,7 +287,9 @@ mod tests {
                 SavingsAccountType::Mandatory.as_str()
             );
 
-            let ledger = get_monthly_ledger("default", 2026, &pool).await.unwrap();
+            let ledger = get_monthly_ledger("default", 2026, None, &pool)
+                .await
+                .unwrap();
             assert_eq!(ledger.periods, vec!["2026-09".to_string()]);
             let month = &ledger.savings[0];
             assert_eq!(month.principal_opening, 0);
