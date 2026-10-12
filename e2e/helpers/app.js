@@ -18,7 +18,8 @@ export async function openPage(path, title) {
 
 export async function createMember(code, name, principal = 50000) {
   await openPage("/members", "Anggota");
-  await $(".search-field input").setValue("");
+  // WebKitGTK rejects the empty send-keys request issued by setValue("").
+  await $(".search-field input").clearValue();
   await $("button=Tambah anggota").click();
   const modal = dialog("Tambah anggota baru");
   await modal.waitForDisplayed();
@@ -88,8 +89,11 @@ export function cashRow(description) {
 }
 
 export async function cashBalance() {
-  await $(".cash-book-table tfoot td:nth-child(5)").waitForDisplayed();
-  const text = await $(".cash-book-table tfoot td:nth-child(5)").getText();
+  // The footer's first cell spans two columns; its cash balance is the fourth
+  // DOM cell. Select its semantic classes instead of counting table columns.
+  const balance = $(".cash-book-table tfoot td.num-cell.sheet-total");
+  await balance.waitForDisplayed();
+  const text = await balance.getText();
   // Spreadsheet formatting uses '-' for zero and parentheses for negatives.
   const amount = Number(text.replace(/\D/g, ""));
   return text.includes("(") ? -amount : amount;
