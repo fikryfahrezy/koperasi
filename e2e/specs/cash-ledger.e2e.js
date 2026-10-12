@@ -2,6 +2,7 @@ import { $, $$, expect } from "@wdio/globals";
 import {
   cashBalance,
   cashRow,
+  clickWhenReady,
   createMember,
   dialog,
   expectSavings,
@@ -75,11 +76,11 @@ describe("Daily cash ledger", () => {
     await cashRow(description).$("button=Hapus").click();
     const modal = dialog("Hapus transaksi?");
     await expect(modal).toHaveText(expect.stringContaining(description));
-    await modal.$("button=Batal").click();
+    await clickWhenReady(modal.$("button=Batal"));
     await expect(cashRow(description)).toBeDisplayed();
     expect(await cashBalance()).toBe(depositedBalance);
     await cashRow(description).$("button=Hapus").click();
-    await modal.$("button=Hapus").click();
+    await clickWhenReady(modal.$("button=Hapus"));
     await modal.waitForDisplayed({ reverse: true });
     await expect(cashRow(description)).not.toExist();
     expect(await cashBalance()).toBe(depositedBalance - 80000);

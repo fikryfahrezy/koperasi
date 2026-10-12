@@ -2,7 +2,10 @@ import { $, expect } from "@wdio/globals";
 import {
   cashRow,
   chooseBorrower,
+  clickSubmit,
+  expectSheetCell,
   createLoan,
+  clickWhenReady,
   createMember,
   dialog,
   expectSavings,
@@ -51,9 +54,8 @@ describe("Loans and repayments", () => {
     await expect($(".sheet-table tbody")).toHaveText(
       expect.stringContaining(name),
     );
-    await expect($(".sheet-table tbody")).toHaveText(
-      expect.stringContaining("1.100.000"),
-    );
+    // Ten leading cells, ten obligation cells, date, five movements, closing balance.
+    await expectSheetCell(name, 10, 27, "1.100.000");
   });
 
   it("rejects principal overpayment and allows a full payoff", async () => {
@@ -65,7 +67,7 @@ describe("Loans and repayments", () => {
     await modal.$('input[aria-label="Angsuran pokok"]').setValue("1201000");
     await modal.$('input[aria-label="Bunga"]').setValue("0");
     await modal.$('input[aria-label="Simpanan wajib"]').setValue("0");
-    await modal.$('button[type="submit"]').click();
+    await clickSubmit(modal);
     await expect($(".toast-card--warning")).toHaveText(
       expect.stringContaining(
         "Pembayaran pokok melebihi saldo pinjaman berjalan.",
@@ -86,7 +88,7 @@ describe("Loans and repayments", () => {
     await expect($(".combobox__empty")).toHaveText(
       /Tidak ada anggota dengan pinjaman berjalan/,
     );
-    await payment.$("button=Batal").click();
+    await clickWhenReady(payment.$("button=Batal"));
   });
 
   it("creates and repays a non-member temporary flat-interest loan", async () => {
@@ -115,12 +117,8 @@ describe("Loans and repayments", () => {
     await expect($(".sheet-table tbody")).toHaveText(
       expect.stringContaining(name),
     );
-    await expect($(".sheet-table tbody")).toHaveText(
-      expect.stringContaining("1.100.000"),
-    );
-    await expect($(".sheet-table tbody")).toHaveText(
-      expect.stringContaining("plat"),
-    );
+    await expectSheetCell(name, 10, 27, "1.100.000");
+    await expectSheetCell(name, 10, 5, "plat");
     await $('select[aria-label="Kelompok pinjaman"]').selectByVisibleText(
       "Anggota PP BRI",
     );
@@ -134,25 +132,25 @@ describe("Loans and repayments", () => {
     await createLoan("E2E Loan Rate");
     await openPage("/loans", "Pinjaman");
     await $(`button=Insentif ${YEAR}`).click();
-    const modal = dialog(`Insentif pinjaman ${YEAR}`);
-    const input = modal.$('input[type="number"]');
-    const original = await input.getValue();
+    const modal = () => dialog(`Insentif pinjaman ${YEAR}`);
+    const input = () => modal().$('input[type="number"]');
+    const original = await input().getValue();
     try {
-      await input.setValue("11.5");
-      await modal.$("button=Simpan").click();
-      await modal.waitForDisplayed({ reverse: true });
+      await input().setValue("11.5");
+      await clickSubmit(modal());
+      await modal().waitForDisplayed({ reverse: true });
       await restartApp();
       await openPage("/loans", "Pinjaman");
       await $(`button=Insentif ${YEAR}`).click();
-      await expect(modal.$('input[type="number"]')).toHaveValue("11.5");
+      await expect(modal().$('input[type="number"]')).toHaveValue("11.5");
     } finally {
-      if (!(await modal.isDisplayed())) {
+      if (!(await modal().isDisplayed())) {
         await openPage("/loans", "Pinjaman");
         await $(`button=Insentif ${YEAR}`).click();
       }
-      await input.setValue(original);
-      await modal.$("button=Simpan").click();
-      await modal.waitForDisplayed({ reverse: true });
+      await input().setValue(original);
+      await clickSubmit(modal());
+      await modal().waitForDisplayed({ reverse: true });
     }
   });
 });

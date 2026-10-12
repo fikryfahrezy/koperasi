@@ -1,6 +1,9 @@
 import { $, expect } from "@wdio/globals";
 import {
   chooseBorrower,
+  clickSubmit,
+  expectSheetCell,
+  clickWhenReady,
   createMember,
   dialog,
   expectSavings,
@@ -34,9 +37,9 @@ describe("Savings", () => {
     await expect($(".sheet-table tbody")).toHaveText(
       expect.stringContaining(name),
     );
-    await expect($(".sheet-table tbody")).toHaveText(
-      expect.stringContaining("70.000"),
-    );
+    // January includes SHU: closing balances occupy cells 15, 16 and 17.
+    await expectSheetCell(name, 2, 16, "70.000");
+    await expectSheetCell(name, 2, 17, "70.000");
   });
 
   it("rejects an overdrawn withdrawal without changing the member balance", async () => {
@@ -48,12 +51,12 @@ describe("Savings", () => {
     await modal
       .$('input[aria-label="Nominal transaksi dalam Rupiah"]')
       .setValue("31000");
-    await modal.$('button[type="submit"]').click();
+    await clickSubmit(modal);
     await expect($(".toast-card--warning")).toHaveText(
       expect.stringContaining("Saldo simpanan tidak mencukupi."),
     );
     await expect(modal).toBeDisplayed();
-    await modal.$("button=Batal").click();
+    await clickWhenReady(modal.$("button=Batal"));
     await restartApp();
     await openMember(name);
     await expectSavings(50000, 0, 30000);
@@ -64,26 +67,26 @@ describe("Savings", () => {
     await postSavings("E2E Savings Rate", "Wajib", 50000);
     await openPage("/savings", "Simpanan");
     await $(`button=Insentif ${YEAR}`).click();
-    const modal = dialog(`Insentif simpanan ${YEAR}`);
-    const input = modal.$('input[type="number"]');
-    const original = await input.getValue();
+    const modal = () => dialog(`Insentif simpanan ${YEAR}`);
+    const input = () => modal().$('input[type="number"]');
+    const original = await input().getValue();
     try {
-      await input.setValue("4.25");
-      await modal.$("button=Simpan").click();
-      await modal.waitForDisplayed({ reverse: true });
+      await input().setValue("4.25");
+      await clickSubmit(modal());
+      await modal().waitForDisplayed({ reverse: true });
       await restartApp();
       await openPage("/savings", "Simpanan");
       await $(`button=Insentif ${YEAR}`).click();
-      await expect(modal.$('input[type="number"]')).toHaveValue("4.25");
+      await expect(modal().$('input[type="number"]')).toHaveValue("4.25");
     } finally {
       // Rates are company-wide: restore them so spec order cannot affect loans.
-      if (!(await modal.isDisplayed())) {
+      if (!(await modal().isDisplayed())) {
         await openPage("/savings", "Simpanan");
         await $(`button=Insentif ${YEAR}`).click();
       }
-      await input.setValue(original);
-      await modal.$("button=Simpan").click();
-      await modal.waitForDisplayed({ reverse: true });
+      await input().setValue(original);
+      await clickSubmit(modal());
+      await modal().waitForDisplayed({ reverse: true });
     }
   });
 });
