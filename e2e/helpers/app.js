@@ -34,7 +34,11 @@ export async function expectSheetCell(name, leadingColumns, column, expected) {
   const cell = memberName().$("..").$("..").$(`td:nth-child(${column})`);
   await cell.waitForExist();
   await cell.scrollIntoView({ block: "center", inline: "center" });
-  await expect(cell).toHaveText(expected);
+  // WebKit's visible-text command can return "" for clipped spreadsheet cells.
+  // Assert the exact value rendered in the DOM, retaining the normal retry wait.
+  await expect(cell).toHaveElementProperty("textContent", expected, {
+    trim: true,
+  });
 }
 
 export async function restartApp() {
