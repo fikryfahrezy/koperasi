@@ -121,7 +121,11 @@ async function refreshPage() {
         <p>Catat transaksi baru dengan tombol Catat transaksi.</p>
       </div>
       <div v-else class="data-table-wrap sheet-wrap">
-        <table v-table-navigation class="sheet-table cash-book-table">
+        <table
+          v-table-navigation
+          v-sticky-header
+          class="sheet-table cash-book-table"
+        >
           <thead>
             <tr class="sheet-letters">
               <th v-for="letter in cashBookLetters" :key="letter">
