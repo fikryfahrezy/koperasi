@@ -1,4 +1,10 @@
 import { browser, $, $$, expect } from "@wdio/globals";
+import {
+  createMember,
+  dialog,
+  openMember,
+  restartApp,
+} from "../helpers/app.js";
 
 async function openMembers() {
   await $(".new-tab-page h1").waitForDisplayed();
@@ -7,9 +13,10 @@ async function openMembers() {
 }
 
 describe("Member ledger", () => {
+  beforeEach(restartApp);
+
   it("creates a member with principal savings and persists it across app restart", async () => {
     await openMembers();
-    await expect($$(".member-name-link")).toBeElementsArrayOfSize(0);
     await $("button=Tambah anggota").click();
     const dialog = $('[role="dialog"][aria-label="Tambah anggota baru"]');
     await dialog.waitForDisplayed();
@@ -20,6 +27,8 @@ describe("Member ledger", () => {
     await dialog.$("button=Simpan anggota").click();
     await dialog.waitForDisplayed({ reverse: true });
     await expect($("a.member-name-link=Anggota E2E")).toBeDisplayed();
+    await $(".search-field input").setValue("E2E-01");
+    await expect($$(".member-name-link")).toBeElementsArrayOfSize(1);
 
     // The first arrow enters the table; subsequent arrows move cell focus.
     await browser.execute(() => document.activeElement?.blur());
@@ -51,6 +60,7 @@ describe("Member ledger", () => {
     // New WebDriver session launches a fresh app process against the same test DB.
     await browser.reloadSession();
     await openMembers();
+    await $(".search-field input").setValue("E2E-01");
     await expect($$(".member-name-link")).toBeElementsArrayOfSize(1);
     await expect($(".data-table tbody tr:first-child td")).toHaveText("E2E-01");
     await $("a.member-name-link=Anggota E2E").click();
@@ -60,5 +70,95 @@ describe("Member ledger", () => {
     ).toHaveValue("Anggota E2E");
     await expect($(".member-detail__breakdown strong")).toHaveText(/50\.000/);
     await expect($(".runtime-banner")).not.toExist();
+  });
+
+  it("rejects duplicate member IDs without adding another member", async () => {
+    await createMember("E2E-DUP", "E2E Duplicate Owner");
+    await $("button=Tambah anggota").click();
+    const modal = dialog("Tambah anggota baru");
+    await modal.$('input[aria-label="ID anggota"]').setValue("E2E-DUP");
+    await modal
+      .$('input[aria-label="Nama lengkap"]')
+      .setValue("E2E Duplicate Rejected");
+    await expect(modal.$('[role="alert"]')).toHaveText(
+      /sudah dipakai oleh E2E Duplicate Owner/,
+    );
+    await modal.$("button=Simpan anggota").click();
+    await expect(modal).toBeDisplayed();
+    await modal.$("button=Batal").click();
+    await expect($("a.member-name-link=E2E Duplicate Rejected")).not.toExist();
+    await $(".search-field input").setValue("E2E-DUP");
+    await expect($$(".member-name-link")).toBeElementsArrayOfSize(1);
+  });
+
+  it("validates minimum principal savings and cancels a new member", async () => {
+    await openMembers();
+    await $("button=Tambah anggota").click();
+    const modal = dialog("Tambah anggota baru");
+    await modal.$('input[aria-label="ID anggota"]').setValue("E2E-CANCEL");
+    await modal
+      .$('input[aria-label="Nama lengkap"]')
+      .setValue("E2E Cancelled Member");
+    const amount = modal.$('input[aria-label="Simpanan pokok dalam Rupiah"]');
+    await amount.setValue("49000");
+    await modal.$("button=Simpan anggota").click();
+    await expect(modal).toBeDisplayed();
+    await expect(amount).toHaveElementProperty(
+      "validationMessage",
+      "Simpanan pokok minimal Rp50.000.",
+    );
+    await modal.$("button=Batal").click();
+    await restartApp();
+    await openMembers();
+    await $(".search-field input").setValue("E2E-CANCEL");
+    await expect($$(".member-name-link")).toBeElementsArrayOfSize(0);
+  });
+
+  it("cancels edits, rejects another member's ID, and persists identity changes", async () => {
+    await createMember("E2E-EDIT-OWNER", "E2E Edit Owner");
+    await createMember("E2E-EDIT", "E2E Edit Member");
+    await openMember("E2E Edit Member");
+    const form = $(".member-edit-form");
+    await form.$('input[aria-label="Nama lengkap"]').setValue("Unsaved name");
+    await form.$("button=Batal").click();
+    await expect(form.$('input[aria-label="Nama lengkap"]')).toHaveValue(
+      "E2E Edit Member",
+    );
+    await form.$('input[aria-label="ID anggota"]').setValue("E2E-EDIT-OWNER");
+    await expect(form.$('[role="alert"]')).toHaveText(/sudah dipakai/);
+    await form.$("button=Simpan").click();
+    await expect(form.$('[role="alert"]')).toBeDisplayed();
+    await form.$('input[aria-label="ID anggota"]').setValue("E2E-EDIT-SAVED");
+    await form
+      .$('input[aria-label="Nama lengkap"]')
+      .setValue("E2E Edited Member");
+    await form
+      .$('select[aria-label="Tanggal bergabung: tahun"]')
+      .selectByVisibleText("2026");
+    await form
+      .$('select[aria-label="Tanggal bergabung: bulan"]')
+      .selectByVisibleText("01");
+    await form
+      .$('select[aria-label="Tanggal bergabung: hari"]')
+      .selectByVisibleText("10");
+    await form.$("button=Simpan").click();
+    await expect($(".page-heading h1")).toHaveText("E2E Edited Member");
+    await restartApp();
+    await openMembers();
+    await $(".search-field input").setValue("E2E-EDIT-SAVED");
+    await expect($$(".member-name-link")).toBeElementsArrayOfSize(1);
+    await $("a.member-name-link=E2E Edited Member").click();
+    await expect(form.$('input[aria-label="ID anggota"]')).toHaveValue(
+      "E2E-EDIT-SAVED",
+    );
+    await expect(
+      form.$('select[aria-label="Tanggal bergabung: hari"]'),
+    ).toHaveValue("10");
+    await expect(
+      form.$('select[aria-label="Tanggal bergabung: bulan"]'),
+    ).toHaveValue("1");
+    await expect(
+      form.$('select[aria-label="Tanggal bergabung: tahun"]'),
+    ).toHaveValue("2026");
   });
 });
