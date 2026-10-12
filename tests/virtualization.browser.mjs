@@ -303,6 +303,15 @@ try {
       scrollTop: (await read()).scrollTop,
     }),
   );
+  // Menu navigation through member detail must keep the sheet scroll.
+  await evaluate(`document.querySelector('a[href="/members"]').click()`);
+  await waitFor(`document.querySelector('a[href^="/members/"]')`);
+  await evaluate(`document.querySelector('a[href^="/members/"]').click()`);
+  await waitFor(`location.pathname.startsWith('/members/')`);
+  await evaluate(`document.querySelector('a[href="/savings"]').click()`);
+  await waitFor(
+    `location.pathname==='/savings' && Number(document.querySelector('tbody tr[data-virtual-row]')?.dataset.virtualRow)>700`,
+  );
   await evaluate(
     `document.querySelector('input[type=search]').value='Member 1000';document.querySelector('input[type=search]').dispatchEvent(new Event('input',{bubbles:true}))`,
   );

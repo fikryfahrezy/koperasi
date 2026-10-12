@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
-import { useRoute } from "vue-router";
+import { computed, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { Building2, CalendarDays } from "lucide-vue-next";
 import logo from "./assets/logo.png";
 import AppMenu from "./components/AppMenu.vue";
@@ -11,6 +11,7 @@ import WorkspaceTabs from "./components/WorkspaceTabs.vue";
 import WorkspaceTabPages from "./components/WorkspaceTabPages.vue";
 import { clearRuntimeError, runtimeError } from "./runtime-error";
 import { useKoperasiStore } from "./store/koperasi";
+import { activeWorkspaceTab } from "./workspace-tabs";
 
 const {
   initialize,
@@ -34,15 +35,28 @@ const reportYearOptions = computed(() =>
   yearOptions.value.map((year) => ({ value: year, label: String(year) })),
 );
 const route = useRoute();
+const router = useRouter();
+// Menu clicks switch the tab's page before the router settles, so follow the
+// tab. Apply it post-flush: cached pages save scroll before the layout changes
+// and restore it after.
+const fitViewport = ref(false);
+watch(
+  () =>
+    Boolean(
+      router.resolve(activeWorkspaceTab()?.fullPath ?? route.fullPath).meta
+        .fitViewport,
+    ),
+  (value) => {
+    fitViewport.value = value;
+  },
+  { immediate: true, flush: "post" },
+);
 
 onMounted(initialize);
 </script>
 
 <template>
-  <div
-    class="app-frame"
-    :class="{ 'app-frame--sheet': route.meta.fitViewport }"
-  >
+  <div class="app-frame" :class="{ 'app-frame--sheet': fitViewport }">
     <section v-if="runtimeError" class="runtime-banner" role="alert">
       <div>
         <strong>{{ $t("app.errorTitle") }}</strong>

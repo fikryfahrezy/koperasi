@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, provide, reactive, ref } from "vue";
+import {
+  computed,
+  nextTick,
+  onMounted,
+  provide,
+  reactive,
+  ref,
+  watch,
+} from "vue";
 import {
   RouterView,
   routeLocationKey,
@@ -50,6 +58,38 @@ const warming = ref(true);
 const isDetail = computed(
   () => !pages.some((page) => page.path === tabRoute.value.path),
 );
+// Detail pages share one cached instance, so keep their scroll per tab here.
+const root = ref<HTMLElement>();
+const detailScroll = new Map<string, { path: string; top: number }>();
+const content = () => root.value?.closest<HTMLElement>(".app-content");
+let revision = 0;
+watch(
+  () =>
+    [isDetail.value, tabRoute.value.path, activeWorkspaceTabId.value] as const,
+  async ([detail, path, tabId], [wasDetail, previousPath, previousTabId]) => {
+    const currentRevision = ++revision;
+    const element = content();
+    if (wasDetail && element)
+      detailScroll.set(previousTabId, {
+        path: previousPath,
+        top: element.scrollTop,
+      });
+    if (!detail) return;
+    await nextTick();
+    if (revision !== currentRevision) return;
+    const saved = detailScroll.get(tabId);
+    const target = content();
+    if (target) target.scrollTop = saved?.path === path ? saved.top : 0;
+  },
+  { flush: "pre" },
+);
+watch(
+  () => workspaceTabs.value.map((tab) => tab.id),
+  (ids) => {
+    for (const id of detailScroll.keys())
+      if (!ids.includes(id)) detailScroll.delete(id);
+  },
+);
 onMounted(async () => {
   // Mount every main page once, then retain its rendered DOM in KeepAlive.
   await nextTick();
@@ -58,7 +98,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="workspace-tab-pages">
+  <div ref="root" class="workspace-tab-pages">
     <CachedWorkspacePage
       v-for="page in pages"
       :key="page.path"

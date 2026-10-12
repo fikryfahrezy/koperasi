@@ -80,7 +80,7 @@ function renderer() {
     style: {},
     scrollTop: 0,
     scrollLeft: 0,
-    closest: () => null,
+    closest: () => globalThis.__appContent ?? null,
     querySelectorAll() {
       return [this];
     },
@@ -228,6 +228,73 @@ test("main pages mount once across tabs, preserving filters and scroll without c
     app.unmount();
     workspace.workspaceTabs.value = originalTabs;
     workspace.activeWorkspaceTabId.value = originalActiveId;
+    delete globalThis.__tabPageMounts;
+    delete globalThis.__tabPageFields;
+    delete globalThis.__tabPageRoots;
+    delete globalThis.__tabPageStates;
+  }
+});
+
+test("member detail keeps its scroll per tab and starts new members at the top", async () => {
+  globalThis.__tabPageMounts = [];
+  globalThis.__tabPageFields = {};
+  globalThis.__tabPageRoots = {};
+  globalThis.__tabPageStates = {};
+  const content = { scrollTop: 0, scrollLeft: 0 };
+  globalThis.__appContent = content;
+  const errors = [];
+  const originalTabs = workspace.workspaceTabs.value;
+  const originalActiveId = workspace.activeWorkspaceTabId.value;
+  workspace.workspaceTabs.value = [
+    { id: "first", fullPath: "/members", titleKey: "members" },
+    { id: "second", fullPath: "/loans", titleKey: "loans" },
+  ];
+  workspace.activeWorkspaceTabId.value = "first";
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      ...["/new-tab", "/members", "/savings", "/loans", "/cash-ledger"].map(
+        (path) => ({ path, component: { render: () => null } }),
+      ),
+      { path: "/members/:id", component: { render: () => h("div", "detail") } },
+    ],
+  });
+  await router.push("/members");
+  const app = renderer().createApp({ render: () => h(WorkspaceTabPages) });
+  app.use(router);
+  app.config.errorHandler = (error) => errors.push(error);
+  app.mount({ children: [] });
+  const settle = async () => {
+    await nextTick();
+    await nextTick();
+  };
+  try {
+    await settle();
+    workspace.workspaceTabs.value[0].fullPath = "/members/1";
+    await settle();
+    assert.equal(content.scrollTop, 0);
+    content.scrollTop = 900;
+
+    workspace.activeWorkspaceTabId.value = "second";
+    await settle();
+    content.scrollTop = 0;
+    workspace.activeWorkspaceTabId.value = "first";
+    await settle();
+    assert.equal(
+      content.scrollTop,
+      900,
+      "switching tabs restores detail scroll",
+    );
+
+    workspace.workspaceTabs.value[0].fullPath = "/members/2";
+    await settle();
+    assert.equal(content.scrollTop, 0, "another member opens at the top");
+    assert.deepEqual(errors, []);
+  } finally {
+    app.unmount();
+    workspace.workspaceTabs.value = originalTabs;
+    workspace.activeWorkspaceTabId.value = originalActiveId;
+    delete globalThis.__appContent;
     delete globalThis.__tabPageMounts;
     delete globalThis.__tabPageFields;
     delete globalThis.__tabPageRoots;

@@ -5,7 +5,12 @@ export type WorkspaceTab = {
   id: string;
   fullPath: string;
   titleKey: string;
+  /** Last page visited per menu section, e.g. "/members" -> "/members/7". */
+  sectionPaths?: Record<string, string>;
 };
+
+const sectionOf = (fullPath: string) =>
+  "/" + (fullPath.split(/[?#]/)[0].split("/")[1] ?? "");
 
 let tabSequence = 0;
 const makeId = () => `tab-${Date.now()}-${tabSequence++}`;
@@ -29,6 +34,14 @@ export function syncActiveWorkspaceTab(fullPath: string, titleKey: string) {
   if (!tab) return;
   tab.fullPath = fullPath;
   tab.titleKey = titleKey;
+  tab.sectionPaths = { ...tab.sectionPaths, [sectionOf(fullPath)]: fullPath };
+}
+
+/** Menu target: the section's last page in this tab, or its root when already there. */
+export function workspaceSectionPath(section: string) {
+  const tab = activeWorkspaceTab();
+  if (!tab || sectionOf(tab.fullPath) === section) return section;
+  return tab.sectionPaths?.[section] ?? section;
 }
 
 export function navigateActiveWorkspaceTab(path: string, router: Router) {
