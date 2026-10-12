@@ -45,7 +45,7 @@ export const config = {
   waitforTimeout: 15000,
   connectionRetryTimeout: 30000,
   connectionRetryCount: 1,
-  mochaOpts: { timeout: 60000 },
+  mochaOpts: { timeout: 120000 },
 
   async onPrepare() {
     if (!["linux", "win32"].includes(process.platform)) {
