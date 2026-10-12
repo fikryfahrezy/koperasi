@@ -17,9 +17,9 @@ export async function clickSubmit(modal) {
 }
 
 export async function expectSheetCell(name, leadingColumns, column, expected) {
-  await expect(
-    $(`.sheet-table tbody .sheet-name strong=${name}`),
-  ).toBeDisplayed();
+  // WDIO text selectors apply to one tag, not a compound descendant selector.
+  const memberName = () => $(".sheet-table tbody").$(`strong=${name}`);
+  await expect(memberName()).toBeDisplayed();
   // Monthly column groups may not mount until they intersect the viewport.
   // First reveal the selected month after the always-rendered leading columns.
   await browser.execute((count) => {
@@ -31,7 +31,7 @@ export async function expectSheetCell(name, leadingColumns, column, expected) {
       .reduce((width, col) => width + Number.parseFloat(col.style.width), 0);
   }, leadingColumns);
   await $(`.sheet-table th[data-period="${PERIOD}"]`).waitForExist();
-  const cell = $(`.sheet-table tbody tr*=${name}`).$(`td:nth-child(${column})`);
+  const cell = memberName().$("..").$("..").$(`td:nth-child(${column})`);
   await cell.waitForExist();
   await cell.scrollIntoView({ block: "center", inline: "center" });
   await expect(cell).toHaveText(expected);
