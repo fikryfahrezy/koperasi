@@ -93,6 +93,11 @@ heights, horizontal month windows, header/data/total alignment, totals, filterin
 keyboard navigation, section boundaries and tab scroll
 restoration. It does not access the native application database.
 
+Run `node tests/sticky-headers.browser.mjs` for the focused header regression.
+It checks all four table pages while scrolling, changing header row heights, and
+resizing the window, including the frozen columns in Savings and Loans. Header
+cells stick individually with measured row offsets to support Chromium 88.
+
 The production build still targets Chromium 88. Native `scrollend` is disabled;
 TanStack uses its timer fallback. The browser regression runs on the locally
 installed browser and does **not** certify Windows 7 compatibility. Before release,

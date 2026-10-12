@@ -130,6 +130,7 @@ strong {
   background: #d7e5ed;
   font:
     800 14px/1 "Avenir Next",
+    "Segoe UI",
     sans-serif;
   letter-spacing: -0.03em;
 }
@@ -220,7 +221,10 @@ strong {
   border-radius: 10px;
   color: #fff;
   background: var(--green);
-  font: 700 11px/1 "Manrope";
+  font:
+    700 11px/1 "Manrope",
+    "Segoe UI",
+    sans-serif;
 }
 .profile-control > div {
   display: grid;
@@ -246,6 +250,7 @@ strong {
   color: var(--green);
   font:
     800 10px/1.2 "Avenir Next",
+    "Segoe UI",
     sans-serif;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -455,8 +460,9 @@ strong {
   border-bottom: 1px solid #edf1ef;
   white-space: nowrap;
 }
-.sheet-table thead {
-  /* Keep multi-row headers together without assuming fixed row heights. */
+.sheet-table thead th,
+.data-table thead th {
+  /* Per-row offsets are measured by v-sticky-header for Chromium 88. */
   position: sticky;
   top: 0;
   z-index: 2;
@@ -467,7 +473,10 @@ strong {
   white-space: normal;
   color: #000;
   background: #fff;
-  font: 700 11px/1.3 "Avenir Next";
+  font:
+    700 11px/1.3 "Avenir Next",
+    "Segoe UI",
+    sans-serif;
   letter-spacing: 0.03em;
   text-align: center;
   text-transform: uppercase;

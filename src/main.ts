@@ -7,6 +7,7 @@ import { router } from "./router";
 import { reportRuntimeError } from "./runtime-error";
 import { i18n } from "./i18n";
 import { tableNavigation } from "./directives/tableNavigation";
+import { stickyHeader } from "./directives/stickyHeader";
 
 window.addEventListener("error", (event) => {
   reportRuntimeError(event.error ?? event.message, "Unhandled window error");
@@ -18,6 +19,7 @@ window.addEventListener("unhandledrejection", (event) => {
 
 const app = createApp(App);
 app.directive("table-navigation", tableNavigation);
+app.directive("sticky-header", stickyHeader);
 
 app.config.errorHandler = (error, instance, info) => {
   const componentName = instance?.$options.name ?? "UnknownComponent";

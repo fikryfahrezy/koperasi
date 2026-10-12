@@ -100,10 +100,11 @@ export function scrollTableCellIntoView(
   const viewportTop = viewport.top + scroller.clientTop;
   const viewportBottom = viewportTop + scroller.clientHeight;
   const rect = cell.getBoundingClientRect();
-  const top = Math.max(
-    viewportTop,
-    table.tHead?.getBoundingClientRect().bottom ?? viewportTop,
-  );
+  // Header cells stick individually; the thead remains in normal flow.
+  const headerBottoms = Array.from(
+    table.tHead?.querySelectorAll<HTMLTableCellElement>("th") ?? [],
+  ).map((headerCell) => headerCell.getBoundingClientRect().bottom);
+  const top = Math.max(viewportTop, ...headerBottoms);
   // The footer cells are sticky; the tfoot itself remains in normal flow.
   const footerTops = Array.from(
     table.tFoot?.querySelectorAll<HTMLTableCellElement>("td") ?? [],
