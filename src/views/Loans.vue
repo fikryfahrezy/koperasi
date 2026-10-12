@@ -421,6 +421,7 @@ const navigation = computed(() => ({
         <table
           ref="table"
           v-table-navigation="navigation"
+          v-sticky-header
           class="sheet-table sheet-table--virtual"
           :style="{
             width: `${totalWidth}px`,

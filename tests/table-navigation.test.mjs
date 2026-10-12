@@ -23,7 +23,13 @@ function fixture({
   };
   const table = {
     closest: () => scroller,
-    tHead: { getBoundingClientRect: () => ({ bottom: 200 }) },
+    tHead: {
+      getBoundingClientRect: () => ({ bottom: -100 }),
+      querySelectorAll: () => [
+        { getBoundingClientRect: () => ({ bottom: 125 }) },
+        { getBoundingClientRect: () => ({ bottom: 200 }) },
+      ],
+    },
     tFoot: {
       // Before reaching the bottom, the section is below the viewport.
       getBoundingClientRect: () => ({ top: 1000 }),

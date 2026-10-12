@@ -75,7 +75,7 @@ function formatJoinedAt(value: string) {
     </PageHeader>
     <section class="panel table-panel">
       <div class="data-table-wrap">
-        <table v-table-navigation class="data-table">
+        <table v-table-navigation v-sticky-header class="data-table">
           <thead>
             <tr>
               <th>ID Anggota</th>
@@ -146,14 +146,18 @@ function formatJoinedAt(value: string) {
 }
 .data-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 11px;
 }
 .data-table th {
   padding: 11px 15px;
   color: #000;
   background: #fff;
-  font: 700 11px/1.3 "Avenir Next";
+  font:
+    700 11px/1.3 "Avenir Next",
+    "Segoe UI",
+    sans-serif;
   letter-spacing: 0.05em;
   text-align: left;
   text-transform: uppercase;

@@ -95,7 +95,7 @@ function closeTab(tab: WorkspaceTab) {
   min-width: 0;
   height: 100%;
   display: flex;
-  align-items: start;
+  align-items: flex-start;
   gap: 2px;
   padding: 5px var(--shell-gutter) 0;
   overflow-x: auto;
