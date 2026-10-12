@@ -2,7 +2,10 @@
 import { RouterLink, useRouter } from "vue-router";
 import { BookOpen, Coins, HandCoins, Users } from "lucide-vue-next";
 import { useI18n } from "vue-i18n";
-import { navigateActiveWorkspaceTab } from "../workspace-tabs";
+import {
+  navigateActiveWorkspaceTab,
+  workspaceSectionPath,
+} from "../workspace-tabs";
 
 const router = useRouter();
 const { t } = useI18n();
@@ -24,10 +27,10 @@ function navigate(path: string) {
       <RouterLink
         v-for="item in menuItems"
         :key="item.to"
-        :to="item.to"
+        :to="workspaceSectionPath(item.to)"
         class="app-menu__item"
         active-class="app-menu__item--active"
-        @click="navigate(item.to)"
+        @click="navigate(workspaceSectionPath(item.to))"
       >
         <component :is="item.icon" :size="16" />
         <span>{{ t(item.labelKey) }}</span>
