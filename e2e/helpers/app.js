@@ -5,6 +5,38 @@ export const YEAR = "2026";
 export const PERIOD = `${YEAR}-01`;
 export const dialog = (title) => $(`[role="dialog"][aria-label="${title}"]`);
 
+export async function clickWhenReady(element) {
+  // Dialogs scroll independently, and transient toasts can cover their actions.
+  await element.scrollIntoView({ block: "center", inline: "center" });
+  await element.waitForClickable();
+  await element.click();
+}
+
+export async function clickSubmit(modal) {
+  await clickWhenReady(modal.$('button[type="submit"]'));
+}
+
+export async function expectSheetCell(name, leadingColumns, column, expected) {
+  await expect(
+    $(`.sheet-table tbody .sheet-name strong=${name}`),
+  ).toBeDisplayed();
+  // Monthly column groups may not mount until they intersect the viewport.
+  // First reveal the selected month after the always-rendered leading columns.
+  await browser.execute((count) => {
+    const table = document.querySelector(".sheet-table");
+    const scroller = table.closest(".data-table-wrap");
+    const columns = [...table.querySelectorAll("colgroup col")];
+    scroller.scrollLeft = columns
+      .slice(0, count)
+      .reduce((width, col) => width + Number.parseFloat(col.style.width), 0);
+  }, leadingColumns);
+  await $(`.sheet-table th[data-period="${PERIOD}"]`).waitForExist();
+  const cell = $(`.sheet-table tbody tr*=${name}`).$(`td:nth-child(${column})`);
+  await cell.waitForExist();
+  await cell.scrollIntoView({ block: "center", inline: "center" });
+  await expect(cell).toHaveText(expected);
+}
+
 export async function restartApp() {
   await browser.reloadSession();
   await $(".new-tab-page h1").waitForDisplayed();
@@ -28,7 +60,7 @@ export async function createMember(code, name, principal = 50000) {
   await modal
     .$('input[aria-label="Simpanan pokok dalam Rupiah"]')
     .setValue(String(principal));
-  await modal.$("button=Simpan anggota").click();
+  await clickSubmit(modal);
   await modal.waitForDisplayed({ reverse: true });
   await expect($(`a.member-name-link=${name}`)).toBeDisplayed();
 }
@@ -79,7 +111,7 @@ export async function openEntry(kind) {
 }
 
 export async function submitEntry(modal) {
-  await modal.$('button[type="submit"]').click();
+  await clickSubmit(modal);
   await modal.waitForDisplayed({ reverse: true });
   await expect($(".runtime-banner")).not.toExist();
 }

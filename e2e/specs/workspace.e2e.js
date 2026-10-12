@@ -1,5 +1,11 @@
 import { $, $$, expect } from "@wdio/globals";
-import { createMember, dialog, openPage, restartApp } from "../helpers/app.js";
+import {
+  clickWhenReady,
+  createMember,
+  dialog,
+  openPage,
+  restartApp,
+} from "../helpers/app.js";
 
 describe("Workspace tabs and reporting year", () => {
   beforeEach(restartApp);
@@ -13,7 +19,7 @@ describe("Workspace tabs and reporting year", () => {
     const modal = dialog("Tambah anggota baru");
     await modal.$('input[aria-label="ID anggota"]').setValue("E2E-TAB-DRAFT");
     // The backdrop covers the tab bar; close the dialog while keeping its draft.
-    await modal.$("button=Batal").click();
+    await clickWhenReady(modal.$("button=Batal"));
     await $('button[aria-label="Buka tab baru"]').click();
     await $(".new-tab-page h1").waitForDisplayed();
     await openPage("/members", "Anggota");
@@ -22,7 +28,7 @@ describe("Workspace tabs and reporting year", () => {
     await expect($("a.member-name-link=E2E Tab Beta")).toBeDisplayed();
     await $("button=Tambah anggota").click();
     await expect(modal.$('input[aria-label="ID anggota"]')).toHaveValue("");
-    await modal.$("button=Batal").click();
+    await clickWhenReady(modal.$("button=Batal"));
     const tabs = await $$('[role="tab"]');
     await tabs[0].click();
     await expect($(".search-field input")).toHaveValue("E2E-TAB-A");
@@ -31,7 +37,7 @@ describe("Workspace tabs and reporting year", () => {
     await expect(modal.$('input[aria-label="ID anggota"]')).toHaveValue(
       "E2E-TAB-DRAFT",
     );
-    await modal.$("button=Batal").click();
+    await clickWhenReady(modal.$("button=Batal"));
     await tabs[0].$('button[aria-label="Tutup Anggota"]').click();
     await expect($$('[role="tab"]')).toBeElementsArrayOfSize(1);
     await expect($(".search-field input")).toHaveValue("E2E-TAB-B");
