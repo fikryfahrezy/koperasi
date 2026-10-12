@@ -59,7 +59,9 @@ describe("Workspace tabs and reporting year", () => {
 
   it("isolates members and their IDs between companies", async () => {
     const company = $('select[aria-label="Perusahaan"]');
-    await company.waitForDisplayed();
+    // UiSelect keeps the native select transparent over its visible wrapper.
+    await $(".company-control").waitForDisplayed();
+    await company.waitForExist();
     const originalCompany = await company.getValue();
     const otherCompany = originalCompany === "default" ? "testing" : "default";
     await createMember("E2E-COMPANY", "E2E Company Original");
