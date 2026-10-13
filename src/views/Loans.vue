@@ -5,6 +5,7 @@ import { useDebouncedRef } from "../composables/useDebouncedRef";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import { useVirtualSheetColumns } from "../composables/useVirtualSheetColumns";
 import { useVirtualSheet } from "../composables/useVirtualSheet";
+import ExportButton from "../components/ExportButton.vue";
 import IncentiveRatesDialog from "../components/IncentiveRatesDialog.vue";
 import PageHeader from "../components/PageHeader.vue";
 import UiSelect from "../components/UiSelect.vue";
@@ -399,6 +400,9 @@ const navigation = computed(() => ({
         >
           <Percent :size="16" /> Insentif {{ selectedYear }}
         </button>
+      </template>
+      <template #actions>
+        <ExportButton v-if="monthlyLedger.periods.length" kind="loans" />
       </template>
     </PageHeader>
     <section

@@ -352,6 +352,11 @@ const payoffTotal = computed(() =>
     0,
   ),
 );
+const exceedsTopUpPlafond = computed(
+  () =>
+    selectedPayoffs.value.length > 0 &&
+    payoffTotal.value + loanProvision.value.amount > loanForm.value.plafond,
+);
 /** Provisi at the parameter rate. A suplesi charges it on the new money
  * only, as in the sheet: plafond minus what pays off the old loans. */
 function rateProvision(preview: LoanPreview | null) {
@@ -559,7 +564,8 @@ async function submit() {
         loanForm.value.plafond <= 0 ||
         !tenor ||
         tenor <= 0 ||
-        !Number.isFinite(loanProvision.value.amount)
+        !Number.isFinite(loanProvision.value.amount) ||
+        exceedsTopUpPlafond.value
       )
         return;
       saved = await createLoan(
@@ -986,6 +992,10 @@ defineExpose({ open: openModal });
               </div>
             </template>
           </dl>
+          <p v-if="exceedsTopUpPlafond" class="field-hint" role="alert">
+            Pelunasan pinjaman lama dan provisi tidak boleh melebihi plafond
+            pinjaman.
+          </p>
         </div>
       </template>
 
@@ -1033,7 +1043,9 @@ defineExpose({ open: openModal });
         <button
           class="button button--primary"
           type="submit"
-          :disabled="submitting"
+          :disabled="
+            submitting || (category === Category.Loan && exceedsTopUpPlafond)
+          "
         >
           {{ submitting ? "Menyimpan…" : submitLabel }}
         </button>

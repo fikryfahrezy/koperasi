@@ -72,5 +72,7 @@ export default {
     reversalPostedMessage:
       "{id} dihapus dari Buku Kas; histori asal tetap tersimpan.",
     reversalFailed: "Transaksi gagal dihapus",
+    exported: "File Excel tersimpan",
+    exportFailed: "Ekspor Excel gagal",
   },
 } as const;

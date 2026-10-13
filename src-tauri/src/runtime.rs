@@ -28,6 +28,7 @@ pub(crate) fn run() {
         })
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             crate::commands::list_companies,
             crate::commands::get_app_snapshot,
@@ -42,7 +43,8 @@ pub(crate) fn run() {
             crate::commands::post_payment,
             crate::commands::reverse_transaction,
             crate::commands::get_financial_parameters,
-            crate::commands::set_incentive_rates
+            crate::commands::set_incentive_rates,
+            crate::commands::export_xlsx
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -127,7 +127,7 @@ pub(crate) async fn create_loan(
         }
     };
     let mut payoff_components = Vec::new();
-    let mut payoff_total = 0;
+    let mut payoff_total = 0_i64;
     if !input.payoffs.is_empty() && loan_group != LoanGroup::Member {
         return Err("Pelunasan pinjaman lama hanya untuk Anggota.".into());
     }
@@ -176,11 +176,19 @@ pub(crate) async fn create_loan(
                 .for_loan(loan_id),
             );
         }
-        payoff_total += payoff.principal + payoff.interest;
+        payoff_total = payoff_total
+            .checked_add(payoff.principal)
+            .and_then(|total| total.checked_add(payoff.interest))
+            .ok_or("Total pelunasan pinjaman lama terlalu besar.")?;
     }
     let is_top_up = !payoff_components.is_empty();
     // Provision is charged on the money the member actually receives.
-    let provision_base = (input.plafond - payoff_total).max(0);
+    if payoff_total > input.plafond {
+        return Err(
+            "Pelunasan pinjaman lama dan provisi tidak boleh melebihi plafond pinjaman.".into(),
+        );
+    }
+    let provision_base = input.plafond - payoff_total;
     let rate = parameter(
         &mut db,
         company_id,
@@ -201,6 +209,11 @@ pub(crate) async fn create_loan(
     .await?;
     let rate_provision = calculate_rate_amount(provision_base, provision_rate)?;
     let provision = input.provision.unwrap_or(rate_provision);
+    if is_top_up && provision > provision_base {
+        return Err(
+            "Pelunasan pinjaman lama dan provisi tidak boleh melebihi plafond pinjaman.".into(),
+        );
+    }
     let due_date = add_months(&disbursement.business_date, input.tenor)?;
 
     let id = timestamp_id("LOAN");
