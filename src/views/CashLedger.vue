@@ -338,9 +338,6 @@ async function refreshPage() {
             <strong>{{ formatCurrency(item.amount) }}</strong>
           </li>
         </ul>
-        <p class="transaction-detail__reference">
-          Referensi {{ pendingDetail.reference }}
-        </p>
         <div class="modal-actions">
           <button class="button" @click="pendingDetail = null">Tutup</button>
         </div>
@@ -455,12 +452,8 @@ async function refreshPage() {
   display: grid;
   gap: 2px;
 }
-.transaction-detail__items small,
-.transaction-detail__reference {
+.transaction-detail__items small {
   color: var(--soft);
   font-size: 10px;
-}
-.transaction-detail__reference {
-  margin: 10px 0 0;
 }
 </style>
