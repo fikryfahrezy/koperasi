@@ -74,5 +74,7 @@ export default {
     reversalFailed: "Transaksi gagal dihapus",
     exported: "File Excel tersimpan",
     exportFailed: "Ekspor Excel gagal",
+    openFolder: "Buka folder",
+    openFolderFailed: "Folder gagal dibuka",
   },
 } as const;

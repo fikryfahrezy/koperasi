@@ -29,6 +29,7 @@ pub(crate) fn run() {
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             crate::commands::list_companies,
             crate::commands::get_app_snapshot,
