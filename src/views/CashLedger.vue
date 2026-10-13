@@ -6,6 +6,7 @@ import { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import PageHeader from "../components/PageHeader.vue";
 import UiModal from "../components/UiModal.vue";
 import CashEntryDialog from "../components/CashEntryDialog.vue";
+import ExportButton from "../components/ExportButton.vue";
 import {
   Channel,
   formatCurrency,
@@ -122,6 +123,7 @@ async function refreshPage() {
         </label>
       </template>
       <template #actions>
+        <ExportButton kind="cash-book" />
         <button
           class="button button--primary"
           type="button"

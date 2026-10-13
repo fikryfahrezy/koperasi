@@ -414,9 +414,20 @@ const command = {
   reverseTransaction: "reverse_transaction",
   getFinancialParameters: "get_financial_parameters",
   setIncentiveRates: "set_incentive_rates",
+  exportXlsx: "export_xlsx",
 } as const;
 
+/** Pages that can be exported to .xlsx, in the layout of their workbook. */
+export type ExportKind = "cash-book" | "savings" | "loans";
+
 const backend = {
+  exportXlsx: (kind: ExportKind, year: number, through?: string) =>
+    invoke<string | null>(command.exportXlsx, {
+      kind,
+      companyId: selectedCompanyId.value,
+      year,
+      through: through || null,
+    }),
   listCompanies: () => invoke<Company[]>(command.listCompanies),
   getAppSnapshot: (companyId = selectedCompanyId.value) =>
     invoke<AppSnapshot>(command.getAppSnapshot, {
@@ -525,6 +536,26 @@ let refreshPromise: Promise<boolean> | null = null;
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Saves the year's page as .xlsx where the user picks; false when it failed. */
+async function exportXlsx(kind: ExportKind) {
+  try {
+    const path = await backend.exportXlsx(
+      kind,
+      selectedYear.value,
+      currentPeriod(),
+    );
+    if (path) notify(translate("notifications.exported"), path);
+    return true;
+  } catch (error) {
+    notify(
+      translate("notifications.exportFailed"),
+      errorMessage(error),
+      "warning",
+    );
+    return false;
+  }
 }
 
 function notify(
@@ -1170,6 +1201,7 @@ export const useKoperasiStore = () => ({
   reverseTransaction,
   postCashEntry,
   getCashBook,
+  exportXlsx,
   snapshotVersion,
   loadFinancialParameters,
 });
