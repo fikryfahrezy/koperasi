@@ -58,7 +58,7 @@ async fn components_for(
     pool: &SqlitePool,
 ) -> Result<HashMap<String, Vec<ComponentDto>>, String> {
     let sql = format!(
-        "SELECT c.transaction_id, c.label, c.amount FROM transaction_components c JOIN transactions t ON t.company_id = c.company_id AND t.id = c.transaction_id WHERE c.company_id = ? AND {filter_sql} ORDER BY c.id"
+        "SELECT c.transaction_id, c.label, c.amount, COALESCE(c.loan_id, '') loan_id, COALESCE(a.account_type, '') account_type FROM transaction_components c JOIN transactions t ON t.company_id = c.company_id AND t.id = c.transaction_id LEFT JOIN savings_accounts a ON a.company_id = c.company_id AND a.id = c.savings_account_id WHERE c.company_id = ? AND {filter_sql} ORDER BY c.id"
     );
     let mut query = sqlx::query(&sql).bind(company_id);
     for value in binds {
@@ -74,6 +74,8 @@ async fn components_for(
         map.entry(transaction_id).or_default().push(ComponentDto {
             label: try_column!(row, "label"),
             amount: try_column!(row, "amount"),
+            loan_id: try_column!(row, "loan_id"),
+            account_type: try_column!(row, "account_type"),
         });
     }
     Ok(map)
