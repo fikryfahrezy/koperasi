@@ -60,42 +60,99 @@ pub(crate) async fn post_savings_transaction(
     company_id: &str,
     pool: &SqlitePool,
 ) -> Result<AppSnapshot, String> {
-    if input.amount <= 0 {
+    let requested: Vec<(&str, i64)> = if input.amounts.is_empty() {
+        vec![(input.account_type.as_str(), input.amount)]
+    } else {
+        input
+            .amounts
+            .iter()
+            .map(|item| (item.account_type.as_str(), item.amount))
+            .collect()
+    };
+    let mut amounts: Vec<(SavingsAccountType, i64)> = Vec::new();
+    for (account_type, amount) in requested {
+        let account_type = SavingsAccountType::try_from(account_type)?;
+        if amount < 0 {
+            return Err("Nominal transaksi tidak boleh negatif.".into());
+        }
+        if amounts.iter().any(|(other, _)| *other == account_type) {
+            return Err("Jenis simpanan yang sama tercantum dua kali.".into());
+        }
+        if amount > 0 {
+            amounts.push((account_type, amount));
+        }
+    }
+    if amounts.is_empty() {
         return Err("Nominal transaksi harus lebih dari nol.".into());
     }
-    let account_type = SavingsAccountType::try_from(input.account_type.as_str())?;
+    // Pokok, Wajib, Manasuka: the order of the SIMPANAN columns.
+    let order = |account_type: &SavingsAccountType| match account_type {
+        SavingsAccountType::Principal => 0,
+        SavingsAccountType::Mandatory => 1,
+        SavingsAccountType::Voluntary => 2,
+    };
+    amounts.sort_by_key(|(account_type, _)| order(account_type));
     let movement = SavingsMovement::try_from(input.movement.as_str())?;
     let channel = Channel::try_from(input.channel.as_str())?;
     validate_business_date(&input.business_date)?;
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
     let member_name = member_name(&mut db, company_id, &input.member_id).await?;
-    let account_id =
-        savings_account_id(&mut db, company_id, &input.member_id, account_type).await?;
     let is_deposit = movement == SavingsMovement::Deposit;
-    if !is_deposit && savings_balance(&mut db, company_id, &account_id).await? < input.amount {
-        return Err("Saldo simpanan tidak mencukupi.".into());
-    }
-
-    let id = timestamp_id(if is_deposit { "SAV-IN" } else { "SAV-OUT" });
-    let reference = reference_or(&input.reference, format!("KBS/SAV/{id}"));
-    ensure_reference_unused(&mut db, company_id, &reference).await?;
     let (component_type, direction) = if is_deposit {
         (ComponentType::SavingsDeposit, TransactionDirection::In)
     } else {
         (ComponentType::SavingsWithdrawal, TransactionDirection::Out)
     };
-    // Descriptions follow the daily cash ledger, e.g. a voluntary savings withdrawal by Hj Aisyah.
-    let account_label = match account_type {
+    // Descriptions follow the daily cash ledger, e.g. "Pengambilan Manasuka <nama>"
+    // or "Setoran Wajib & Manasuka <nama>".
+    let account_label = |account_type: &SavingsAccountType| match account_type {
         SavingsAccountType::Principal => "Simpanan Pokok",
         SavingsAccountType::Mandatory => "Simpanan Wajib",
         SavingsAccountType::Voluntary => "Manasuka",
     };
-    let description = if is_deposit {
-        format!("Setoran {account_label} {member_name}")
+    let mut components = Vec::new();
+    for (account_type, amount) in &amounts {
+        let account_id =
+            savings_account_id(&mut db, company_id, &input.member_id, *account_type).await?;
+        if !is_deposit && savings_balance(&mut db, company_id, &account_id).await? < *amount {
+            return Err(if amounts.len() == 1 {
+                "Saldo simpanan tidak mencukupi.".into()
+            } else {
+                format!(
+                    "Saldo {} tidak mencukupi.",
+                    account_label(account_type).to_lowercase()
+                )
+            });
+        }
+        components.push(
+            Component::new(component_type, account_label(account_type), *amount)
+                .for_savings(&account_id),
+        );
+    }
+    let accounts = if let [(account_type, _)] = amounts.as_slice() {
+        account_label(account_type).to_string()
     } else {
-        format!("Pengambilan {account_label} {member_name}")
+        let names: Vec<&str> = amounts
+            .iter()
+            .map(|(account_type, _)| match account_type {
+                SavingsAccountType::Principal => "Pokok",
+                SavingsAccountType::Mandatory => "Wajib",
+                SavingsAccountType::Voluntary => "Manasuka",
+            })
+            .collect();
+        let (last, rest) = names.split_last().expect("at least two savings types");
+        format!("Simpanan {} & {last}", rest.join(", "))
     };
-    append(
+    let description = if is_deposit {
+        format!("Setoran {accounts} {member_name}")
+    } else {
+        format!("Pengambilan {accounts} {member_name}")
+    };
+
+    let id = timestamp_id(if is_deposit { "SAV-IN" } else { "SAV-OUT" });
+    let reference = reference_or(&input.reference, format!("KBS/SAV/{id}"));
+    ensure_reference_unused(&mut db, company_id, &reference).await?;
+    let amount = append(
         &mut db,
         company_id,
         Entry {
@@ -111,9 +168,7 @@ pub(crate) async fn post_savings_transaction(
             direction,
             actor: APP_ACTOR,
             reversed_transaction_id: None,
-            components: vec![
-                Component::new(component_type, &description, input.amount).for_savings(&account_id)
-            ],
+            components,
         },
     )
     .await?;
@@ -123,7 +178,13 @@ pub(crate) async fn post_savings_transaction(
         AuditEntityType::Transaction,
         &id,
         AuditAction::Posted,
-        serde_json::json!({"movement": movement.as_str(), "accountType": account_type.as_str(), "amount": input.amount, "channel": channel.as_str(), "reference": reference}),
+        serde_json::json!({
+            "movement": movement.as_str(),
+            "amounts": amounts.iter().map(|(account_type, amount)| serde_json::json!({"accountType": account_type.as_str(), "amount": amount})).collect::<Vec<_>>(),
+            "amount": amount,
+            "channel": channel.as_str(),
+            "reference": reference,
+        }),
     )
     .await?;
     db.commit().await.map_err(|error| error.to_string())?;
@@ -162,12 +223,18 @@ pub(crate) async fn post_payment(
     let reference = reference_or(&input.reference, format!("KBS/RCPT/{id}"));
     ensure_reference_unused(&mut db, company_id, &reference).await?;
 
+    let mut components = Vec::new();
+    if !input.loans.is_empty() {
+        components = loan_lines(&input, company_id, &mut db).await?;
+    }
     // Principal is allocated to the chosen loan, or else to the oldest
     // outstanding loan first.
-    let mut components = Vec::new();
     let mut remaining_principal = input.principal;
     let mut first_loan: Option<String> = None;
-    let loan_ids: Vec<String> = sqlx::query(
+    let loan_ids: Vec<String> = if input.principal == 0 && input.interest == 0 {
+        Vec::new()
+    } else {
+        sqlx::query(
         "SELECT l.id FROM loans l JOIN loan_balances b ON b.company_id = l.company_id AND b.loan_id = l.id WHERE l.company_id = ? AND l.member_id = ? AND b.balance > 0 AND (? = '' OR l.id = ?) ORDER BY l.realization_date, l.id",
     )
     .bind(company_id)
@@ -179,7 +246,8 @@ pub(crate) async fn post_payment(
     .map_err(|error| error.to_string())?
     .into_iter()
     .map(|row| row.try_get("id").map_err(|error| error.to_string()))
-    .collect::<Result<_, String>>()?;
+    .collect::<Result<_, String>>()?
+    };
     for loan_id in loan_ids {
         if first_loan.is_none() {
             first_loan = Some(loan_id.clone());
@@ -256,6 +324,65 @@ pub(crate) async fn post_payment(
     .await?;
     db.commit().await.map_err(|error| error.to_string())?;
     get_app_snapshot(company_id, pool).await
+}
+
+/// Principal and interest components for a payment that lists each loan, as
+/// in a Buku Kas row like "Setoran Pinjaman <nama>" that pays two loans.
+async fn loan_lines(
+    input: &PaymentInput,
+    company_id: &str,
+    db: &mut SqliteConnection,
+) -> Result<Vec<Component>, String> {
+    if input.principal != 0 || input.interest != 0 || !input.loan_id.trim().is_empty() {
+        return Err("Isi pokok dan bunga per pinjaman saja.".into());
+    }
+    let mut components = Vec::new();
+    let mut seen = Vec::new();
+    for line in &input.loans {
+        let loan_id = line.loan_id.trim();
+        if line.principal < 0 || line.interest < 0 {
+            return Err("Komponen pembayaran tidak boleh negatif.".into());
+        }
+        if seen.contains(&loan_id) {
+            return Err("Pinjaman yang sama tercantum dua kali.".into());
+        }
+        seen.push(loan_id);
+        if line.principal == 0 && line.interest == 0 {
+            continue;
+        }
+        let belongs: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM loans WHERE company_id = ? AND id = ? AND member_id = ?",
+        )
+        .bind(company_id)
+        .bind(loan_id)
+        .bind(&input.member_id)
+        .fetch_optional(&mut *db)
+        .await
+        .map_err(|error| error.to_string())?;
+        if belongs.is_none() {
+            return Err("Pinjaman tidak ditemukan untuk anggota ini.".into());
+        }
+        if line.principal > loan_balance(db, company_id, loan_id).await? {
+            return Err("Pembayaran pokok melebihi saldo pinjaman berjalan.".into());
+        }
+        if line.principal > 0 {
+            components.push(
+                Component::new(
+                    ComponentType::LoanPrincipal,
+                    "Pokok pinjaman",
+                    line.principal,
+                )
+                .for_loan(loan_id),
+            );
+        }
+        if line.interest > 0 {
+            components.push(
+                Component::new(ComponentType::LoanInterest, "Bunga pinjaman", line.interest)
+                    .for_loan(loan_id),
+            );
+        }
+    }
+    Ok(components)
 }
 
 /// Installment for one loan, as in the daily cash ledger rows for Non Anggota borrowers

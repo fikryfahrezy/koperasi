@@ -316,15 +316,17 @@ interface CreateLoanInput {
   loanType: LoanType;
   /** Typed provision fee; omitted uses the Provisi parameter rate. */
   provision?: number;
+  /** Suplesi: old loans paid off from this loan (full principal + interest). */
+  payoffs?: { loanId: string; principal: number; interest: number }[];
 }
 
 type ChannelInput = { channel: Channel };
 
 interface SavingsTransactionInput {
   memberId: string;
-  accountType: SavingsAccountType;
   movement: SavingsMovement;
-  amount: number;
+  /** One row for every savings type moved together, e.g. Wajib & Manasuka. */
+  amounts: { accountType: SavingsAccountType; amount: number }[];
   reference: string;
 }
 
@@ -334,6 +336,8 @@ interface PaymentInput {
   loanId?: string;
   principal: number;
   interest: number;
+  /** Anggota: principal and interest per loan, instead of the two above. */
+  loans?: { loanId: string; principal: number; interest: number }[];
   wajib: number;
   voluntary: number;
   reference: string;
@@ -849,7 +853,14 @@ async function postPayment(input: PaymentInput, options: PostingOptions = {}) {
       translate("notifications.paymentPosted"),
       translate("notifications.paymentPostedMessage", {
         amount: formatCurrency(
-          input.principal + input.interest + input.wajib + input.voluntary,
+          input.principal +
+            input.interest +
+            (input.loans ?? []).reduce(
+              (sum, line) => sum + line.principal + line.interest,
+              0,
+            ) +
+            input.wajib +
+            input.voluntary,
         ),
       }),
     );

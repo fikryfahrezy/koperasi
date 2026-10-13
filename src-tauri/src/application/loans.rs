@@ -2,7 +2,7 @@
 
 use sqlx::{SqliteConnection, SqlitePool};
 
-use super::posting::{append, audit, Component, Entry, APP_ACTOR};
+use super::posting::{append, audit, loan_balance, Component, Entry, APP_ACTOR};
 use super::read_model::get_app_snapshot;
 use super::savings::member_name;
 use crate::{
@@ -90,6 +90,8 @@ pub(crate) async fn preview_loan(
 
 /// A loan is recorded when it is realised, as in PINJAMAN BULANAN: the principal outflow
 /// and provision fee inflow are written as two rows, as in the daily cash ledger.
+/// A suplesi also pays off the member's old loans, as a third row "Pelunasan Pinjaman
+/// Lama", and its provision is charged on the new money only (plafond minus payoff).
 pub(crate) async fn create_loan(
     input: CreateLoanInput,
     company_id: &str,
@@ -124,6 +126,61 @@ pub(crate) async fn create_loan(
             (None, name.to_string())
         }
     };
+    let mut payoff_components = Vec::new();
+    let mut payoff_total = 0;
+    if !input.payoffs.is_empty() && loan_group != LoanGroup::Member {
+        return Err("Pelunasan pinjaman lama hanya untuk Anggota.".into());
+    }
+    for (index, payoff) in input.payoffs.iter().enumerate() {
+        let loan_id = payoff.loan_id.trim();
+        if input.payoffs[..index]
+            .iter()
+            .any(|other| other.loan_id.trim() == loan_id)
+        {
+            return Err("Pinjaman yang sama tercantum dua kali.".into());
+        }
+        if payoff.interest < 0 {
+            return Err("Komponen pembayaran tidak boleh negatif.".into());
+        }
+        let belongs: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM loans WHERE company_id = ? AND id = ? AND member_id = ?",
+        )
+        .bind(company_id)
+        .bind(loan_id)
+        .bind(&input.member_id)
+        .fetch_optional(&mut *db)
+        .await
+        .map_err(|error| error.to_string())?;
+        if belongs.is_none() {
+            return Err("Pinjaman lama tidak ditemukan untuk anggota ini.".into());
+        }
+        let balance = loan_balance(&mut db, company_id, loan_id).await?;
+        if balance <= 0 || payoff.principal != balance {
+            return Err("Pelunasan pinjaman lama harus sebesar sisa pokoknya.".into());
+        }
+        payoff_components.push(
+            Component::new(
+                ComponentType::LoanPrincipal,
+                "Pelunasan pokok",
+                payoff.principal,
+            )
+            .for_loan(loan_id),
+        );
+        if payoff.interest > 0 {
+            payoff_components.push(
+                Component::new(
+                    ComponentType::LoanInterest,
+                    "Bunga pinjaman",
+                    payoff.interest,
+                )
+                .for_loan(loan_id),
+            );
+        }
+        payoff_total += payoff.principal + payoff.interest;
+    }
+    let is_top_up = !payoff_components.is_empty();
+    // Provision is charged on the money the member actually receives.
+    let provision_base = (input.plafond - payoff_total).max(0);
     let rate = parameter(
         &mut db,
         company_id,
@@ -142,7 +199,7 @@ pub(crate) async fn create_loan(
         &disbursement.business_date,
     )
     .await?;
-    let rate_provision = calculate_rate_amount(input.plafond, provision_rate)?;
+    let rate_provision = calculate_rate_amount(provision_base, provision_rate)?;
     let provision = input.provision.unwrap_or(rate_provision);
     let due_date = add_months(&disbursement.business_date, input.tenor)?;
 
@@ -162,7 +219,11 @@ pub(crate) async fn create_loan(
             member_id,
             member_name: &borrower_name,
             channel,
-            description: &format!("Realisasi Pinjaman {borrower_name}"),
+            description: &if is_top_up {
+                format!("Suplesi {borrower_name} Jk {} bulan", input.tenor)
+            } else {
+                format!("Realisasi Pinjaman {borrower_name}")
+            },
             reference: &format!("KBS/DISB/{id}/{disbursement_id}"),
             direction: TransactionDirection::Out,
             actor: APP_ACTOR,
@@ -193,7 +254,7 @@ pub(crate) async fn create_loan(
                     format!(
                         "Provisi {} % x Rp. {}",
                         format_rate(provision_rate * 100.0),
-                        format_thousands(input.plafond)
+                        format_thousands(provision_base)
                     )
                 } else {
                     format!("Provisi pinjaman Rp. {}", format_thousands(input.plafond))
@@ -212,13 +273,36 @@ pub(crate) async fn create_loan(
         )
         .await?;
     }
+    if is_top_up {
+        let payoff_id = timestamp_id("PAYOFF");
+        append(
+            &mut db,
+            company_id,
+            Entry {
+                id: payoff_id.clone(),
+                business_date: &disbursement.business_date,
+                display_date: &disbursement.display_date,
+                display_time: &disbursement.display_time,
+                member_id,
+                member_name: &borrower_name,
+                channel,
+                description: &format!("Pelunasan Pinjaman Lama {borrower_name}"),
+                reference: &format!("KBS/RCPT/{id}/{payoff_id}"),
+                direction: TransactionDirection::In,
+                actor: APP_ACTOR,
+                reversed_transaction_id: None,
+                components: payoff_components,
+            },
+        )
+        .await?;
+    }
     audit(
         &mut db,
         company_id,
         AuditEntityType::Loan,
         &id,
         AuditAction::Disbursed,
-        serde_json::json!({"loanGroup": loan_group.as_str(), "memberId": member_id, "plafond": input.plafond, "tenor": input.tenor, "interestType": interest_type.as_str(), "loanType": loan_type.as_str(), "provision": provision, "dueDate": due_date, "channel": channel.as_str()}),
+        serde_json::json!({"loanGroup": loan_group.as_str(), "memberId": member_id, "plafond": input.plafond, "tenor": input.tenor, "interestType": interest_type.as_str(), "loanType": loan_type.as_str(), "provision": provision, "dueDate": due_date, "channel": channel.as_str(), "payoffs": input.payoffs.iter().map(|payoff| serde_json::json!({"loanId": payoff.loan_id, "principal": payoff.principal, "interest": payoff.interest})).collect::<Vec<_>>()}),
     )
     .await?;
     db.commit().await.map_err(|error| error.to_string())?;

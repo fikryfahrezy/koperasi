@@ -42,8 +42,9 @@ pub(crate) async fn list_companies(pool: &SqlitePool) -> Result<Vec<CompanyDto>,
 mod tests {
     use super::*;
     use crate::contracts::{
-        AddMemberInput, CashEntryInput, CreateLoanInput, DisbursementInput, OpeningSavingsInput,
-        PaymentInput, PreviewLoanInput, ReverseTransactionInput, SavingsTransactionInput,
+        AddMemberInput, CashEntryInput, CreateLoanInput, DisbursementInput, LoanPaymentLine,
+        OpeningSavingsInput, PaymentInput, PreviewLoanInput, ReverseTransactionInput,
+        SavingsAmountInput, SavingsTransactionInput,
     };
     use crate::domain::{
         Channel, ComponentType, InterestType, LoanGroup, LoanType, ParameterKey,
@@ -74,6 +75,7 @@ mod tests {
             loan_id: String::new(),
             principal,
             interest: 20_000,
+            loans: Vec::new(),
             wajib: 10_000,
             voluntary: 5_000,
             reference: reference.into(),
@@ -318,6 +320,7 @@ mod tests {
                     interest_type: InterestType::Flat.as_str().into(),
                     loan_type: LoanType::Temporary.as_str().into(),
                     provision: None,
+                    payoffs: Vec::new(),
                     disbursement: DisbursementInput {
                         channel: Channel::Cash.as_str().into(),
                         business_date: DATE.into(),
@@ -365,6 +368,185 @@ mod tests {
     }
 
     #[test]
+    fn several_savings_types_share_one_cash_row() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+            add_member(member_input("Saver"), "default", &pool)
+                .await
+                .unwrap();
+            let savings = |movement: SavingsMovement, amounts: &[(SavingsAccountType, i64)]| {
+                SavingsTransactionInput {
+                    member_id: "default-M001".into(),
+                    account_type: String::new(),
+                    movement: movement.as_str().into(),
+                    amount: 0,
+                    amounts: amounts
+                        .iter()
+                        .map(|(account_type, amount)| SavingsAmountInput {
+                            account_type: account_type.as_str().into(),
+                            amount: *amount,
+                        })
+                        .collect(),
+                    reference: String::new(),
+                    channel: Channel::Cash.as_str().into(),
+                    business_date: DATE.into(),
+                    display_date: "13 Sep 2026".into(),
+                    display_time: "10:00".into(),
+                }
+            };
+            use SavingsAccountType::{Mandatory, Principal, Voluntary};
+            post_savings_transaction(
+                savings(
+                    SavingsMovement::Deposit,
+                    &[(Voluntary, 25_000), (Mandatory, 50_000)],
+                ),
+                "default",
+                &pool,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                post_savings_transaction(
+                    savings(
+                        SavingsMovement::Withdrawal,
+                        &[(Principal, 50_000), (Voluntary, 30_000)]
+                    ),
+                    "default",
+                    &pool,
+                )
+                .await
+                .err()
+                .unwrap(),
+                "Saldo manasuka tidak mencukupi."
+            );
+            assert!(post_savings_transaction(
+                savings(SavingsMovement::Deposit, &[(Mandatory, 1), (Mandatory, 2)]),
+                "default",
+                &pool,
+            )
+            .await
+            .is_err());
+            let snapshot = post_savings_transaction(
+                savings(
+                    SavingsMovement::Withdrawal,
+                    &[
+                        (Principal, 50_000),
+                        (Mandatory, 50_000),
+                        (Voluntary, 25_000),
+                    ],
+                ),
+                "default",
+                &pool,
+            )
+            .await
+            .unwrap();
+            assert_eq!(snapshot.totals.savings, 0);
+
+            let book = get_cash_book("default", 2026, Channel::Cash.as_str(), &pool)
+                .await
+                .unwrap();
+            let rows: Vec<(&str, i64)> = book.rows[book.rows.len() - 2..]
+                .iter()
+                .map(|row| (row.transaction.description.as_str(), row.transaction.amount))
+                .collect();
+            assert_eq!(
+                rows,
+                [
+                    ("Setoran Simpanan Wajib & Manasuka Saver", 75_000),
+                    (
+                        "Pengambilan Simpanan Pokok, Wajib & Manasuka Saver",
+                        125_000
+                    ),
+                ]
+            );
+        });
+    }
+
+    #[test]
+    fn suplesi_pays_off_old_loans_in_three_cash_rows() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+            add_member(member_input("Suplesi Member"), "default", &pool)
+                .await
+                .unwrap();
+            let loan = |plafond: i64, tenor: i64, payoffs: Vec<LoanPaymentLine>| CreateLoanInput {
+                loan_group: LoanGroup::Member.as_str().into(),
+                member_id: "default-M001".into(),
+                borrower_name: String::new(),
+                plafond,
+                tenor,
+                interest_type: InterestType::Declining.as_str().into(),
+                loan_type: LoanType::Monthly.as_str().into(),
+                provision: None,
+                payoffs,
+                disbursement: DisbursementInput {
+                    channel: Channel::Cash.as_str().into(),
+                    business_date: DATE.into(),
+                    display_date: "13 Sep 2026".into(),
+                    display_time: "10:10".into(),
+                },
+            };
+            let first = create_loan(loan(1_000_000, 10, Vec::new()), "default", &pool)
+                .await
+                .unwrap();
+            let old_id = first.loans[0].id.clone();
+            let payoff = |principal: i64| LoanPaymentLine {
+                loan_id: old_id.clone(),
+                principal,
+                interest: 20_000,
+            };
+
+            // A payoff must clear the old loan.
+            assert!(
+                create_loan(loan(3_000_000, 12, vec![payoff(900_000)]), "default", &pool)
+                    .await
+                    .is_err()
+            );
+            let mut non_member = loan(3_000_000, 12, vec![payoff(1_000_000)]);
+            (non_member.loan_group, non_member.borrower_name) =
+                (LoanGroup::NonMember.as_str().into(), "Someone".into());
+            assert!(create_loan(non_member, "default", &pool).await.is_err());
+
+            let snapshot = create_loan(
+                loan(3_000_000, 12, vec![payoff(1_000_000)]),
+                "default",
+                &pool,
+            )
+            .await
+            .unwrap();
+            let old = snapshot
+                .loans
+                .iter()
+                .find(|item| item.id == old_id)
+                .unwrap();
+            assert_eq!(old.balance, 0);
+            let new = snapshot
+                .loans
+                .iter()
+                .find(|item| item.id != old_id)
+                .unwrap();
+            assert_eq!(new.balance, 3_000_000);
+
+            let book = get_cash_book("default", 2026, Channel::Cash.as_str(), &pool)
+                .await
+                .unwrap();
+            let rows: Vec<(&str, i64)> = book.rows[book.rows.len() - 3..]
+                .iter()
+                .map(|row| (row.transaction.description.as_str(), row.transaction.amount))
+                .collect();
+            // Provision is 1% of 3,000,000 - (1,000,000 + 20,000).
+            assert_eq!(
+                rows,
+                [
+                    ("Suplesi Suplesi Member Jk 12 bulan", 3_000_000),
+                    ("Provisi 1 % x Rp. 1.980.000", 19_800),
+                    ("Pelunasan Pinjaman Lama Suplesi Member", 1_020_000),
+                ]
+            );
+        });
+    }
+
+    #[test]
     fn derives_balances_from_an_append_only_ledger() {
         tauri::async_runtime::block_on(async {
             let pool = crate::database::memory_pool().await;
@@ -378,6 +560,7 @@ mod tests {
             let invalid_account_type = post_savings_transaction(
                 SavingsTransactionInput {
                     member_id: "testing-M001".into(),
+                    amounts: Vec::new(),
                     account_type: "UNKNOWN".into(),
                     movement: crate::domain::SavingsMovement::Deposit.as_str().into(),
                     amount: 25_000,
@@ -418,6 +601,7 @@ mod tests {
                 post_savings_transaction(
                     SavingsTransactionInput {
                         member_id: member_id.into(),
+                        amounts: Vec::new(),
                         account_type: SavingsAccountType::Voluntary.as_str().into(),
                         movement: SavingsMovement::Deposit.as_str().into(),
                         amount: 25_000,
@@ -436,6 +620,7 @@ mod tests {
             let overdraw = post_savings_transaction(
                 SavingsTransactionInput {
                     member_id: "testing-M001".into(),
+                    amounts: Vec::new(),
                     account_type: SavingsAccountType::Voluntary.as_str().into(),
                     movement: SavingsMovement::Withdrawal.as_str().into(),
                     amount: 30_000,
@@ -454,6 +639,7 @@ mod tests {
             let principal_overdraw = post_savings_transaction(
                 SavingsTransactionInput {
                     member_id: "testing-M001".into(),
+                    amounts: Vec::new(),
                     account_type: SavingsAccountType::Principal.as_str().into(),
                     movement: SavingsMovement::Withdrawal.as_str().into(),
                     amount: 60_000,
@@ -497,6 +683,7 @@ mod tests {
                     interest_type: InterestType::Declining.as_str().into(),
                     loan_type: LoanType::Monthly.as_str().into(),
                     provision: None,
+                    payoffs: Vec::new(),
                     disbursement: DisbursementInput {
                         channel: Channel::Cash.as_str().into(),
                         business_date: DATE.into(),
@@ -586,6 +773,36 @@ mod tests {
             let mut other = payment(50_000, "OTHER-LOAN", Channel::NonCash.as_str());
             other.loan_id = "not-this-member".into();
             assert!(post_payment(other, "testing", &pool).await.is_err());
+
+            // One deposit can list principal and interest per loan.
+            let line = |loan_id: &str, principal: i64, interest: i64| LoanPaymentLine {
+                loan_id: loan_id.into(),
+                principal,
+                interest,
+            };
+            let mut per_loan = payment(0, "PER-LOAN", Channel::NonCash.as_str());
+            (per_loan.interest, per_loan.wajib, per_loan.voluntary) = (0, 0, 0);
+            per_loan.loans = vec![line(&loan_id, 200_000, 18_000)];
+            let paid = post_payment(per_loan, "testing", &pool).await.unwrap();
+            let loan = paid.loans.iter().find(|loan| loan.id == loan_id).unwrap();
+            assert_eq!(loan.balance, 750_000);
+            let row = paid
+                .transactions
+                .iter()
+                .find(|transaction| transaction.reference == "PER-LOAN")
+                .unwrap();
+            assert_eq!(row.amount, 218_000);
+            let mut mixed = payment(10_000, "MIXED", Channel::Cash.as_str());
+            mixed.loans = vec![line(&loan_id, 10_000, 0)];
+            assert!(post_payment(mixed, "testing", &pool).await.is_err());
+            let mut too_much = payment(0, "TOO-MUCH", Channel::Cash.as_str());
+            too_much.interest = 0;
+            too_much.loans = vec![line(&loan_id, 800_000, 0)];
+            assert!(post_payment(too_much, "testing", &pool).await.is_err());
+            let mut foreign = payment(0, "FOREIGN", Channel::Cash.as_str());
+            foreign.interest = 0;
+            foreign.loans = vec![line("not-this-member", 10_000, 0)];
+            assert!(post_payment(foreign, "testing", &pool).await.is_err());
 
             let expense = post_cash_entry(
                 CashEntryInput {
