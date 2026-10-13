@@ -140,12 +140,10 @@ export async function postSavings(name, account, amount, withdrawal = false) {
     withdrawal ? "savings-withdrawal" : "savings-deposit",
   );
   await chooseBorrower(modal, name);
-  await modal
-    .$('select[aria-label="Jenis simpanan"]')
-    .selectByVisibleText(account);
-  await modal
-    .$('input[aria-label="Nominal transaksi dalam Rupiah"]')
-    .setValue(String(amount));
+  for (const field of ["Pokok", "Wajib", "Manasuka"])
+    await modal
+      .$(`input[aria-label="Simpanan ${field.toLowerCase()}"]`)
+      .setValue(field === account ? String(amount) : "0");
   await submitEntry(modal);
 }
 

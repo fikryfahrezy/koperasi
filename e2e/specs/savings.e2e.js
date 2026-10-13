@@ -48,9 +48,7 @@ describe("Savings", () => {
     await postSavings(name, "Manasuka", 30000);
     const modal = await openEntry("savings-withdrawal");
     await chooseBorrower(modal, name);
-    await modal
-      .$('input[aria-label="Nominal transaksi dalam Rupiah"]')
-      .setValue("31000");
+    await modal.$('input[aria-label="Simpanan manasuka"]').setValue("31000");
     await clickSubmit(modal);
     await expect($(".toast-card--warning")).toHaveText(
       expect.stringContaining("Saldo simpanan tidak mencukupi."),

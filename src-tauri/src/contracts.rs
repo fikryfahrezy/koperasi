@@ -157,6 +157,10 @@ pub(crate) struct CreateLoanInput {
     /// Provision fee typed by the user; empty uses the Provisi parameter rate.
     #[serde(default)]
     pub(crate) provision: Option<i64>,
+    /// Suplesi: the member's running loans paid off from this loan, each with
+    /// its full remaining principal and the interest still due.
+    #[serde(default)]
+    pub(crate) payoffs: Vec<LoanPaymentLine>,
     /// Loans are recorded when they are realised, as in PINJAMAN BULANAN.
     pub(crate) disbursement: DisbursementInput,
 }
@@ -179,6 +183,10 @@ pub(crate) struct PaymentInput {
     pub(crate) loan_id: String,
     pub(crate) principal: i64,
     pub(crate) interest: i64,
+    /// Principal and interest per loan, for a member paying several loans in
+    /// one deposit (one Buku Kas row). Used instead of `principal`/`interest`.
+    #[serde(default)]
+    pub(crate) loans: Vec<LoanPaymentLine>,
     pub(crate) wajib: i64,
     pub(crate) voluntary: i64,
     pub(crate) reference: String,
@@ -190,16 +198,38 @@ pub(crate) struct PaymentInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct LoanPaymentLine {
+    pub(crate) loan_id: String,
+    pub(crate) principal: i64,
+    pub(crate) interest: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct SavingsTransactionInput {
     pub(crate) member_id: String,
+    #[serde(default)]
     pub(crate) account_type: String,
     pub(crate) movement: String,
+    #[serde(default)]
     pub(crate) amount: i64,
+    /// Several savings types in one row, e.g. "Setoran Wajib & Manasuka" or a
+    /// member leaving who takes out Pokok, Wajib, and Manasuka at once. Used
+    /// instead of `account_type` and `amount`.
+    #[serde(default)]
+    pub(crate) amounts: Vec<SavingsAmountInput>,
     pub(crate) reference: String,
     pub(crate) channel: String,
     pub(crate) business_date: String,
     pub(crate) display_date: String,
     pub(crate) display_time: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SavingsAmountInput {
+    pub(crate) account_type: String,
+    pub(crate) amount: i64,
 }
 
 #[derive(Deserialize)]
