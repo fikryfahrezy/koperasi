@@ -5,6 +5,7 @@
 //! without a Tauri runtime.
 
 use tauri::State;
+use tauri_plugin_dialog::DialogExt;
 
 use crate::{
     application,
@@ -137,4 +138,39 @@ pub(crate) async fn set_incentive_rates(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     application::set_incentive_rates(input, &company_id, &state.db).await
+}
+
+/// Exports a page (`cash-book`, `savings` or `loans`) of the year as .xlsx to a
+/// file the user picks. Returns the saved path, or nothing when cancelled.
+#[tauri::command]
+pub(crate) async fn export_xlsx(
+    kind: String,
+    company_id: String,
+    year: i32,
+    through: Option<String>,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    let kind = application::ExportKind::parse(&kind)?;
+    let file_name = kind.file_name(year);
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_file_name(file_name)
+            .add_filter("Excel", &["xlsx"])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    // Written exactly where the dialog confirmed (it already adds .xlsx from
+    // the filter); renaming here could overwrite a file nobody confirmed.
+    let path = picked.into_path().map_err(|error| error.to_string())?;
+    let bytes =
+        application::export_workbook(&kind, &company_id, year, through.as_deref(), &state.db)
+            .await?;
+    std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
+    Ok(Some(path.display().to_string()))
 }

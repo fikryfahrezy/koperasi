@@ -1,5 +1,6 @@
 //! Framework-independent application-service facade.
 
+mod export;
 mod ledger;
 mod ledger_report;
 mod loans;
@@ -10,6 +11,7 @@ mod read_model;
 mod savings;
 mod transactions;
 
+pub(crate) use export::{export_workbook, ExportKind};
 pub(crate) use ledger::get_monthly_ledger;
 pub(crate) use loans::{create_loan, preview_loan};
 pub(crate) use members::{add_member, update_member};
@@ -507,6 +509,43 @@ mod tests {
                 (LoanGroup::NonMember.as_str().into(), "Someone".into());
             assert!(create_loan(non_member, "default", &pool).await.is_err());
 
+            // Principal, interest, and the typed provision must all fit in the
+            // new loan. Rejected requests must not change balances or history.
+            let audit_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_events")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            for (plafond, provision) in [
+                (500_000, None),
+                (1_000_000, None),
+                (1_020_000, Some(1)),
+                (1_030_000, Some(10_001)),
+            ] {
+                let mut invalid = loan(plafond, 12, vec![payoff(1_000_000)]);
+                invalid.provision = provision;
+                assert_eq!(
+                    create_loan(invalid, "default", &pool).await.err().unwrap(),
+                    "Pelunasan pinjaman lama dan provisi tidak boleh melebihi plafond pinjaman."
+                );
+                let unchanged = get_app_snapshot("default", &pool).await.unwrap();
+                assert_eq!(
+                    serde_json::to_value(&unchanged).unwrap(),
+                    serde_json::to_value(&first).unwrap()
+                );
+                let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_events")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+                assert_eq!(after, audit_count);
+            }
+
+            let mut overflow = loan(i64::MAX, 12, vec![payoff(1_000_000)]);
+            overflow.payoffs[0].interest = i64::MAX;
+            assert_eq!(
+                create_loan(overflow, "default", &pool).await.err().unwrap(),
+                "Total pelunasan pinjaman lama terlalu besar."
+            );
+
             let snapshot = create_loan(
                 loan(3_000_000, 12, vec![payoff(1_000_000)]),
                 "default",
@@ -542,6 +581,30 @@ mod tests {
                     ("Provisi 1 % x Rp. 1.980.000", 19_800),
                     ("Pelunasan Pinjaman Lama Suplesi Member", 1_020_000),
                 ]
+            );
+
+            // The exact limit is allowed, including a manually entered fee:
+            // 3,000,000 principal + 20,000 interest + 10,000 provision.
+            let mut at_limit = loan(
+                3_030_000,
+                12,
+                vec![LoanPaymentLine {
+                    loan_id: new.id.clone(),
+                    principal: new.balance,
+                    interest: 20_000,
+                }],
+            );
+            at_limit.provision = Some(10_000);
+            let at_limit = create_loan(at_limit, "default", &pool).await.unwrap();
+            assert_eq!(at_limit.totals.cash, snapshot.totals.cash);
+            assert_eq!(
+                at_limit
+                    .loans
+                    .iter()
+                    .find(|item| item.id == new.id)
+                    .unwrap()
+                    .balance,
+                0
             );
         });
     }
