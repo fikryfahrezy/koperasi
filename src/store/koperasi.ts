@@ -239,7 +239,14 @@ export interface Transaction {
   status: TransactionStatus;
   /** The row that cancels another row (Dibalik). */
   isReversal: boolean;
-  components: { label: string; amount: number }[];
+  components: {
+    label: string;
+    amount: number;
+    /** The loan this item pays or disburses; empty otherwise. */
+    loanId: string;
+    /** The savings type this item moves; empty otherwise. */
+    accountType: SavingsAccountType | "";
+  }[];
   actor: string;
 }
 
