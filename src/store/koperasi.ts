@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useQuery } from "@tanstack/vue-query";
 import { computed, reactive, ref, watch } from "vue";
 import { queryClient, queryKeys } from "../query-client";
@@ -370,6 +371,8 @@ export interface ToastMessage {
   title: string;
   message: string;
   tone: "success" | "info" | "warning";
+  exportPath?: string;
+  openingFolder?: boolean;
 }
 
 const members = reactive<Member[]>([]);
@@ -546,7 +549,8 @@ async function exportXlsx(kind: ExportKind) {
       selectedYear.value,
       currentPeriod(),
     );
-    if (path) notify(translate("notifications.exported"), path);
+    if (path)
+      notify(translate("notifications.exported"), path, "success", path);
     return true;
   } catch (error) {
     notify(
@@ -558,16 +562,36 @@ async function exportXlsx(kind: ExportKind) {
   }
 }
 
+async function openExportFolder(toast: ToastMessage) {
+  if (!toast.exportPath || toast.openingFolder) return;
+  toast.openingFolder = true;
+  try {
+    await revealItemInDir(toast.exportPath);
+  } catch (error) {
+    notify(
+      translate("notifications.openFolderFailed"),
+      errorMessage(error),
+      "warning",
+    );
+  } finally {
+    toast.openingFolder = false;
+  }
+}
+
 function notify(
   title: string,
   message: string,
   tone: ToastMessage["tone"] = "success",
+  exportPath?: string,
 ) {
   const id = ++toastId;
-  toasts.value.push({ id, title, message, tone });
-  window.setTimeout(() => {
-    toasts.value = toasts.value.filter((item) => item.id !== id);
-  }, 4200);
+  toasts.value.push({ id, title, message, tone, exportPath });
+  window.setTimeout(
+    () => {
+      toasts.value = toasts.value.filter((item) => item.id !== id);
+    },
+    exportPath ? 12000 : 4200,
+  );
 }
 
 function applySnapshot(
@@ -1202,6 +1226,7 @@ export const useKoperasiStore = () => ({
   postCashEntry,
   getCashBook,
   exportXlsx,
+  openExportFolder,
   snapshotVersion,
   loadFinancialParameters,
 });

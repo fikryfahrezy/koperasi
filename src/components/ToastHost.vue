@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { CheckCircle2, Info, TriangleAlert } from "lucide-vue-next";
+import { CheckCircle2, FolderOpen, Info, TriangleAlert } from "lucide-vue-next";
 import { useKoperasiStore } from "../store/koperasi";
 
-const { toasts } = useKoperasiStore();
+const { toasts, openExportFolder } = useKoperasiStore();
 </script>
 
 <template>
@@ -18,6 +18,16 @@ const { toasts } = useKoperasiStore();
       <div>
         <strong>{{ toast.title }}</strong>
         <p>{{ toast.message }}</p>
+        <button
+          v-if="toast.exportPath"
+          type="button"
+          class="button button--secondary toast-folder-button"
+          :disabled="toast.openingFolder"
+          @click="openExportFolder(toast)"
+        >
+          <FolderOpen :size="14" aria-hidden="true" />
+          {{ $t("notifications.openFolder") }}
+        </button>
       </div>
     </article>
   </div>
@@ -44,6 +54,7 @@ const { toasts } = useKoperasiStore();
   background: #fff;
 }
 .toast-card > div {
+  min-width: 0;
   display: grid;
   gap: 3px;
 }
@@ -52,10 +63,17 @@ const { toasts } = useKoperasiStore();
   font-size: 11px;
 }
 .toast-card p {
+  overflow-wrap: anywhere;
   margin: 0;
   color: var(--muted);
   font-size: 9.5px;
   line-height: 1.45;
+}
+.toast-folder-button {
+  justify-self: start;
+  margin-top: 6px;
+  padding: 6px 9px;
+  font-size: 11px;
 }
 .toast-card--warning {
   color: var(--amber);
