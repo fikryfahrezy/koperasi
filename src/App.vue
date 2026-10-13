@@ -101,21 +101,25 @@ onMounted(initialize);
           </header>
           <WorkspaceTabs />
         </div>
-        <main class="app-content">
-          <section v-if="loading" class="backend-state panel">
-            <span class="backend-state__spinner"></span>
-            <strong>{{ $t("app.loadingTitle") }}</strong>
-            <p>{{ $t("app.loadingDescription") }}</p>
-          </section>
-          <section v-else-if="backendError" class="backend-state panel">
-            <strong>{{ $t("app.backendTitle") }}</strong>
-            <p>{{ backendError }}</p>
-            <button class="button button--primary" @click="initialize">
-              {{ $t("common.retry") }}
-            </button>
-          </section>
-          <WorkspaceTabPages v-else />
-        </main>
+        <div class="app-stage">
+          <!-- Page dialogs render here so tabs and the menu stay usable. -->
+          <div id="page-overlay"></div>
+          <main class="app-content">
+            <section v-if="loading" class="backend-state panel">
+              <span class="backend-state__spinner"></span>
+              <strong>{{ $t("app.loadingTitle") }}</strong>
+              <p>{{ $t("app.loadingDescription") }}</p>
+            </section>
+            <section v-else-if="backendError" class="backend-state panel">
+              <strong>{{ $t("app.backendTitle") }}</strong>
+              <p>{{ backendError }}</p>
+              <button class="button button--primary" @click="initialize">
+                {{ $t("common.retry") }}
+              </button>
+            </section>
+            <WorkspaceTabPages v-else />
+          </main>
+        </div>
         <AppMenu />
       </div>
     </div>
@@ -136,6 +140,13 @@ onMounted(initialize);
 .app-shell__body {
   min-width: 0;
   height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.app-stage {
+  position: relative;
+  flex: 1 1 0%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }

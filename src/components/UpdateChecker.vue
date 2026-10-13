@@ -109,6 +109,7 @@ function closeModal() {
 
   <UiModal
     :open="open"
+    scope="app"
     :title="t('update.title')"
     :description="t('update.currentVersion', { version: currentVersion })"
     @close="closeModal"

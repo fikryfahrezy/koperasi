@@ -35,7 +35,9 @@ fn is_closed(row: &LoanMonthDto) -> bool {
 /// to member id, or name for Non Anggota) has another loan still running; its
 /// income moves to the running loan realized last (`realized`: loan id to
 /// realization date, `YYYY-MM-DD`), so it still counts toward the SHU.
-/// Borrowers with only paid-off loans keep those rows.
+/// A borrower with only paid-off loans keeps just the one realized last, which
+/// takes over the income of the others. A loan without a borrower key is its
+/// own borrower.
 pub(crate) fn apply_loan_report(
     loans: &mut [LoanMonthDto],
     borrowers: &HashMap<String, String>,
@@ -68,7 +70,11 @@ pub(crate) fn apply_loan_report(
 
     let mut groups: HashMap<(String, String), Vec<usize>> = HashMap::new();
     for (index, row) in loans.iter().enumerate() {
-        let borrower = borrowers.get(&row.loan_id).cloned().unwrap_or_default();
+        let borrower = borrowers
+            .get(&row.loan_id)
+            .filter(|borrower| !borrower.is_empty())
+            .cloned()
+            .unwrap_or_else(|| format!("loan:{}", row.loan_id));
         groups
             .entry((row.period.clone(), borrower))
             .or_default()
@@ -77,15 +83,18 @@ pub(crate) fn apply_loan_report(
     for group in groups.values() {
         let (closed, open): (Vec<usize>, Vec<usize>) =
             group.iter().partition(|&&index| is_closed(&loans[index]));
-        let Some(&host) = open.iter().max_by(|&&a, &&b| {
-            let realized = |index: usize| realized.get(&loans[index].loan_id);
-            realized(a)
-                .cmp(&realized(b))
-                .then_with(|| loans[b].loan_id.cmp(&loans[a].loan_id))
-        }) else {
+        let realized_last = |candidates: &[usize]| {
+            candidates.iter().copied().max_by(|&a, &b| {
+                let realized = |index: usize| realized.get(&loans[index].loan_id);
+                realized(a)
+                    .cmp(&realized(b))
+                    .then_with(|| loans[b].loan_id.cmp(&loans[a].loan_id))
+            })
+        };
+        let Some(host) = realized_last(&open).or_else(|| realized_last(&closed)) else {
             continue;
         };
-        for index in closed {
+        for index in closed.into_iter().filter(|&index| index != host) {
             let (interest, provision) =
                 (loans[index].income_interest, loans[index].income_provision);
             for quarter in 0..4 {
@@ -207,6 +216,43 @@ mod tests {
         let borrowers = HashMap::from([("paid".to_string(), "M001".to_string())]);
         apply_loan_report(&mut loans, &borrowers, &HashMap::new(), 0.101);
         assert!(loans[0].shown);
+    }
+
+    #[test]
+    fn keeps_only_the_last_loan_when_every_loan_is_paid_off() {
+        // A borrower in September 2026 whose two loans were both paid off earlier.
+        let mut old_jan = loan("old", "2026-01", 3_000_000, 0);
+        old_jan.interest_paid = 60_000;
+        let mut new_may = loan("new", "2026-05", 0, 0);
+        new_may.disbursed = 2_000_000;
+        new_may.provision = 10_000;
+        let mut loans = vec![
+            old_jan,
+            new_may,
+            loan("old", "2026-09", 0, 0),
+            loan("new", "2026-09", 0, 0),
+        ];
+        let borrowers = HashMap::from([
+            ("old".to_string(), "M109".to_string()),
+            ("new".to_string(), "M109".to_string()),
+        ]);
+        let realized = HashMap::from([
+            ("old".to_string(), "2025-05-21".to_string()),
+            ("new".to_string(), "2026-04-22".to_string()),
+        ]);
+        apply_loan_report(&mut loans, &borrowers, &realized, 0.101);
+        assert!(!loans[2].shown);
+        assert_eq!(loans[2].income_interest, [0; 4]);
+        assert!(loans[3].shown);
+        assert_eq!(loans[3].income_interest, [60_000, 0, 0, 0]);
+        assert_eq!(loans[3].income_provision, [0, 10_000, 0, 0]);
+    }
+
+    #[test]
+    fn does_not_merge_loans_without_a_borrower() {
+        let mut loans = vec![loan("a", "2026-09", 0, 0), loan("b", "2026-09", 0, 0)];
+        apply_loan_report(&mut loans, &HashMap::new(), &HashMap::new(), 0.101);
+        assert!(loans[0].shown && loans[1].shown);
     }
 
     #[test]
