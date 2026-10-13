@@ -185,7 +185,7 @@ string_enum!(ParameterKey {
     MandatorySavings => "SAVINGS_MONTHLY",
     LoanProvisionRate => "LOAN_PROVISION_RATE",
     LoanAnnualRate => "LOAN_ANNUAL_RATE",
-    // Set at each RAT for the book year; see docs/rules-and-formulas.md 1.10, 2.3a.
+    // Set at each RAT for the book year; see notes/rules-and-formulas.md 1.10, 2.3a.
     LoanIncentiveRate => "LOAN_INCENTIVE_RATE",
     SavingsIncentiveRate => "SAVINGS_INCENTIVE_RATE",
 });

@@ -1,7 +1,7 @@
 //! Year-end report columns derived from the monthly ledger, as in the RAT
 //! workbooks (DATA PINJAMAN / DATA SIMPANAN POSISI DESEMBER 2025):
 //! paid-off loans, Jumlah Pemasukan per triwulan, Insentif Pinjaman, Ratas
-//! Simpanan and Insentif Simpanan. See docs/rules-and-formulas.md 1.10, 2.3a.
+//! Simpanan and Insentif Simpanan. See notes/rules-and-formulas.md 1.10, 2.3a.
 
 use std::collections::HashMap;
 

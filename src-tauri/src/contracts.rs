@@ -59,6 +59,10 @@ pub(crate) struct LoanDto {
 pub(crate) struct ComponentDto {
     pub(crate) label: String,
     pub(crate) amount: i64,
+    /// The loan this item pays or disburses; empty otherwise.
+    pub(crate) loan_id: String,
+    /// The savings type (POKOK, WAJIB, MANASUKA) this item moves; empty otherwise.
+    pub(crate) account_type: String,
 }
 
 #[derive(Serialize)]

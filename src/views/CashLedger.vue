@@ -9,6 +9,7 @@ import CashEntryDialog from "../components/CashEntryDialog.vue";
 import {
   Channel,
   formatCurrency,
+  formatLoanLabel,
   formatSheetNumber,
   type CashBookRow,
   TransactionDirection,
@@ -20,14 +21,34 @@ import { cashBookLetters } from "../sheet-columns";
 
 const pageState = useWorkspacePageState("/cash-ledger");
 
-const { selectedYear, loadFinancialParameters, reverseTransaction, refresh } =
-  useKoperasiStore();
+const {
+  selectedYear,
+  loans,
+  loadFinancialParameters,
+  reverseTransaction,
+  refresh,
+} = useKoperasiStore();
 
 // --- Cash ledger (following the daily cash ledger spreadsheet) ----------------------------
 const { cashBook, loadingBook } = useCashBook(Channel.Cash);
 const pendingDelete = pageState.field<CashBookRow | null>(
   "pendingDelete",
   () => null,
+);
+
+// "Detail": one row can hold several items, e.g. a deposit paying two loans
+// plus wajib, or a suplesi payoff.
+const pendingDetail = pageState.field<CashBookRow | null>(
+  "pendingDetail",
+  () => null,
+);
+const detailItems = computed(() =>
+  (pendingDetail.value?.components ?? []).map((item) => {
+    const loan = item.loanId
+      ? loans.find((candidate) => candidate.id === item.loanId)
+      : undefined;
+    return { ...item, loanLabel: loan ? formatLoanLabel(loan) : "" };
+  }),
 );
 
 onMounted(() => {
@@ -224,6 +245,14 @@ async function refreshPage() {
               <td class="sheet-total"></td>
               <td class="cash-book-table__actions">
                 <button
+                  class="cash-book-table__detail"
+                  type="button"
+                  :aria-label="`Detail ${item.description}`"
+                  @click.stop="pendingDetail = item"
+                >
+                  Detail
+                </button>
+                <button
                   class="cash-book-table__delete"
                   type="button"
                   :aria-label="`Hapus ${item.description}`"
@@ -274,6 +303,49 @@ async function refreshPage() {
     <CashEntryDialog ref="entryDialog" :page-state="pageState" />
 
     <UiModal
+      :open="Boolean(pendingDetail) && pageState.active.value"
+      title="Detail transaksi"
+      @close="pendingDetail = null"
+      ><div v-if="pendingDetail" class="transaction-detail">
+        <div class="transaction-detail__head">
+          <div>
+            <strong>{{ pendingDetail.description }}</strong
+            ><span
+              >{{ pendingDetail.date }}
+              <template v-if="pendingDetail.memberNumber">
+                · {{ pendingDetail.memberNumber }}
+                {{ pendingDetail.memberName }}</template
+              ></span
+            >
+          </div>
+          <div class="transaction-detail__total">
+            <strong>{{ formatCurrency(pendingDetail.amount) }}</strong
+            ><span>{{
+              pendingDetail.direction === TransactionDirection.In
+                ? "Masuk"
+                : "Keluar"
+            }}</span>
+          </div>
+        </div>
+        <ul class="transaction-detail__items">
+          <li v-for="(item, index) in detailItems" :key="index">
+            <div>
+              <span>{{ item.label }}</span>
+              <small v-if="item.loanLabel">{{ item.loanLabel }}</small>
+            </div>
+            <strong>{{ formatCurrency(item.amount) }}</strong>
+          </li>
+        </ul>
+        <p class="transaction-detail__reference">
+          Referensi {{ pendingDetail.reference }}
+        </p>
+        <div class="modal-actions">
+          <button class="button" @click="pendingDetail = null">Tutup</button>
+        </div>
+      </div>
+    </UiModal>
+
+    <UiModal
       :open="Boolean(pendingDelete) && pageState.active.value"
       title="Hapus transaksi?"
       @close="pendingDelete = null"
@@ -313,8 +385,22 @@ async function refreshPage() {
 }
 .cash-book-table .cash-book-table__actions {
   width: 1%;
+  white-space: nowrap;
   padding: 2px 6px;
   text-align: center;
+}
+.cash-book-table__detail {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--primary);
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cash-book-table__detail:hover {
+  background: rgba(1, 82, 156, 0.06);
 }
 .cash-book-table__delete {
   padding: 2px 6px;
@@ -344,5 +430,35 @@ async function refreshPage() {
 .transaction-detail__head span {
   color: var(--soft);
   font-size: 9px;
+}
+.transaction-detail__total {
+  justify-items: end;
+}
+.transaction-detail__items {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.transaction-detail__items li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 20px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.transaction-detail__items li > div {
+  display: grid;
+  gap: 2px;
+}
+.transaction-detail__items small,
+.transaction-detail__reference {
+  color: var(--soft);
+  font-size: 10px;
+}
+.transaction-detail__reference {
+  margin: 10px 0 0;
 }
 </style>
