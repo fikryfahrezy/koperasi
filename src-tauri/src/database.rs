@@ -96,18 +96,8 @@ mod tests {
                 .unwrap();
             // Installs up to 0.15.9 ran 001 on every start without recording it.
             sqlx::raw_sql(MIGRATIONS[0].1).execute(&pool).await.unwrap();
-            sqlx::query("INSERT INTO members (id, company_id, name, joined_at) VALUES ('default-M001', 'default', 'Legacy', '2026-01-01')")
-                .execute(&pool)
-                .await
-                .unwrap();
             apply_schema(&pool).await.unwrap();
             apply_schema(&pool).await.unwrap();
-            let number: Option<String> =
-                sqlx::query_scalar("SELECT member_number FROM members WHERE id = 'default-M001'")
-                    .fetch_one(&pool)
-                    .await
-                    .unwrap();
-            assert_eq!(number.as_deref(), Some("A0001"));
             let recorded: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM schema_migrations")
                 .fetch_one(&pool)
                 .await
@@ -117,58 +107,31 @@ mod tests {
     }
 
     #[test]
-    fn prefills_missing_member_numbers_once() {
+    fn runs_each_data_script_once() {
         tauri::async_runtime::block_on(async {
             let pool = memory_pool().await;
-            sqlx::query("DELETE FROM applied_data_scripts")
+            // Scripts recorded by an older install whose files are gone are ignored.
+            sqlx::query("INSERT INTO applied_data_scripts (name) VALUES ('001_removed')")
                 .execute(&pool)
                 .await
                 .unwrap();
-            for (id, number) in [
-                ("default-M001", None),
-                ("default-M002", Some("X-9")),
-                ("default-M003", None),
-                ("default-M004", Some("a0003")),
-                ("testing-M001", None),
-            ] {
-                let company = id.split('-').next().unwrap();
-                sqlx::query("INSERT INTO members (id, company_id, member_number, name, joined_at) VALUES (?, ?, ?, ?, '2026-01-01')")
-                    .bind(id).bind(company).bind(number).bind(id)
-                    .execute(&pool).await.unwrap();
-            }
-            apply_schema(&pool).await.unwrap();
-            let numbers: Vec<(String, Option<String>)> =
-                sqlx::query_as("SELECT id, member_number FROM members ORDER BY id")
-                    .fetch_all(&pool)
-                    .await
-                    .unwrap();
-            let expected = [
-                ("default-M001", Some("A0001")),
-                ("default-M002", Some("X-9")),
-                ("default-M003", None),
-                ("default-M004", Some("a0003")),
-                ("testing-M001", Some("A0001")),
-            ];
-            assert_eq!(
-                numbers,
-                expected
-                    .iter()
-                    .map(|(id, number)| (id.to_string(), number.map(String::from)))
-                    .collect::<Vec<_>>()
-            );
-
-            // Already applied: a member cleared afterwards is not filled again.
-            sqlx::query("UPDATE members SET member_number = NULL WHERE id = 'default-M001'")
+            let scripts = [(
+                "999_test",
+                "INSERT INTO members (id, company_id, name, joined_at) VALUES ('default-M999', 'default', 'Test', '2026-01-01')",
+            )];
+            run_once(&pool, "applied_data_scripts", &scripts).await.unwrap();
+            sqlx::query("DELETE FROM members WHERE id = 'default-M999'")
                 .execute(&pool)
                 .await
                 .unwrap();
-            apply_schema(&pool).await.unwrap();
-            let first: Option<String> =
-                sqlx::query_scalar("SELECT member_number FROM members WHERE id = 'default-M001'")
+            // Already applied: running again does not insert the member again.
+            run_once(&pool, "applied_data_scripts", &scripts).await.unwrap();
+            let members: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM members WHERE id = 'default-M999'")
                     .fetch_one(&pool)
                     .await
                     .unwrap();
-            assert_eq!(first, None);
+            assert_eq!(members, 0);
         });
     }
 }

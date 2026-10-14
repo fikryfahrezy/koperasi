@@ -136,6 +136,17 @@ mod tests {
     fn incentive_rates_follow_the_book_year() {
         tauri::async_runtime::block_on(async {
             let pool = crate::database::memory_pool().await;
+            set_incentive_rates(
+                SetIncentiveRatesInput {
+                    year: 2025,
+                    loan_incentive_rate: Some(0.101),
+                    savings_incentive_rate: Some(0.0365),
+                },
+                "default",
+                &pool,
+            )
+            .await
+            .unwrap();
             // RAT 2025 rates apply until a later year sets its own.
             assert_eq!(
                 incentive_rates("default", 2026, &pool).await.unwrap(),
