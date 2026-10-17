@@ -51,7 +51,6 @@ async function handleRefresh() {
   align-items: center;
   justify-content: space-between;
   gap: 28px;
-  padding: 2px 0;
 }
 .page-heading__title {
   display: flex;
@@ -61,14 +60,14 @@ async function handleRefresh() {
 }
 .page-heading h1 {
   margin: 0;
-  font-size: clamp(23px, 2vw, 28px);
+  font-size: 17px;
   line-height: 1.15;
   letter-spacing: -0.035em;
 }
 .page-heading__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 9px;
+  gap: 6px;
 }
 @media (max-width: 780px) {
   .page-heading {

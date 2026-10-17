@@ -240,7 +240,10 @@ export interface Transaction {
   status: TransactionStatus;
   /** The row that cancels another row (Dibalik). */
   isReversal: boolean;
+  /** Imported month this row belongs to; Hapus may cancel more of it. */
+  groupId: string;
   components: {
+    componentType: string;
     label: string;
     amount: number;
     /** The loan this item pays or disburses; empty otherwise. */
@@ -249,6 +252,13 @@ export interface Transaction {
     accountType: SavingsAccountType | "";
   }[];
   actor: string;
+}
+
+/** What Hapus of a transaction cancels: the transaction, or for an imported row
+ * the rows and member movements paired with it. */
+export interface TransactionGroup {
+  label: string;
+  transactions: Transaction[];
 }
 
 export interface CashBookRow extends Transaction {
@@ -415,6 +425,7 @@ const command = {
   postSavingsTransaction: "post_savings_transaction",
   postPayment: "post_payment",
   reverseTransaction: "reverse_transaction",
+  getTransactionGroup: "get_transaction_group",
   getFinancialParameters: "get_financial_parameters",
   setIncentiveRates: "set_incentive_rates",
   exportXlsx: "export_xlsx",
@@ -507,6 +518,11 @@ const backend = {
   reverseTransaction: (input: { id: string } & OperationalTimestamp) =>
     invoke<AppSnapshot>(command.reverseTransaction, {
       input,
+      companyId: selectedCompanyId.value,
+    }),
+  getTransactionGroup: (id: string) =>
+    invoke<TransactionGroup>(command.getTransactionGroup, {
+      id,
       companyId: selectedCompanyId.value,
     }),
   getFinancialParameters: (companyId = selectedCompanyId.value) =>
@@ -995,16 +1011,25 @@ async function getCashBook(year: number, channel: Channel) {
   });
 }
 
-async function reverseTransaction(id: string) {
+async function reverseTransaction(
+  transaction: Pick<Transaction, "id" | "date" | "description" | "amount">,
+) {
   const companyId = selectedCompanyId.value;
   try {
     applyMutationSnapshot(
-      await backend.reverseTransaction({ id, ...operationalTimestamp() }),
+      await backend.reverseTransaction({
+        id: transaction.id,
+        ...operationalTimestamp(),
+      }),
       companyId,
     );
     notify(
       translate("notifications.reversalPosted"),
-      translate("notifications.reversalPostedMessage", { id }),
+      translate("notifications.reversalPostedMessage", {
+        date: transaction.date,
+        description: transaction.description,
+        amount: formatCurrency(transaction.amount),
+      }),
       "warning",
     );
     return true;
@@ -1015,6 +1040,20 @@ async function reverseTransaction(id: string) {
       "warning",
     );
     return false;
+  }
+}
+
+/** What Hapus of `id` cancels; null if it cannot be loaded. */
+async function getTransactionGroup(id: string) {
+  try {
+    return await backend.getTransactionGroup(id);
+  } catch (error) {
+    notify(
+      translate("notifications.reversalFailed"),
+      errorMessage(error),
+      "warning",
+    );
+    return null;
   }
 }
 
@@ -1223,6 +1262,7 @@ export const useKoperasiStore = () => ({
   postSavingsTransaction,
   postPayment,
   reverseTransaction,
+  getTransactionGroup,
   postCashEntry,
   getCashBook,
   exportXlsx,
