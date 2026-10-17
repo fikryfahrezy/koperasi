@@ -75,7 +75,7 @@ strong {
   flex: 1 1 0%;
   min-height: 0;
   width: 100%;
-  padding: 12px var(--shell-gutter) 24px;
+  padding: 6px var(--shell-gutter) 8px;
   overflow: auto;
 }
 
@@ -244,6 +244,9 @@ strong {
   display: flex;
   flex-direction: column;
   gap: 22px;
+}
+.page-stack--sheet {
+  gap: 6px;
 }
 .page-heading__eyebrow {
   margin: 0;
@@ -1073,9 +1076,6 @@ strong {
   .profile-control {
     padding: 0;
   }
-  .app-content {
-    padding: 10px var(--shell-gutter) 20px;
-  }
   .page-heading__actions .search-field {
     flex: 1 1 100%;
     min-width: 0;
@@ -1144,4 +1144,18 @@ strong {
 }
 .member-edit-form .field-error {
   grid-column: 1 / -1;
+}
+
+/* Page header controls stay compact so the sheet keeps the height. */
+.page-heading .button {
+  min-height: 30px;
+  gap: 6px;
+  padding-inline: 10px;
+  font-size: 12px;
+}
+.page-heading .search-field input {
+  height: 28px;
+}
+.page-heading .page-heading__actions .ui-select--toolbar {
+  min-height: 30px;
 }
