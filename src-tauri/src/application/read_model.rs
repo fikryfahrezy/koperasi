@@ -19,7 +19,7 @@ macro_rules! try_column {
     };
 }
 
-const TRANSACTION_COLUMNS: &str = "t.id, t.business_date, t.display_date, t.display_time, t.member_name, COALESCE((SELECT m.member_number FROM members m WHERE m.id = t.member_id), '') AS member_number, t.channel, t.description, t.reference, t.direction, t.amount, t.actor, t.reversed_transaction_id IS NOT NULL AS is_reversal, (t.reversed_transaction_id IS NOT NULL OR EXISTS (SELECT 1 FROM transactions r WHERE r.company_id = t.company_id AND r.reversed_transaction_id = t.id)) AS excluded, EXISTS (SELECT 1 FROM transactions r WHERE r.company_id = t.company_id AND r.reversed_transaction_id = t.id) AS reversed";
+const TRANSACTION_COLUMNS: &str = "t.id, t.business_date, t.display_date, t.display_time, t.member_name, COALESCE((SELECT m.member_number FROM members m WHERE m.id = t.member_id), '') AS member_number, t.channel, t.description, t.reference, t.direction, t.amount, t.actor, t.reversed_transaction_id IS NOT NULL AS is_reversal, (t.reversed_transaction_id IS NOT NULL OR EXISTS (SELECT 1 FROM transactions r WHERE r.company_id = t.company_id AND r.reversed_transaction_id = t.id)) AS excluded, EXISTS (SELECT 1 FROM transactions r WHERE r.company_id = t.company_id AND r.reversed_transaction_id = t.id) AS reversed, COALESCE((SELECT g.group_id FROM transaction_groups g WHERE g.company_id = t.company_id AND g.transaction_id = t.id), '') AS group_id";
 
 /// Derived status: reversed transactions are marked as reversed.
 fn transaction_dto(
@@ -46,6 +46,7 @@ fn transaction_dto(
             TransactionStatus::Posted
         },
         is_reversal: try_column!(row, "is_reversal"),
+        group_id: try_column!(row, "group_id"),
         actor: try_column!(row, "actor"),
     })
 }
@@ -58,7 +59,7 @@ async fn components_for(
     pool: &SqlitePool,
 ) -> Result<HashMap<String, Vec<ComponentDto>>, String> {
     let sql = format!(
-        "SELECT c.transaction_id, c.label, c.amount, COALESCE(c.loan_id, '') loan_id, COALESCE(a.account_type, '') account_type FROM transaction_components c JOIN transactions t ON t.company_id = c.company_id AND t.id = c.transaction_id LEFT JOIN savings_accounts a ON a.company_id = c.company_id AND a.id = c.savings_account_id WHERE c.company_id = ? AND {filter_sql} ORDER BY c.id"
+        "SELECT c.transaction_id, c.component_type, c.label, c.amount, COALESCE(c.loan_id, '') loan_id, COALESCE(a.account_type, '') account_type FROM transaction_components c JOIN transactions t ON t.company_id = c.company_id AND t.id = c.transaction_id LEFT JOIN savings_accounts a ON a.company_id = c.company_id AND a.id = c.savings_account_id WHERE c.company_id = ? AND {filter_sql} ORDER BY c.id"
     );
     let mut query = sqlx::query(&sql).bind(company_id);
     for value in binds {
@@ -72,6 +73,7 @@ async fn components_for(
     {
         let transaction_id: String = try_column!(row, "transaction_id");
         map.entry(transaction_id).or_default().push(ComponentDto {
+            component_type: try_column!(row, "component_type"),
             label: try_column!(row, "label"),
             amount: try_column!(row, "amount"),
             loan_id: try_column!(row, "loan_id"),
@@ -79,6 +81,34 @@ async fn components_for(
         });
     }
     Ok(map)
+}
+
+/// The given transactions with their components, in ledger order.
+pub(crate) async fn transactions_by_ids(
+    company_id: &str,
+    ids: &[String],
+    pool: &SqlitePool,
+) -> Result<Vec<TransactionDto>, String> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let filter = format!("t.id IN ({})", vec!["?"; ids.len()].join(", "));
+    let sql = format!(
+        "SELECT {TRANSACTION_COLUMNS} FROM transactions t WHERE t.company_id = ? AND {filter} ORDER BY t.business_date, t.rowid"
+    );
+    let mut query = sqlx::query(&sql).bind(company_id);
+    for id in ids {
+        query = query.bind(id);
+    }
+    let rows = query
+        .fetch_all(pool)
+        .await
+        .map_err(|error| error.to_string())?;
+    let binds: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut components = components_for(company_id, &filter, &binds, pool).await?;
+    rows.iter()
+        .map(|row| transaction_dto(row, &mut components))
+        .collect()
 }
 
 async fn snapshot(company_id: &str, pool: &SqlitePool) -> Result<AppSnapshot, String> {

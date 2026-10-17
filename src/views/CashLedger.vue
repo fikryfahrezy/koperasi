@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { CalendarX2, Plus, Search, Trash2 } from "lucide-vue-next";
 import { useDebouncedRef } from "../composables/useDebouncedRef";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
@@ -9,6 +9,8 @@ import CashEntryDialog from "../components/CashEntryDialog.vue";
 import ExportButton from "../components/ExportButton.vue";
 import {
   Channel,
+  type Transaction,
+  type TransactionGroup,
   formatCurrency,
   formatLoanLabel,
   formatSheetNumber,
@@ -27,6 +29,7 @@ const {
   loans,
   loadFinancialParameters,
   reverseTransaction,
+  getTransactionGroup,
   refresh,
 } = useKoperasiStore();
 
@@ -51,6 +54,71 @@ const detailItems = computed(() =>
     return { ...item, loanLabel: loan ? formatLoanLabel(loan) : "" };
   }),
 );
+
+// Hapus of an imported row also cancels the movements paired with it: list them.
+const deleteGroup = ref<TransactionGroup | null>(null);
+watch(pendingDelete, async (row) => {
+  deleteGroup.value = null;
+  if (!row?.groupId) return;
+  const group = await getTransactionGroup(row.id);
+  if (pendingDelete.value?.id === row.id) deleteGroup.value = group;
+});
+const deleteAlso = computed(() =>
+  (deleteGroup.value?.transactions ?? [])
+    .filter((transaction) => transaction.id !== pendingDelete.value?.id)
+    .map((transaction) => ({ ...transaction, ...plainWords(transaction) })),
+);
+const itemWords: Record<string, string> = {
+  LOAN_PRINCIPAL: "pokok",
+  LOAN_INTEREST: "bunga",
+  LOAN_PROVISION: "provisi",
+  LOAN_DISBURSEMENT: "pencairan",
+  SAVINGS_DEPOSIT: "setor",
+  SAVINGS_WITHDRAWAL: "ambil",
+  SAVINGS_SHU: "SHU",
+};
+const accountWords: Record<string, string> = {
+  POKOK: "pokok",
+  WAJIB: "wajib",
+  MANASUKA: "manasuka",
+};
+/** "Pembayaran pinjaman Rp 13.900.000" with "pokok 10.007.331 · bunga 200.147"
+ * for a loan or savings movement; other rows keep their description. */
+function plainWords(transaction: Transaction) {
+  const items = transaction.components;
+  const loan = loans.find((candidate) =>
+    items.some((item) => item.loanId === candidate.id),
+  );
+  const parts = items.map((item) =>
+    item.accountType
+      ? `${accountWords[item.accountType] ?? item.accountType} ${formatSheetNumber(item.amount)}`
+      : `${itemWords[item.componentType] ?? item.label} ${formatSheetNumber(item.amount)}`,
+  );
+  const imported = transaction.reference.includes("-MIG");
+  if (items.some((item) => item.loanId)) {
+    const disbursed = items.some(
+      (item) => item.componentType === "LOAN_DISBURSEMENT",
+    );
+    return {
+      title: `${disbursed ? "Pencairan" : "Pembayaran"} pinjaman${loan ? ` ${formatCurrency(loan.plafond)}` : ""}`,
+      detail: [...parts, imported ? "dari sheet PINJAMAN" : ""]
+        .filter(Boolean)
+        .join(" · "),
+    };
+  }
+  if (items.some((item) => item.accountType)) {
+    const withdrawn = items.some(
+      (item) => item.componentType === "SAVINGS_WITHDRAWAL",
+    );
+    return {
+      title: withdrawn ? "Pengambilan simpanan" : "Setoran simpanan",
+      detail: [...parts, imported ? "dari sheet SIMPANAN" : ""]
+        .filter(Boolean)
+        .join(" · "),
+    };
+  }
+  return { title: transaction.description, detail: "" };
+}
 
 onMounted(() => {
   void loadFinancialParameters();
@@ -99,7 +167,7 @@ const entryDialog = ref<InstanceType<typeof CashEntryDialog> | null>(null);
 async function deletePending() {
   if (!pendingDelete.value) return;
   const submitted = pendingDelete.forTab(pageState.tabId.value);
-  const reversed = await reverseTransaction(submitted.value!.id);
+  const reversed = await reverseTransaction(submitted.value!);
   if (reversed) submitted.value = null;
 }
 async function refreshPage() {
@@ -356,10 +424,29 @@ async function refreshPage() {
           </div>
           <strong>{{ formatCurrency(pendingDelete.amount) }}</strong>
         </div>
+        <template v-if="deleteAlso.length">
+          <p class="transaction-detail__also">
+            Ikut terhapus: pembayaran pinjaman/simpanan yang tercatat dari baris
+            ini ({{ deleteGroup?.label }}).
+          </p>
+          <ul class="transaction-detail__items">
+            <li v-for="transaction in deleteAlso" :key="transaction.id">
+              <div>
+                <span>{{ transaction.title }}</span>
+                <small v-if="transaction.detail">{{
+                  transaction.detail
+                }}</small>
+                <small>{{ transaction.date }}</small>
+              </div>
+              <strong>{{ formatCurrency(transaction.amount) }}</strong>
+            </li>
+          </ul>
+        </template>
         <div class="modal-actions">
           <button class="button" @click="pendingDelete = null">Batal</button
           ><button class="button button--danger" @click="deletePending">
-            <Trash2 :size="17" /> Hapus
+            <Trash2 :size="17" />
+            Hapus
           </button>
         </div>
       </div>
@@ -451,6 +538,11 @@ async function refreshPage() {
 .transaction-detail__items li > div {
   display: grid;
   gap: 2px;
+}
+.transaction-detail__also {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 11px;
 }
 .transaction-detail__items small {
   color: var(--soft);

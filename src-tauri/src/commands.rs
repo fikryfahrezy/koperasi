@@ -13,7 +13,7 @@ use crate::{
         AddMemberInput, AppSnapshot, CashBookDto, CashEntryInput, CompanyDto, CreateLoanInput,
         FinancialParametersDto, LoanPreview, MonthlyLedgerDto, PaymentInput, PreviewLoanInput,
         ReverseTransactionInput, SavingsTransactionInput, SetIncentiveRatesInput,
-        UpdateMemberInput,
+        TransactionGroupDto, UpdateMemberInput,
     },
     state::AppState,
 };
@@ -121,6 +121,15 @@ pub(crate) async fn reverse_transaction(
     state: State<'_, AppState>,
 ) -> Result<AppSnapshot, String> {
     application::reverse_transaction(input, &company_id, &state.db).await
+}
+
+#[tauri::command]
+pub(crate) async fn get_transaction_group(
+    id: String,
+    company_id: String,
+    state: State<'_, AppState>,
+) -> Result<TransactionGroupDto, String> {
+    application::get_transaction_group(&id, &company_id, &state.db).await
 }
 
 #[tauri::command]

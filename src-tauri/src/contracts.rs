@@ -57,6 +57,7 @@ pub(crate) struct LoanDto {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ComponentDto {
+    pub(crate) component_type: String,
     pub(crate) label: String,
     pub(crate) amount: i64,
     /// The loan this item pays or disburses; empty otherwise.
@@ -82,6 +83,8 @@ pub(crate) struct TransactionDto {
     pub(crate) status: TransactionStatus,
     /// The row that cancels another row (Dibalik).
     pub(crate) is_reversal: bool,
+    /// Imported month this transaction belongs to; Hapus may cancel more of it.
+    pub(crate) group_id: String,
     pub(crate) components: Vec<ComponentDto>,
     pub(crate) actor: String,
 }
@@ -234,6 +237,16 @@ pub(crate) struct SavingsTransactionInput {
 pub(crate) struct SavingsAmountInput {
     pub(crate) account_type: String,
     pub(crate) amount: i64,
+}
+
+/// What Hapus of a transaction cancels: the transaction, or for an imported row the
+/// rows and member movements paired with it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TransactionGroupDto {
+    /// e.g. "Anggota A · Februari 2026", or the transaction description.
+    pub(crate) label: String,
+    pub(crate) transactions: Vec<TransactionDto>,
 }
 
 #[derive(Deserialize)]

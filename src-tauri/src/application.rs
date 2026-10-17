@@ -9,6 +9,7 @@ mod parameters;
 pub(crate) mod posting;
 mod read_model;
 mod savings;
+mod transaction_groups;
 mod transactions;
 
 pub(crate) use export::{export_workbook, ExportKind};
@@ -18,6 +19,7 @@ pub(crate) use members::{add_member, update_member};
 pub(crate) use parameters::{get_financial_parameters, set_incentive_rates};
 pub(crate) use read_model::{get_app_snapshot, get_cash_book};
 pub(crate) use savings::{post_payment, post_savings_transaction};
+pub(crate) use transaction_groups::get_transaction_group;
 pub(crate) use transactions::{post_cash_entry, reverse_transaction};
 
 use crate::contracts::CompanyDto;
@@ -460,6 +462,237 @@ mod tests {
                         125_000
                     ),
                 ]
+            );
+        });
+    }
+
+    /// An imported suplesi month: Buku Kas rows hold cash only, the member's
+    /// loan and savings movements sit in NON_KAS rows, all in one group.
+    async fn imported_suplesi_month(pool: &sqlx::SqlitePool) {
+        add_member(member_input("Importir"), "default", pool)
+            .await
+            .unwrap();
+        let sql = [
+            "INSERT INTO loans (id, company_id, loan_group, member_id, member_name, plafond, rate_annual, tenor, interest_type, loan_type, realization_date, due_date) VALUES ('L-OLD', 'default', 'Anggota PP BRI', 'default-M001', 'Importir', 2400000, 24, 10, 'Menurun', 'Bulanan', '2025-08-05', '2026-06-05'), ('L-NEW', 'default', 'Anggota PP BRI', 'default-M001', 'Importir', 3000000, 24, 10, 'Menurun', 'Bulanan', '2026-02-09', '2026-12-09')",
+        ];
+        for statement in sql {
+            sqlx::query(statement).execute(pool).await.unwrap();
+        }
+        let tx = |id: &str,
+                  date: &str,
+                  channel: &str,
+                  description: &str,
+                  direction: &str,
+                  amount: i64| {
+            format!("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, channel, description, reference, direction, amount, actor) VALUES ('{id}', 'default', '{date}', '{date}', '', 'Koperasi', '{channel}', '{description}', '{id}', '{direction}', {amount}, 'Migrasi')")
+        };
+        let component = |id: &str, kind: &str, amount: i64, loan: &str, account: &str| {
+            let loan = if loan.is_empty() {
+                "NULL".to_string()
+            } else {
+                format!("'{loan}'")
+            };
+            let account = if account.is_empty() {
+                "NULL".to_string()
+            } else {
+                format!("'{account}'")
+            };
+            format!("INSERT INTO transaction_components (company_id, transaction_id, component_type, label, amount, loan_id, savings_account_id) VALUES ('default', '{id}', '{kind}', 'x', {amount}, {loan}, {account})")
+        };
+        let statements = [
+            // The old loan, outstanding 1.200.000 before February.
+            tx(
+                "OPEN-OLD",
+                "2026-01-01",
+                "NON_KAS",
+                "Saldo awal",
+                "Masuk",
+                1_200_000,
+            ),
+            component("OPEN-OLD", "LOAN_OPENING", 1_200_000, "L-OLD", ""),
+            tx(
+                "KAS-159",
+                "2026-02-09",
+                "KAS",
+                "Suplesi Importir Jk 10 bulan",
+                "Keluar",
+                3_000_000,
+            ),
+            component("KAS-159", "CASH", 3_000_000, "", ""),
+            tx(
+                "KAS-160",
+                "2026-02-09",
+                "KAS",
+                "Provisi 1 %",
+                "Masuk",
+                21_000,
+            ),
+            component("KAS-160", "CASH", 21_000, "", ""),
+            tx(
+                "KAS-161",
+                "2026-02-09",
+                "KAS",
+                "Pelunasan Pinjaman Lama",
+                "Masuk",
+                960_000,
+            ),
+            component("KAS-161", "CASH", 960_000, "", ""),
+            tx(
+                "PIN-OLD-02",
+                "2026-02-09",
+                "NON_KAS",
+                "Mutasi pinjaman (migrasi)",
+                "Masuk",
+                1_248_000,
+            ),
+            component("PIN-OLD-02", "LOAN_PRINCIPAL", 1_200_000, "L-OLD", ""),
+            component("PIN-OLD-02", "LOAN_INTEREST", 48_000, "L-OLD", ""),
+            tx(
+                "PIN-NEW-02",
+                "2026-02-09",
+                "NON_KAS",
+                "Mutasi pinjaman (migrasi)",
+                "Keluar",
+                3_021_000,
+            ),
+            component("PIN-NEW-02", "LOAN_DISBURSEMENT", 3_000_000, "L-NEW", ""),
+            component("PIN-NEW-02", "LOAN_PROVISION", 21_000, "L-NEW", ""),
+            tx(
+                "SIM-02",
+                "2026-02-02",
+                "NON_KAS",
+                "Mutasi simpanan (migrasi)",
+                "Masuk",
+                100_000,
+            ),
+            component(
+                "SIM-02",
+                "SAVINGS_DEPOSIT",
+                50_000,
+                "",
+                "SA-default-M001-WAJIB",
+            ),
+            component(
+                "SIM-02",
+                "SAVINGS_DEPOSIT",
+                50_000,
+                "",
+                "SA-default-M001-MANASUKA",
+            ),
+            // March repays part of the new loan, outside the group.
+            tx(
+                "PIN-NEW-03",
+                "2026-03-02",
+                "NON_KAS",
+                "Mutasi pinjaman (migrasi)",
+                "Masuk",
+                300_000,
+            ),
+            component("PIN-NEW-03", "LOAN_PRINCIPAL", 300_000, "L-NEW", ""),
+        ];
+        for statement in statements {
+            sqlx::query(&statement).execute(pool).await.unwrap();
+        }
+        for id in [
+            "KAS-159",
+            "KAS-160",
+            "KAS-161",
+            "PIN-OLD-02",
+            "PIN-NEW-02",
+            "SIM-02",
+        ] {
+            sqlx::query("INSERT INTO transaction_groups (company_id, group_id, label, member_id, transaction_id) VALUES ('default', 'G-02', '', 'default-M001', ?)")
+                .bind(id)
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+    }
+
+    fn balance(snapshot: &crate::contracts::AppSnapshot, loan: &str) -> i64 {
+        snapshot
+            .loans
+            .iter()
+            .find(|item| item.id == loan)
+            .map_or(0, |item| item.balance)
+    }
+
+    #[test]
+    fn hapus_of_an_imported_row_lists_and_cancels_its_pairs() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+            imported_suplesi_month(&pool).await;
+            // The suplesi row goes with its provision and the new loan's movement; the
+            // payoff with the old loan's movement only.
+            let suplesi = get_transaction_group("KAS-159", "default", &pool)
+                .await
+                .unwrap();
+            assert_eq!(suplesi.label, "Importir · Februari 2026");
+            assert_eq!(suplesi.transactions.len(), 3);
+            let payoff = get_transaction_group("KAS-161", "default", &pool)
+                .await
+                .unwrap();
+            let ids: Vec<&str> = payoff
+                .transactions
+                .iter()
+                .map(|transaction| transaction.id.as_str())
+                .collect();
+            assert_eq!(ids, ["KAS-161", "PIN-OLD-02"]);
+
+            let stamp = |id: &str| ReverseTransactionInput {
+                id: id.into(),
+                business_date: DATE.into(),
+                display_date: "13 Sep 2026".into(),
+                display_time: "12:00".into(),
+            };
+            // The new loan was repaid in March: its suplesi cannot be deleted.
+            assert!(reverse_transaction(stamp("KAS-159"), "default", &pool)
+                .await
+                .is_err());
+            // The payoff can: the old loan is owed again, ready to be re-entered.
+            let snapshot = reverse_transaction(stamp("KAS-161"), "default", &pool)
+                .await
+                .unwrap();
+            assert_eq!(balance(&snapshot, "L-OLD"), 1_200_000);
+            assert_eq!(balance(&snapshot, "L-NEW"), 2_700_000);
+            assert_eq!(snapshot.totals.savings, 150_000);
+        });
+    }
+
+    #[test]
+    fn hapus_cancels_the_rows_paired_with_an_imported_row() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+            imported_suplesi_month(&pool).await;
+            // Without the March repayment the suplesi can be deleted.
+            sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, channel, description, reference, direction, amount, actor, reversed_transaction_id) VALUES ('REV-03', 'default', '2026-03-02', '2026-03-02', '', 'Koperasi', 'NON_KAS', 'Hapus', 'REV-03', 'Keluar', 300000, 'Test', 'PIN-NEW-03')")
+                .execute(&pool)
+                .await
+                .unwrap();
+            let snapshot = reverse_transaction(
+                ReverseTransactionInput {
+                    id: "KAS-160".into(),
+                    business_date: DATE.into(),
+                    display_date: "13 Sep 2026".into(),
+                    display_time: "12:00".into(),
+                },
+                "default",
+                &pool,
+            )
+            .await
+            .unwrap();
+            // The provision row takes the suplesi row and the new loan's movement with
+            // it; the payoff of the old loan and the savings stay.
+            assert_eq!(balance(&snapshot, "L-OLD"), 0);
+            assert!(snapshot.loans.iter().all(|loan| loan.id != "L-NEW"));
+            assert_eq!(snapshot.totals.savings, 150_000);
+            assert_eq!(
+                snapshot
+                    .transactions
+                    .iter()
+                    .filter(|transaction| transaction.is_reversal)
+                    .count(),
+                4
             );
         });
     }
