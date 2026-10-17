@@ -465,6 +465,62 @@ mod tests {
     }
 
     #[test]
+    fn a_deleted_loan_is_no_longer_listed() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+            add_member(member_input("Borrower"), "default", &pool)
+                .await
+                .unwrap();
+            let snapshot = create_loan(
+                CreateLoanInput {
+                    loan_group: LoanGroup::Member.as_str().into(),
+                    member_id: "default-M001".into(),
+                    borrower_name: String::new(),
+                    plafond: 1_000_000,
+                    tenor: 10,
+                    interest_type: InterestType::Declining.as_str().into(),
+                    loan_type: LoanType::Monthly.as_str().into(),
+                    provision: None,
+                    payoffs: Vec::new(),
+                    disbursement: DisbursementInput {
+                        channel: Channel::Cash.as_str().into(),
+                        business_date: DATE.into(),
+                        display_date: "13 Sep 2026".into(),
+                        display_time: "10:10".into(),
+                    },
+                },
+                "default",
+                &pool,
+            )
+            .await
+            .unwrap();
+            assert_eq!(snapshot.loans.len(), 1);
+            let disbursement = snapshot
+                .transactions
+                .iter()
+                .find(|transaction| transaction.description.starts_with("Realisasi"))
+                .unwrap()
+                .id
+                .clone();
+            // Deleting only the disbursement row hides the loan, even though
+            // its provision row is still in effect.
+            let snapshot = reverse_transaction(
+                ReverseTransactionInput {
+                    id: disbursement,
+                    business_date: DATE.into(),
+                    display_date: "13 Sep 2026".into(),
+                    display_time: "10:20".into(),
+                },
+                "default",
+                &pool,
+            )
+            .await
+            .unwrap();
+            assert!(snapshot.loans.is_empty());
+        });
+    }
+
+    #[test]
     fn suplesi_pays_off_old_loans_in_three_cash_rows() {
         tauri::async_runtime::block_on(async {
             let pool = crate::database::memory_pool().await;
