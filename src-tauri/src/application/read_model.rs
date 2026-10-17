@@ -117,7 +117,9 @@ async fn snapshot(company_id: &str, pool: &SqlitePool) -> Result<AppSnapshot, St
     })
     .collect::<Result<Vec<_>, _>>()?;
 
-    let loans = sqlx::query("SELECT l.id, l.loan_group, COALESCE(l.member_id, '') member_id, l.member_name, l.plafond, b.balance, l.rate_annual, l.tenor, l.interest_type, l.loan_type, l.realization_date, l.due_date, l.guarantee, COALESCE(l.recommender, '') recommender FROM loans l JOIN loan_balances b ON b.company_id = l.company_id AND b.loan_id = l.id WHERE l.company_id = ? ORDER BY l.id")
+    // A loan whose disbursement (or opening balance) was deleted never happened:
+    // leave it out instead of showing it as paid off.
+    let loans = sqlx::query("SELECT l.id, l.loan_group, COALESCE(l.member_id, '') member_id, l.member_name, l.plafond, b.balance, l.rate_annual, l.tenor, l.interest_type, l.loan_type, l.realization_date, l.due_date, l.guarantee, COALESCE(l.recommender, '') recommender FROM loans l JOIN loan_balances b ON b.company_id = l.company_id AND b.loan_id = l.id WHERE l.company_id = ? AND EXISTS (SELECT 1 FROM effective_components c WHERE c.company_id = l.company_id AND c.loan_id = l.id AND c.component_type IN ('LOAN_OPENING', 'LOAN_DISBURSEMENT')) ORDER BY l.id")
         .bind(company_id)
         .fetch_all(pool)
         .await
