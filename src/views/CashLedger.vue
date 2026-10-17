@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { CalendarX2, Plus, Search, Trash2 } from "lucide-vue-next";
+import { CalendarX2, History, Plus, Search, Trash2 } from "lucide-vue-next";
 import { useDebouncedRef } from "../composables/useDebouncedRef";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import PageHeader from "../components/PageHeader.vue";
@@ -137,6 +137,36 @@ const filteredRows = computed(() => {
         (search !== "" && row.memberNumber.toLowerCase().includes(search))),
   );
 });
+// "Riwayat hapus" swaps the sheet for every deleted row of the year, newest
+// deletion first. The reversal row carries when it was deleted; its reference
+// extends the original's.
+const showDeleted = pageState.field("showDeleted", () => false);
+const deletedRows = computed(() => {
+  const reversals = rows.value.filter((row) => row.isReversal);
+  return rows.value
+    .filter((row) => row.status === TransactionStatus.Reversed)
+    .map((row) => {
+      const reversal = reversals.find((candidate) =>
+        candidate.reference.startsWith(`${row.reference}/REV/`),
+      );
+      return {
+        ...row,
+        deletedAt: reversal
+          ? [reversal.date, reversal.time].filter(Boolean).join(" ")
+          : "",
+        deletedOrder: reversal ? `${reversal.businessDate} ${reversal.id}` : "",
+      };
+    })
+    .sort((a, b) => b.deletedOrder.localeCompare(a.deletedOrder));
+});
+const filteredDeletedRows = computed(() => {
+  const search = debouncedQuery.value.trim().toLowerCase();
+  return deletedRows.value.filter(
+    (row) =>
+      row.description.toLowerCase().includes(search) ||
+      (search !== "" && row.memberNumber.toLowerCase().includes(search)),
+  );
+});
 // As in the spreadsheet, the date appears only on the first row of each day.
 const showDate = (index: number) =>
   index === 0 ||
@@ -178,7 +208,10 @@ async function refreshPage() {
 
 <template>
   <div class="page-stack page-stack--sheet">
-    <PageHeader title="Buku kas harian" :refresh="refreshPage">
+    <PageHeader
+      :title="showDeleted ? 'Riwayat hapus' : 'Buku kas harian'"
+      :refresh="refreshPage"
+    >
       <template #before-actions>
         <label class="search-field">
           <Search :size="18" />
@@ -191,6 +224,20 @@ async function refreshPage() {
         </label>
       </template>
       <template #actions>
+        <button
+          :class="[
+            'button',
+            showDeleted ? 'button--active' : 'button--secondary',
+          ]"
+          type="button"
+          :aria-pressed="showDeleted"
+          @click="showDeleted = !showDeleted"
+        >
+          <History :size="16" /> Riwayat hapus
+          <span v-if="deletedRows.length" class="deleted-count">{{
+            deletedRows.length
+          }}</span>
+        </button>
         <ExportButton kind="cash-book" />
         <button
           class="button button--primary"
@@ -210,6 +257,63 @@ async function refreshPage() {
         <CalendarX2 :size="36" />
         <strong>Belum ada transaksi kas untuk {{ selectedYear }}</strong>
         <p>Catat transaksi baru dengan tombol Catat transaksi.</p>
+      </div>
+      <div v-else-if="showDeleted" class="data-table-wrap sheet-wrap">
+        <table
+          v-table-navigation
+          v-sticky-header
+          class="sheet-table cash-book-table deleted-table"
+        >
+          <thead>
+            <tr>
+              <th>Tanggal</th>
+              <th class="cash-book-table__desc">Uraian</th>
+              <th>Anggota</th>
+              <th>Debet</th>
+              <th>Kredit</th>
+              <th>Dihapus</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="item in filteredDeletedRows"
+              :key="item.id"
+              class="cash-book-table__row"
+            >
+              <td>{{ item.date }}</td>
+              <td class="cash-book-table__desc">{{ item.description }}</td>
+              <td>
+                {{
+                  [item.memberNumber, item.memberName].filter(Boolean).join(" ")
+                }}
+              </td>
+              <td class="num-cell">
+                {{
+                  item.direction === TransactionDirection.Out
+                    ? formatSheetNumber(item.amount)
+                    : ""
+                }}
+              </td>
+              <td class="num-cell">
+                {{
+                  item.direction === TransactionDirection.In
+                    ? formatSheetNumber(item.amount)
+                    : ""
+                }}
+              </td>
+              <td>{{ item.deletedAt }}</td>
+            </tr>
+            <tr v-if="!filteredDeletedRows.length">
+              <td colspan="6">
+                {{
+                  debouncedQuery.trim()
+                    ? "Tidak ada transaksi terhapus yang cocok dengan pencarian."
+                    : `Belum ada transaksi yang dihapus di ${selectedYear}.`
+                }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
       <div v-else class="data-table-wrap sheet-wrap">
         <table
@@ -547,5 +651,17 @@ async function refreshPage() {
 .transaction-detail__items small {
   color: var(--soft);
   font-size: 10px;
+}
+.button--active {
+  border: 1px solid var(--green);
+  color: var(--green);
+  background: var(--green-soft);
+}
+.deleted-count {
+  min-width: 18px;
+  padding: 1px 5px;
+  color: var(--red);
+  background: var(--red-soft);
+  font-size: 10.5px;
 }
 </style>
