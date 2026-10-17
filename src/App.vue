@@ -156,10 +156,10 @@ onMounted(initialize);
   background: #fff;
 }
 .topbar {
-  height: 58px;
+  height: 46px;
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
   padding: 0 var(--shell-gutter);
   border-bottom: 1px solid var(--line);
   background: #fff;
@@ -169,11 +169,10 @@ onMounted(initialize);
   display: flex;
   align-items: center;
   gap: 10px;
-  min-width: 196px;
 }
 .topbar__brand img {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   object-fit: cover;
 }
 .topbar__brand > div {
@@ -223,13 +222,6 @@ onMounted(initialize);
   background: transparent;
 }
 @media (max-width: 780px) {
-  .topbar {
-    height: 54px;
-    padding: 0 var(--shell-gutter);
-  }
-  .topbar__brand {
-    min-width: auto;
-  }
   .topbar__brand > div {
     display: none;
   }

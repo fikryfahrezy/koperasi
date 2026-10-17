@@ -1,12 +1,13 @@
 //! Application use cases for transactions: reversals and general cash entries.
 
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, SqliteConnection, SqlitePool};
 
 use super::posting::{
     append, audit, ensure_reference_unused, loan_balance, savings_balance, Component, Entry,
     APP_ACTOR,
 };
 use super::read_model::get_app_snapshot;
+use super::transaction_groups::deletion_set;
 use crate::{
     contracts::{AppSnapshot, CashEntryInput, ReverseTransactionInput},
     domain::{
@@ -16,7 +17,8 @@ use crate::{
 };
 
 /// Correction without modifying data: a new transaction in the opposite direction references
-/// the original transaction. Both are then excluded from balance calculations.
+/// the original transaction. Both are then excluded from balance calculations. A transaction
+/// that belongs to a group (one member's imported month) is reversed with its whole group.
 pub(crate) async fn reverse_transaction(
     input: ReverseTransactionInput,
     company_id: &str,
@@ -24,7 +26,58 @@ pub(crate) async fn reverse_transaction(
 ) -> Result<AppSnapshot, String> {
     validate_business_date(&input.business_date)?;
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
-    let id = &input.id;
+    let ids = deletion_set(&mut db, company_id, &input.id).await?;
+    let stamp = Stamp {
+        business_date: &input.business_date,
+        display_date: &input.display_date,
+        display_time: &input.display_time,
+    };
+    for id in &ids {
+        reverse_one(&mut db, company_id, id, &stamp).await?;
+    }
+    db.commit().await.map_err(|error| error.to_string())?;
+    get_app_snapshot(company_id, pool).await
+}
+
+/// When a reversal is recorded.
+struct Stamp<'a> {
+    business_date: &'a str,
+    display_date: &'a str,
+    display_time: &'a str,
+}
+
+/// The transaction itself, or every transaction still in effect in its group, in
+/// ledger order. Hapus narrows this down with `deletion_set`.
+pub(crate) async fn group_members(
+    db: &mut SqliteConnection,
+    company_id: &str,
+    id: &str,
+) -> Result<Vec<String>, String> {
+    let ids: Vec<String> = sqlx::query_scalar(
+        "SELECT t.id FROM transactions t WHERE t.company_id = ? AND t.id IN (SELECT e.id FROM effective_transactions e WHERE e.company_id = t.company_id) AND (t.id = ? OR t.id IN (SELECT g.transaction_id FROM transaction_groups g WHERE g.company_id = ? AND g.group_id = (SELECT group_id FROM transaction_groups WHERE company_id = ? AND transaction_id = ?))) ORDER BY t.business_date, t.rowid",
+    )
+    .bind(company_id)
+    .bind(id)
+    .bind(company_id)
+    .bind(company_id)
+    .bind(id)
+    .fetch_all(&mut *db)
+    .await
+    .map_err(|error| error.to_string())?;
+    if !ids.iter().any(|candidate| candidate == id) {
+        return Err("Transaksi tidak ditemukan atau sudah dihapus.".into());
+    }
+    Ok(ids)
+}
+
+/// Appends the reversal of one transaction; a reversal that would make a balance negative
+/// is refused.
+async fn reverse_one(
+    db: &mut SqliteConnection,
+    company_id: &str,
+    id: &str,
+    stamp: &Stamp<'_>,
+) -> Result<String, String> {
     let original = sqlx::query("SELECT member_id, member_name, channel, description, reference, direction FROM effective_transactions WHERE company_id = ? AND id = ?")
         .bind(company_id)
         .bind(id)
@@ -58,14 +111,14 @@ pub(crate) async fn reverse_transaction(
         // Reversing an inflow must not make the balance negative.
         if let Some(account_id) = &savings_account_id {
             if component_type != ComponentType::SavingsWithdrawal
-                && savings_balance(&mut db, company_id, account_id).await? < amount
+                && savings_balance(&mut *db, company_id, account_id).await? < amount
             {
                 return Err("Transaksi tidak dapat dihapus karena saldo simpanan tidak mencukupi.".into());
             }
         }
         if let Some(loan_id) = &loan_id {
             if matches!(component_type, ComponentType::LoanDisbursement | ComponentType::LoanOpening)
-                && loan_balance(&mut db, company_id, loan_id).await? < amount
+                && loan_balance(&mut *db, company_id, loan_id).await? < amount
             {
                 return Err("Transaksi tidak dapat dihapus karena pinjaman sudah memiliki angsuran.".into());
             }
@@ -80,13 +133,13 @@ pub(crate) async fn reverse_transaction(
     let description = format!("Hapus · {}", get("description")?);
     let reference = format!("{}/REV/{reversal_id}", get("reference")?);
     append(
-        &mut db,
+        &mut *db,
         company_id,
         Entry {
             id: reversal_id.clone(),
-            business_date: &input.business_date,
-            display_date: &input.display_date,
-            display_time: &input.display_time,
+            business_date: stamp.business_date,
+            display_date: stamp.display_date,
+            display_time: stamp.display_time,
             member_id: member_id.as_deref(),
             member_name: &get("member_name")?,
             channel,
@@ -100,7 +153,7 @@ pub(crate) async fn reverse_transaction(
     )
     .await?;
     audit(
-        &mut db,
+        &mut *db,
         company_id,
         AuditEntityType::Transaction,
         id,
@@ -108,8 +161,7 @@ pub(crate) async fn reverse_transaction(
         serde_json::json!({"reversalId": reversal_id}),
     )
     .await?;
-    db.commit().await.map_err(|error| error.to_string())?;
-    get_app_snapshot(company_id, pool).await
+    Ok(reversal_id)
 }
 
 /// General cash inflows/outflows (expenses, additional cash, bank transfers, ...).

@@ -70,7 +70,7 @@ export default {
     parametersLoadFailed: "Parameter keuangan gagal dimuat",
     reversalPosted: "Transaksi berhasil dihapus",
     reversalPostedMessage:
-      "{id} dihapus dari Buku Kas; histori asal tetap tersimpan.",
+      "{date} · {description} · {amount} dihapus dari Buku Kas; histori asal tetap tersimpan.",
     reversalFailed: "Transaksi gagal dihapus",
     exported: "File Excel tersimpan",
     exportFailed: "Ekspor Excel gagal",

@@ -43,6 +43,7 @@ pub(crate) fn run() {
             crate::commands::post_savings_transaction,
             crate::commands::post_payment,
             crate::commands::reverse_transaction,
+            crate::commands::get_transaction_group,
             crate::commands::get_financial_parameters,
             crate::commands::set_incentive_rates,
             crate::commands::export_xlsx
