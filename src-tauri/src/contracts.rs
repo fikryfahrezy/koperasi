@@ -70,6 +70,9 @@ pub(crate) struct ComponentDto {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TransactionDto {
     pub(crate) id: String,
+    /// The transaction's date, "2026-08-06".
+    pub(crate) business_date: String,
+    /// The date as it was written when recorded ("06-Aug-2026" from the sheet).
     pub(crate) date: String,
     pub(crate) time: String,
     pub(crate) member_name: String,
@@ -375,7 +378,6 @@ pub(crate) struct CashEntryInput {
 pub(crate) struct CashBookRowDto {
     #[serde(flatten)]
     pub(crate) transaction: TransactionDto,
-    pub(crate) business_date: String,
     /// Running balance after this row; only effective transactions are counted.
     pub(crate) balance: i64,
     /// KAS BUKU TABUNGAN columns: Tambahan Kas dari Tabungan leaves the bank book (keluar),

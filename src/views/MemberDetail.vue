@@ -14,6 +14,7 @@ import StatusPill from "../components/StatusPill.vue";
 import {
   currentPeriod,
   formatCurrency,
+  formatDate,
   formatLoanLabel,
   formatPeriod,
   formatPreviousPeriod,
@@ -393,7 +394,10 @@ const memberTransactions = computed(() => {
           <div v-for="item in memberTransactions" :key="item.id">
             <div>
               <strong>{{ item.description }}</strong>
-              <small>{{ item.date }} · {{ item.reference }}</small>
+              <small
+                >{{ formatDate(item.businessDate) }} ·
+                {{ item.reference }}</small
+              >
             </div>
             <strong
               :class="

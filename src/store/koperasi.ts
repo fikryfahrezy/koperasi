@@ -227,6 +227,8 @@ export interface MonthlyLedger {
 
 export interface Transaction {
   id: string;
+  /** The transaction's date, "2026-08-06". */
+  businessDate: string;
   date: string;
   time: string;
   memberName: string;
@@ -262,7 +264,6 @@ export interface TransactionGroup {
 }
 
 export interface CashBookRow extends Transaction {
-  businessDate: string;
   balance: number;
   /** KAS BUKU TABUNGAN: Tambahan Kas dari Tabungan leaves the bank book (keluar). */
   savingsBookOut: number;
@@ -874,18 +875,38 @@ export function todayIso() {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
+// Written by hand rather than with Intl: some WebViews have no Indonesian
+// locale data and would store "06 Aug 2026" instead.
+const indonesianShortMonths = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "Mei",
+  "Jun",
+  "Jul",
+  "Agu",
+  "Sep",
+  "Okt",
+  "Nov",
+  "Des",
+];
+
+/** "2026-08-06" -> "06 Agu 2026"; anything else is returned as it is. */
+export function formatDate(businessDate: string) {
+  const match = businessDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return businessDate;
+  const month = indonesianShortMonths[Number(match[2]) - 1];
+  return month ? `${match[3]} ${month} ${match[1]}` : businessDate;
+}
+
 function operationalTimestamp(businessDate = todayIso()) {
-  const [year, month, day] = businessDate.split("-").map(Number);
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, "0");
   return {
     businessDate,
-    displayDate: new Date(year, month - 1, day).toLocaleDateString(
-      DEFAULT_LOCALE,
-      { day: "2-digit", month: "short", year: "numeric" },
-    ),
-    displayTime: new Date().toLocaleTimeString(DEFAULT_LOCALE, {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
+    displayDate: formatDate(businessDate),
+    displayTime: `${pad(now.getHours())}.${pad(now.getMinutes())}`,
   };
 }
 
@@ -1026,7 +1047,7 @@ async function reverseTransaction(
     notify(
       translate("notifications.reversalPosted"),
       translate("notifications.reversalPostedMessage", {
-        date: transaction.date,
+        date: formatDate(transaction.businessDate),
         description: transaction.description,
         amount: formatCurrency(transaction.amount),
       }),
