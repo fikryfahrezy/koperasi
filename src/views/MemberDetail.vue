@@ -19,6 +19,7 @@ import {
   formatPeriod,
   formatPreviousPeriod,
   type Loan,
+  type LoanMonth,
   SavingsAccountType,
   TransactionDirection,
   useKoperasiStore,
@@ -119,6 +120,16 @@ const arrearsPeriod = computed(() => {
 });
 type ArrearsPart = "Principal" | "Interest";
 
+/** Whether a loan month's arrears of `part` count. A paid-off loan has no
+ * principal arrears, as in the sheet: an early payoff reads as a large
+ * "lebih bayar" that hides other loans' arrears. Interest it still owes
+ * stays, so a payoff short on interest is not lost. */
+function countsArrears(row: LoanMonth, part: ArrearsPart) {
+  return (
+    row.closingBalance > 0 || (part === "Interest" && row.arrearsInterest > 0)
+  );
+}
+
 const memberLedgerRows = computed(() => {
   const ids = new Set(memberLoans.value.map((loan) => loan.id));
   return monthlyLedger.value.loans
@@ -137,7 +148,7 @@ function unpaidMonths(part: ArrearsPart, loanList: Loan[]) {
     const rows = memberLedgerRows.value.filter((row) => row.loanId === loan.id);
     const latest = rows.find((row) => row.period === arrearsPeriod.value);
     let remaining =
-      latest && latest.closingBalance > 0 ? latest[`arrears${part}`] : 0;
+      latest && countsArrears(latest, part) ? latest[`arrears${part}`] : 0;
     for (let i = rows.length - 1; i >= 0 && remaining > 0; i--) {
       const unpaid = Math.min(rows[i][`scheduled${part}`], remaining);
       if (unpaid <= 0) continue;
@@ -164,23 +175,118 @@ function unpaidMonths(part: ArrearsPart, loanList: Loan[]) {
   return months;
 }
 
+/** One month's installment (or the arrears carried into the year) and what
+ * has paid it so far. */
+interface Installment {
+  period: string;
+  due: number;
+  paid: number;
+  /** Date of each deposit that paid part of it; "" for one before the year. */
+  paidOn: string[];
+}
+
+const paidKey = {
+  Principal: "principalPaid",
+  Interest: "interestPaid",
+} as const;
+
+/** Riwayat angsuran: the year's installments of one loan and when each was
+ * paid. A deposit is not tied to an installment, so it pays the oldest unpaid
+ * one first and any surplus pays the next months ahead. What stays unpaid is
+ * then the latest months, as in `unpaidMonths`, and adds up to the arrears. */
+function installmentsOf(loan: Loan, part: ArrearsPart) {
+  const rows = memberLedgerRows.value.filter((row) => row.loanId === loan.id);
+  const items: Installment[] = [];
+  const credit: { amount: number; date: string }[] = [];
+  const [first] = rows;
+  if (!first) return { items, ahead: 0 };
+  const prior =
+    first[`arrears${part}`] - first[`scheduled${part}`] + first[paidKey[part]];
+  if (prior > 0) items.push({ period: "", due: prior, paid: 0, paidOn: [] });
+  else if (prior < 0) credit.push({ amount: -prior, date: "" });
+  for (const row of rows) {
+    const scheduled = row[`scheduled${part}`];
+    if (scheduled > 0)
+      items.push({ period: row.period, due: scheduled, paid: 0, paidOn: [] });
+    const paid = row[paidKey[part]];
+    if (paid > 0) credit.push({ amount: paid, date: row.transactionDate });
+    for (const item of items) {
+      while (item.paid < item.due && credit.length) {
+        const deposit = credit[0];
+        const amount = Math.min(item.due - item.paid, deposit.amount);
+        item.paid += amount;
+        item.paidOn.push(deposit.date);
+        deposit.amount -= amount;
+        if (!deposit.amount) credit.shift();
+      }
+    }
+  }
+  return { items, ahead: credit.reduce((sum, item) => sum + item.amount, 0) };
+}
+
+function installmentStatus(item: Installment, year: string) {
+  const date = item.paidOn[item.paidOn.length - 1];
+  const when =
+    date === undefined
+      ? ""
+      : date === ""
+        ? `sebelum ${year}`
+        : `${item.period && date.slice(0, 7) < item.period ? "di muka " : ""}${formatDate(date)}`;
+  if (item.paid >= item.due) return `Dibayar ${when}`;
+  if (item.paid > 0)
+    return `Kurang ${formatCurrency(item.due - item.paid)} · sebagian dibayar ${when}`;
+  return "Belum dibayar";
+}
+
+/** Rows of the Riwayat angsuran table: arrears carried into the year first,
+ * then each month, with its principal and interest installments. */
+function scheduleOf(loan: Loan) {
+  const principal = installmentsOf(loan, "Principal");
+  const interest = installmentsOf(loan, "Interest");
+  const year = arrearsPeriod.value.slice(0, 4);
+  const firstPeriod =
+    memberLedgerRows.value.find((row) => row.loanId === loan.id)?.period ?? "";
+  const periods = [
+    ...new Set(
+      [...principal.items, ...interest.items].map((item) => item.period),
+    ),
+  ].sort();
+  const cell = (item?: Installment) =>
+    item && {
+      amount: item.due,
+      status: installmentStatus(item, year),
+      unpaid: item.paid < item.due,
+    };
+  return {
+    rows: periods.map((period) => ({
+      label: period
+        ? formatPeriod(period)
+        : `Tunggakan s/d ${formatPreviousPeriod(firstPeriod)}`,
+      principal: cell(principal.items.find((item) => item.period === period)),
+      interest: cell(interest.items.find((item) => item.period === period)),
+    })),
+    // Paid ahead of the installments due so far; meaningless once paid off.
+    ahead:
+      loan.balance > 0
+        ? { principal: principal.ahead, interest: interest.ahead }
+        : { principal: 0, interest: 0 },
+  };
+}
+
 const arrearsNote = computed(() =>
   arrearsPeriod.value ? `Per ${formatPeriod(arrearsPeriod.value)}` : "",
 );
 
-/** Tunggakan pokok and bunga of the given loans. A paid-off loan has no
- * arrears, as in the sheet; otherwise an early payoff reads as a large
- * "lebih bayar" that hides other loans' arrears. */
+/** Tunggakan pokok and bunga of the given loans (see `countsArrears`). */
 function arrearsOf(loanList: Loan[], withMonths: boolean) {
   const ids = new Set(loanList.map((loan) => loan.id));
   const latest = memberLedgerRows.value.filter(
-    (row) =>
-      ids.has(row.loanId) &&
-      row.period === arrearsPeriod.value &&
-      row.closingBalance > 0,
+    (row) => ids.has(row.loanId) && row.period === arrearsPeriod.value,
   );
   const part = (label: string, key: ArrearsPart) => {
-    const amount = latest.reduce((sum, row) => sum + row[`arrears${key}`], 0);
+    const amount = latest
+      .filter((row) => countsArrears(row, key))
+      .reduce((sum, row) => sum + row[`arrears${key}`], 0);
     return {
       label,
       amount,
@@ -216,10 +322,14 @@ const showLoanTotals = computed(
 );
 const loanDetails = computed(() =>
   memberLoans.value.map((loan) => {
-    const arrears = arrearsOf([loan], true);
+    // A paid-off loan lists only the interest it still owes.
+    const arrears = arrearsOf([loan], true).filter(
+      (part) => loan.balance > 0 || part.amount > 0,
+    );
     return {
       loan,
       arrears,
+      schedule: scheduleOf(loan),
       behind: arrears.some((item) => item.amount > 0),
     };
   }),
@@ -363,7 +473,7 @@ const memberTransactions = computed(() => {
                 />
               </div>
             </div>
-            <div v-if="item.loan.balance > 0" class="loan-summary">
+            <div v-if="item.arrears.length" class="loan-summary">
               <div v-for="part in item.arrears" :key="part.label">
                 <div class="loan-summary__row">
                   <div>
@@ -380,6 +490,51 @@ const memberTransactions = computed(() => {
                 </ul>
               </div>
             </div>
+            <details v-if="item.schedule.rows.length" class="loan-schedule">
+              <summary>Riwayat angsuran</summary>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Bulan</th>
+                    <th>Angsuran pokok</th>
+                    <th>Bunga</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in item.schedule.rows" :key="row.label">
+                    <td>{{ row.label }}</td>
+                    <td
+                      v-for="(cell, index) in [row.principal, row.interest]"
+                      :key="index"
+                    >
+                      <template v-if="cell">
+                        {{ formatCurrency(cell.amount) }}
+                        <small
+                          :class="{ 'loan-schedule__unpaid': cell.unpaid }"
+                        >
+                          {{ cell.status }}
+                        </small>
+                      </template>
+                      <template v-else>-</template>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p
+                v-if="
+                  item.schedule.ahead.principal || item.schedule.ahead.interest
+                "
+                class="loan-schedule__note"
+              >
+                Dibayar di muka untuk bulan berikutnya:
+                <template v-if="item.schedule.ahead.principal">
+                  pokok {{ formatCurrency(item.schedule.ahead.principal) }}
+                </template>
+                <template v-if="item.schedule.ahead.interest">
+                  bunga {{ formatCurrency(item.schedule.ahead.interest) }}
+                </template>
+              </p>
+            </details>
           </div>
         </div>
         <p v-else class="empty-inline">Belum ada pinjaman untuk anggota ini.</p>
@@ -540,6 +695,48 @@ const memberTransactions = computed(() => {
 }
 .loan-details .loan-summary {
   margin: 0 13px 12px;
+}
+.loan-schedule {
+  margin: 0 13px 12px;
+  font-size: 10.5px;
+}
+.loan-schedule summary {
+  color: var(--green);
+  font-weight: 700;
+  cursor: pointer;
+}
+.loan-schedule table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+}
+.loan-schedule th,
+.loan-schedule td {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.loan-schedule th {
+  color: var(--muted);
+  font-weight: 600;
+  background: var(--surface-soft);
+}
+.loan-schedule td + td,
+.loan-schedule th + th {
+  text-align: right;
+}
+.loan-schedule small {
+  display: block;
+  color: var(--soft);
+  font-size: 9.5px;
+}
+small.loan-schedule__unpaid {
+  color: var(--amber);
+}
+.loan-schedule__note {
+  margin: 6px 0 0;
+  color: var(--soft);
 }
 .member-detail__breakdown {
   display: grid;

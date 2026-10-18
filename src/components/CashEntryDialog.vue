@@ -21,6 +21,7 @@ import {
   Channel,
   formatCurrency,
   formatLoanLabel,
+  formatPeriod,
   InterestType,
   LoanGroup,
   LoanType,
@@ -30,6 +31,7 @@ import {
   todayIso,
   TransactionDirection,
   useKoperasiStore,
+  useMonthlyLedger,
 } from "../store/koperasi";
 
 /** Catat transaksi: the single entry point for every Buku Kas movement. */
@@ -266,6 +268,55 @@ const paymentLoans = computed(() =>
 const paymentLoanBalance = computed(() =>
   paymentLoans.value.reduce((sum, loan) => sum + loan.balance, 0),
 );
+// Interest of the transaction month: this month's installment ("Kewajiban
+// setor tiap bulan") and what is still owed through it ("Kewajiban setor s/d"
+// on the Pinjaman page, less what was already paid that month).
+const { monthlyLedger } = useMonthlyLedger();
+const postingPeriod = computed(() => posting.value.businessDate.slice(0, 7));
+const interestOfMonth = computed(
+  () =>
+    new Map(
+      monthlyLedger.value.loans
+        .filter((row) => row.period === postingPeriod.value)
+        .map((row) => [
+          row.loanId,
+          { scheduled: row.scheduledInterest, due: row.arrearsInterest },
+        ]),
+    ),
+);
+function interestDueLines(loanIds: string[]) {
+  let scheduled = 0;
+  let due = 0;
+  for (const loanId of loanIds) {
+    const interest = interestOfMonth.value.get(loanId);
+    if (!interest) return [];
+    scheduled += interest.scheduled;
+    due += interest.due;
+  }
+  if (!loanIds.length) return [];
+  const dueText =
+    due < 0
+      ? `Lebih bayar bunga ${formatCurrency(-due)}`
+      : `Kewajiban bunga s/d ${formatPeriod(postingPeriod.value)} ${formatCurrency(due)}`;
+  return [`Bunga per bulan ${formatCurrency(scheduled)}`, dueText];
+}
+/** A payment that pays off the loan's principal but not exactly its interest
+ * due leaves interest arrears on a paid-off loan; warn, but still allow it
+ * (the interest may be waived). */
+function payoffInterestWarning(
+  loan: (typeof loans)[number],
+  principal: number,
+  interest: number,
+) {
+  const due = interestOfMonth.value.get(loan.id)?.due;
+  if (due === undefined || loan.balance <= 0 || principal !== loan.balance)
+    return "";
+  const gap = due - (interest || 0);
+  if (!gap) return "";
+  return gap > 0
+    ? `Pinjaman lunas, tapi bunga masih kurang ${formatCurrency(gap)}.`
+    : `Pinjaman lunas, tapi bunga lebih ${formatCurrency(-gap)}.`;
+}
 /** One month's installment, to start from: the outstanding balance helps
  * fill in the principal. */
 function installmentOf(loan: (typeof loans)[number]) {
@@ -787,6 +838,14 @@ defineExpose({ open: openModal });
         <template v-if="isNonMemberPayment">
           <p v-if="paymentLoans.length" class="field-hint">
             Sisa pokok pinjaman {{ formatCurrency(paymentLoanBalance) }}
+            <template
+              v-for="line in interestDueLines(
+                paymentLoans.map((loan) => loan.id),
+              )"
+              :key="line"
+            >
+              <br />{{ line }}
+            </template>
           </p>
         </template>
         <div v-if="!isNonMemberPayment" class="field-row">
@@ -818,6 +877,9 @@ defineExpose({ open: openModal });
             </p>
             <p class="field-hint">
               Sisa pokok pinjaman {{ formatCurrency(loan.balance) }}
+              <template v-for="line in interestDueLines([loan.id])" :key="line">
+                <br />{{ line }}
+              </template>
             </p>
             <div class="field-row">
               <label class="field">
@@ -845,6 +907,25 @@ defineExpose({ open: openModal });
                 />
               </label>
             </div>
+            <p
+              v-if="
+                payoffInterestWarning(
+                  loan,
+                  paymentLine(loan.id).principal,
+                  paymentLine(loan.id).interest,
+                )
+              "
+              class="field-hint field-hint--warning"
+              role="status"
+            >
+              {{
+                payoffInterestWarning(
+                  loan,
+                  paymentLine(loan.id).principal,
+                  paymentLine(loan.id).interest,
+                )
+              }}
+            </p>
           </div>
         </section>
         <div v-if="isNonMemberPayment" class="field-row">
@@ -865,6 +946,27 @@ defineExpose({ open: openModal });
             />
           </label>
         </div>
+        <p
+          v-if="
+            isNonMemberPayment &&
+            paymentLoans[0] &&
+            payoffInterestWarning(
+              paymentLoans[0],
+              paymentForm.principal,
+              paymentForm.interest,
+            )
+          "
+          class="field-hint field-hint--warning"
+          role="status"
+        >
+          {{
+            payoffInterestWarning(
+              paymentLoans[0],
+              paymentForm.principal,
+              paymentForm.interest,
+            )
+          }}
+        </p>
       </template>
 
       <template v-else-if="isSavings">
@@ -950,7 +1052,15 @@ defineExpose({ open: openModal });
               <input v-model="loanPayoff(loan.id).selected" type="checkbox" />
               <span>
                 {{ formatLoanLabel(loan) }}
-                <small>Sisa pokok {{ formatCurrency(loan.balance) }}</small>
+                <small>
+                  Sisa pokok {{ formatCurrency(loan.balance) }}
+                  <template
+                    v-for="line in interestDueLines([loan.id])"
+                    :key="line"
+                  >
+                    <br />{{ line }}
+                  </template>
+                </small>
               </span>
             </label>
             <label v-if="loanPayoff(loan.id).selected" class="field">
@@ -961,6 +1071,26 @@ defineExpose({ open: openModal });
                 :aria-label="`Bunga pelunasan ${formatLoanLabel(loan)}`"
               />
             </label>
+            <p
+              v-if="
+                loanPayoff(loan.id).selected &&
+                payoffInterestWarning(
+                  loan,
+                  loan.balance,
+                  loanPayoff(loan.id).interest,
+                )
+              "
+              class="field-hint field-hint--warning"
+              role="status"
+            >
+              {{
+                payoffInterestWarning(
+                  loan,
+                  loan.balance,
+                  loanPayoff(loan.id).interest,
+                )
+              }}
+            </p>
           </div>
         </fieldset>
         <label v-if="loanForm.loanGroup !== LoanGroup.Member" class="field">
@@ -1100,10 +1230,7 @@ defineExpose({ open: openModal });
 
       <label v-if="!isCash" class="field">
         <span>Uraian</span>
-        <input
-          v-model="descriptionInput"
-          placeholder="Terisi otomatis setelah anggota dan nominal diisi"
-        />
+        <input v-model="descriptionInput" placeholder="Keterangan transaksi" />
       </label>
 
       <div class="modal-actions">
@@ -1144,6 +1271,9 @@ defineExpose({ open: openModal });
   margin: -6px 0 0;
   color: var(--soft);
   font-size: 10px;
+}
+.field-hint--warning {
+  color: var(--amber);
 }
 .payoff-field {
   display: grid;
