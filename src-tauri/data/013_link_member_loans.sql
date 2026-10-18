@@ -1,0 +1,101 @@
+-- Links Anggota loans to their members where the import left member_id empty
+-- (PINJAMAN BULANAN writes names differently from SIMPANAN). These links were
+-- made on one database by hand; this brings every database to the same state.
+-- Only fills an empty link, only when the member exists. Ids only.
+CREATE TEMP TABLE link_member_loans (loan_id TEXT PRIMARY KEY, member_id TEXT NOT NULL);
+INSERT INTO link_member_loans (loan_id, member_id) VALUES
+  ('default-L002', 'default-M116'),
+  ('default-L005', 'default-M079'),
+  ('default-L007', 'default-M053'),
+  ('default-L008', 'default-M053'),
+  ('default-L009', 'default-M053'),
+  ('default-L010', 'default-M053'),
+  ('default-L014', 'default-M126'),
+  ('default-L015', 'default-M011'),
+  ('default-L016', 'default-M033'),
+  ('default-L017', 'default-M057'),
+  ('default-L019', 'default-M091'),
+  ('default-L024', 'default-M031'),
+  ('default-L029', 'default-M044'),
+  ('default-L030', 'default-M021'),
+  ('default-L031', 'default-M076'),
+  ('default-L032', 'default-M094'),
+  ('default-L033', 'default-M026'),
+  ('default-L035', 'default-M072'),
+  ('default-L036', 'default-M043'),
+  ('default-L041', 'default-M096'),
+  ('default-L049', 'default-M100'),
+  ('default-L050', 'default-M048'),
+  ('default-L051', 'default-M048'),
+  ('default-L052', 'default-M018'),
+  ('default-L053', 'default-M095'),
+  ('default-L055', 'default-M070'),
+  ('default-L060', 'default-M041'),
+  ('default-L061', 'default-M041'),
+  ('default-L062', 'default-M120'),
+  ('default-L065', 'default-M108'),
+  ('default-L066', 'default-M061'),
+  ('default-L072', 'default-M075'),
+  ('default-L078', 'default-M081'),
+  ('default-L086', 'default-M053'),
+  ('default-L087', 'default-M053'),
+  ('default-L088', 'default-M053'),
+  ('default-L090', 'default-M076'),
+  ('default-L091', 'default-M095'),
+  ('default-L092', 'default-M095'),
+  ('default-L097', 'default-M116'),
+  ('default-L098', 'default-M116'),
+  ('default-L099', 'default-M116'),
+  ('default-L102', 'default-M079'),
+  ('default-L103', 'default-M079'),
+  ('default-L105', 'default-M053'),
+  ('default-L106', 'default-M053'),
+  ('default-L107', 'default-M053'),
+  ('default-L108', 'default-M053'),
+  ('default-L109', 'default-M053'),
+  ('default-L110', 'default-M053'),
+  ('default-L113', 'default-M033'),
+  ('default-L114', 'default-M091'),
+  ('default-L117', 'default-M031'),
+  ('default-L121', 'default-M044'),
+  ('default-L122', 'default-M044'),
+  ('default-L123', 'default-M021'),
+  ('default-L124', 'default-M076'),
+  ('default-L125', 'default-M076'),
+  ('default-L126', 'default-M026'),
+  ('default-L129', 'default-M072'),
+  ('default-L130', 'default-M043'),
+  ('default-L135', 'default-M096'),
+  ('default-L136', 'default-M096'),
+  ('default-L137', 'default-M096'),
+  ('default-L141', 'default-M100'),
+  ('default-L143', 'default-M048'),
+  ('default-L144', 'default-M095'),
+  ('default-L145', 'default-M046'),
+  ('default-L149', 'default-M120'),
+  ('default-L150', 'default-M108'),
+  ('default-L151', 'default-M108'),
+  ('default-L152', 'default-M097'),
+  ('default-L158', 'default-M069'),
+  ('default-L159', 'default-M069'),
+  ('default-L161', 'default-M034'),
+  ('default-L167', 'default-M048'),
+  ('default-L168', 'default-M120'),
+  ('default-L169', 'default-M081'),
+  ('default-L170', 'default-M079'),
+  ('default-L173', 'default-M100'),
+  ('default-L174', 'default-M120'),
+  ('default-L175', 'default-M108'),
+  ('default-L178', 'default-M034');
+INSERT INTO audit_events (company_id, entity_type, entity_id, action, after_json, actor)
+SELECT l.company_id, 'LOAN', l.id, 'UPDATED', json_object('memberId', k.member_id), 'Data script 013_link_member_loans'
+FROM loans l
+JOIN link_member_loans k ON k.loan_id = l.id
+WHERE l.company_id = 'default' AND COALESCE(l.member_id, '') = ''
+  AND EXISTS (SELECT 1 FROM members m WHERE m.id = k.member_id AND m.company_id = l.company_id);
+UPDATE loans
+SET member_id = (SELECT k.member_id FROM link_member_loans k WHERE k.loan_id = loans.id)
+WHERE company_id = 'default' AND COALESCE(member_id, '') = ''
+  AND id IN (SELECT loan_id FROM link_member_loans)
+  AND EXISTS (SELECT 1 FROM members m JOIN link_member_loans k ON k.member_id = m.id WHERE k.loan_id = loans.id AND m.company_id = loans.company_id);
+DROP TABLE link_member_loans;
