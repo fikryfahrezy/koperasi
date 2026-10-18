@@ -4,7 +4,7 @@ use sqlx::{SqliteConnection, SqlitePool};
 
 use super::posting::{append, audit, loan_balance, Component, Entry, APP_ACTOR};
 use super::read_model::get_app_snapshot;
-use super::savings::member_name;
+use super::savings::{member_name, trimmed_or};
 use crate::{
     contracts::{AppSnapshot, CreateLoanInput, LoanPreview, PreviewLoanInput},
     domain::{
@@ -232,11 +232,14 @@ pub(crate) async fn create_loan(
             member_id,
             member_name: &borrower_name,
             channel,
-            description: &if is_top_up {
-                format!("Suplesi {borrower_name} Jk {} bulan", input.tenor)
-            } else {
-                format!("Realisasi Pinjaman {borrower_name}")
-            },
+            description: &trimmed_or(
+                &input.description,
+                if is_top_up {
+                    format!("Suplesi {borrower_name} Jk {} bulan", input.tenor)
+                } else {
+                    format!("Realisasi Pinjaman {borrower_name}")
+                },
+            ),
             reference: &format!("KBS/DISB/{id}/{disbursement_id}"),
             direction: TransactionDirection::Out,
             actor: APP_ACTOR,

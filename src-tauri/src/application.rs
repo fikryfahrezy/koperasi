@@ -82,6 +82,7 @@ mod tests {
             loans: Vec::new(),
             wajib: 10_000,
             voluntary: 5_000,
+            description: String::new(),
             reference: reference.into(),
             channel: channel.into(),
             business_date: DATE.into(),
@@ -325,6 +326,7 @@ mod tests {
                     loan_type: LoanType::Temporary.as_str().into(),
                     provision: None,
                     payoffs: Vec::new(),
+                    description: String::new(),
                     disbursement: DisbursementInput {
                         channel: Channel::Cash.as_str().into(),
                         business_date: DATE.into(),
@@ -391,6 +393,7 @@ mod tests {
                             amount: *amount,
                         })
                         .collect(),
+                    description: String::new(),
                     reference: String::new(),
                     channel: Channel::Cash.as_str().into(),
                     business_date: DATE.into(),
@@ -715,6 +718,7 @@ mod tests {
                     loan_type: LoanType::Monthly.as_str().into(),
                     provision: None,
                     payoffs: Vec::new(),
+                    description: String::new(),
                     disbursement: DisbursementInput {
                         channel: Channel::Cash.as_str().into(),
                         business_date: DATE.into(),
@@ -770,6 +774,7 @@ mod tests {
                 loan_type: LoanType::Monthly.as_str().into(),
                 provision: None,
                 payoffs,
+                description: String::new(),
                 disbursement: DisbursementInput {
                     channel: Channel::Cash.as_str().into(),
                     business_date: DATE.into(),
@@ -899,6 +904,40 @@ mod tests {
     }
 
     #[test]
+    fn uses_the_typed_uraian() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+            add_member(member_input("Default Member"), "default", &pool)
+                .await
+                .unwrap();
+            // A typed Uraian replaces the generated "Setoran Simpanan ..." text.
+            let typed = post_savings_transaction(
+                SavingsTransactionInput {
+                    member_id: "default-M001".into(),
+                    amounts: Vec::new(),
+                    account_type: SavingsAccountType::Voluntary.as_str().into(),
+                    movement: SavingsMovement::Deposit.as_str().into(),
+                    amount: 10_000,
+                    description: "  Titipan manasuka  ".into(),
+                    reference: "TYPED-DESCRIPTION".into(),
+                    channel: Channel::Cash.as_str().into(),
+                    business_date: DATE.into(),
+                    display_date: "13 Sep 2026".into(),
+                    display_time: "10:06".into(),
+                },
+                "default",
+                &pool,
+            )
+            .await
+            .unwrap();
+            assert!(typed
+                .transactions
+                .iter()
+                .any(|transaction| transaction.description == "Titipan manasuka"));
+        });
+    }
+
+    #[test]
     fn derives_balances_from_an_append_only_ledger() {
         tauri::async_runtime::block_on(async {
             let pool = crate::database::memory_pool().await;
@@ -916,6 +955,7 @@ mod tests {
                     account_type: "UNKNOWN".into(),
                     movement: crate::domain::SavingsMovement::Deposit.as_str().into(),
                     amount: 25_000,
+                    description: String::new(),
                     reference: "INVALID-TYPE".into(),
                     channel: Channel::Cash.as_str().into(),
                     business_date: DATE.into(),
@@ -957,6 +997,7 @@ mod tests {
                         account_type: SavingsAccountType::Voluntary.as_str().into(),
                         movement: SavingsMovement::Deposit.as_str().into(),
                         amount: 25_000,
+                        description: String::new(),
                         reference: "SHARED-REFERENCE".into(),
                         channel: Channel::Cash.as_str().into(),
                         business_date: DATE.into(),
@@ -976,6 +1017,7 @@ mod tests {
                     account_type: SavingsAccountType::Voluntary.as_str().into(),
                     movement: SavingsMovement::Withdrawal.as_str().into(),
                     amount: 30_000,
+                    description: String::new(),
                     reference: String::new(),
                     channel: Channel::Cash.as_str().into(),
                     business_date: DATE.into(),
@@ -995,6 +1037,7 @@ mod tests {
                     account_type: SavingsAccountType::Principal.as_str().into(),
                     movement: SavingsMovement::Withdrawal.as_str().into(),
                     amount: 60_000,
+                    description: String::new(),
                     reference: String::new(),
                     channel: Channel::Cash.as_str().into(),
                     business_date: DATE.into(),
@@ -1036,6 +1079,7 @@ mod tests {
                     loan_type: LoanType::Monthly.as_str().into(),
                     provision: None,
                     payoffs: Vec::new(),
+                    description: String::new(),
                     disbursement: DisbursementInput {
                         channel: Channel::Cash.as_str().into(),
                         business_date: DATE.into(),

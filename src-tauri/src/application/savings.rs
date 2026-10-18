@@ -47,7 +47,8 @@ pub(crate) async fn savings_account_id(
     .ok_or_else(|| "Rekening simpanan tidak ditemukan.".to_string())
 }
 
-fn reference_or(input: &str, fallback: String) -> String {
+/// The trimmed text the user typed, or `fallback` when it is empty.
+pub(crate) fn trimmed_or(input: &str, fallback: String) -> String {
     if input.trim().is_empty() {
         fallback
     } else {
@@ -143,14 +144,17 @@ pub(crate) async fn post_savings_transaction(
         let (last, rest) = names.split_last().expect("at least two savings types");
         format!("Simpanan {} & {last}", rest.join(", "))
     };
-    let description = if is_deposit {
-        format!("Setoran {accounts} {member_name}")
-    } else {
-        format!("Pengambilan {accounts} {member_name}")
-    };
+    let description = trimmed_or(
+        &input.description,
+        if is_deposit {
+            format!("Setoran {accounts} {member_name}")
+        } else {
+            format!("Pengambilan {accounts} {member_name}")
+        },
+    );
 
     let id = timestamp_id(if is_deposit { "SAV-IN" } else { "SAV-OUT" });
-    let reference = reference_or(&input.reference, format!("KBS/SAV/{id}"));
+    let reference = trimmed_or(&input.reference, format!("KBS/SAV/{id}"));
     ensure_reference_unused(&mut db, company_id, &reference).await?;
     let amount = append(
         &mut db,
@@ -220,7 +224,7 @@ pub(crate) async fn post_payment(
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
     let member_name = member_name(&mut db, company_id, &input.member_id).await?;
     let id = timestamp_id("TRX");
-    let reference = reference_or(&input.reference, format!("KBS/RCPT/{id}"));
+    let reference = trimmed_or(&input.reference, format!("KBS/RCPT/{id}"));
     ensure_reference_unused(&mut db, company_id, &reference).await?;
 
     let mut components = Vec::new();
@@ -304,7 +308,7 @@ pub(crate) async fn post_payment(
             member_id: Some(&input.member_id),
             member_name: &member_name,
             channel,
-            description: &format!("Setoran {member_name}"),
+            description: &trimmed_or(&input.description, format!("Setoran {member_name}")),
             reference: &reference,
             direction: TransactionDirection::In,
             actor: APP_ACTOR,
@@ -416,7 +420,7 @@ async fn post_loan_payment(
         return Err("Pembayaran pokok melebihi saldo pinjaman berjalan.".into());
     }
     let id = timestamp_id("TRX");
-    let reference = reference_or(&input.reference, format!("KBS/RCPT/{id}"));
+    let reference = trimmed_or(&input.reference, format!("KBS/RCPT/{id}"));
     ensure_reference_unused(&mut db, company_id, &reference).await?;
     let amount = append(
         &mut db,
@@ -429,7 +433,7 @@ async fn post_loan_payment(
             member_id: member_id.as_deref(),
             member_name: &borrower_name,
             channel,
-            description: &format!("Setoran {borrower_name}"),
+            description: &trimmed_or(&input.description, format!("Setoran {borrower_name}")),
             reference: &reference,
             direction: TransactionDirection::In,
             actor: APP_ACTOR,
