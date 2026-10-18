@@ -288,9 +288,9 @@ fn cash_book_sheet(book: &CashBookDto, expenses: &HashMap<(String, String), i64>
     }) {
         row += 1;
         border_row(&mut sheet, row, Style::Number);
-        if item.business_date != last_date {
-            sheet.date(row, 1, &item.business_date);
-            last_date = &item.business_date;
+        if item.transaction.business_date != last_date {
+            sheet.date(row, 1, &item.transaction.business_date);
+            last_date = &item.transaction.business_date;
         }
         let transaction = &item.transaction;
         sheet.text(row, 2, &transaction.description, Style::Text);

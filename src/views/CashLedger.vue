@@ -12,6 +12,7 @@ import {
   type Transaction,
   type TransactionGroup,
   formatCurrency,
+  formatDate,
   formatLoanLabel,
   formatSheetNumber,
   type CashBookRow,
@@ -151,8 +152,23 @@ const deletedRows = computed(() => {
       );
       return {
         ...row,
+        // General cash rows are booked to "Koperasi": no one to show. A name
+        // without an ID Anggota is a Non Anggota borrower.
+        // As on the sheet: Debet is cash out, Kredit is cash in.
+        summary: [
+          `${row.direction === TransactionDirection.Out ? "Debet" : "Kredit"} ${formatCurrency(row.amount)}`,
+          row.memberNumber
+            ? `${row.memberNumber} ${row.memberName}`
+            : row.memberName && row.memberName !== "Koperasi"
+              ? `${row.memberName} (Non Anggota)`
+              : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
         deletedAt: reversal
-          ? [reversal.date, reversal.time].filter(Boolean).join(" ")
+          ? [formatDate(reversal.businessDate), reversal.time]
+              .filter(Boolean)
+              .join(" ")
           : "",
         deletedOrder: reversal ? `${reversal.businessDate} ${reversal.id}` : "",
       };
@@ -170,7 +186,8 @@ const filteredDeletedRows = computed(() => {
 // As in the spreadsheet, the date appears only on the first row of each day.
 const showDate = (index: number) =>
   index === 0 ||
-  filteredRows.value[index - 1].date !== filteredRows.value[index].date;
+  filteredRows.value[index - 1].businessDate !==
+    filteredRows.value[index].businessDate;
 // KAS BUKU TABUNGAN (the bank savings book), as on the sheet: Keluar = Tambahan
 // Kas dari Tabungan, Masuk = the opening balance and Transfer ke Tabungan. The last column is
 // cash + bank on the opening row. No running bank balance: the bank also receives
@@ -268,9 +285,6 @@ async function refreshPage() {
             <tr>
               <th>Tanggal</th>
               <th class="cash-book-table__desc">Uraian</th>
-              <th>Anggota</th>
-              <th>Debet</th>
-              <th>Kredit</th>
               <th>Dihapus</th>
             </tr>
           </thead>
@@ -280,31 +294,15 @@ async function refreshPage() {
               :key="item.id"
               class="cash-book-table__row"
             >
-              <td>{{ item.date }}</td>
-              <td class="cash-book-table__desc">{{ item.description }}</td>
-              <td>
-                {{
-                  [item.memberNumber, item.memberName].filter(Boolean).join(" ")
-                }}
-              </td>
-              <td class="num-cell">
-                {{
-                  item.direction === TransactionDirection.Out
-                    ? formatSheetNumber(item.amount)
-                    : ""
-                }}
-              </td>
-              <td class="num-cell">
-                {{
-                  item.direction === TransactionDirection.In
-                    ? formatSheetNumber(item.amount)
-                    : ""
-                }}
+              <td>{{ formatDate(item.businessDate) }}</td>
+              <td class="cash-book-table__desc">
+                <span class="deleted-table__desc">{{ item.description }}</span>
+                <small class="deleted-table__meta">{{ item.summary }}</small>
               </td>
               <td>{{ item.deletedAt }}</td>
             </tr>
             <tr v-if="!filteredDeletedRows.length">
-              <td colspan="6">
+              <td colspan="3">
                 {{
                   debouncedQuery.trim()
                     ? "Tidak ada transaksi terhapus yang cocok dengan pencarian."
@@ -381,7 +379,9 @@ async function refreshPage() {
               :key="item.id"
               class="cash-book-table__row"
             >
-              <td>{{ showDate(index) ? item.date : "" }}</td>
+              <td>
+                {{ showDate(index) ? formatDate(item.businessDate) : "" }}
+              </td>
               <td class="cash-book-table__desc">{{ item.description }}</td>
               <td class="num-cell">
                 {{
@@ -485,7 +485,7 @@ async function refreshPage() {
           <div>
             <strong>{{ pendingDetail.description }}</strong
             ><span
-              >{{ pendingDetail.date }}
+              >{{ formatDate(pendingDetail.businessDate) }}
               <template v-if="pendingDetail.memberNumber">
                 · {{ pendingDetail.memberNumber }}
                 {{ pendingDetail.memberName }}</template
@@ -524,7 +524,7 @@ async function refreshPage() {
         <div class="transaction-detail__head">
           <div>
             <strong>{{ pendingDelete.description }}</strong
-            ><span>{{ pendingDelete.date }}</span>
+            ><span>{{ formatDate(pendingDelete.businessDate) }}</span>
           </div>
           <strong>{{ formatCurrency(pendingDelete.amount) }}</strong>
         </div>
@@ -540,7 +540,7 @@ async function refreshPage() {
                 <small v-if="transaction.detail">{{
                   transaction.detail
                 }}</small>
-                <small>{{ transaction.date }}</small>
+                <small>{{ formatDate(transaction.businessDate) }}</small>
               </div>
               <strong>{{ formatCurrency(transaction.amount) }}</strong>
             </li>
@@ -651,6 +651,15 @@ async function refreshPage() {
 .transaction-detail__items small {
   color: var(--soft);
   font-size: 10px;
+}
+.deleted-table__desc,
+.deleted-table__meta {
+  display: block;
+}
+.deleted-table__meta {
+  margin-top: 2px;
+  color: var(--soft);
+  font-size: 10.5px;
 }
 .button--active {
   border: 1px solid var(--green);
