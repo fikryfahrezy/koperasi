@@ -101,6 +101,12 @@ const otherForm = pageState.field("otherForm", () => ({
   description: "",
   amount: 0,
 }));
+// Uraian of payments, loans, and savings follows the generated text (as the
+// backend writes it) until the user types their own; empty falls back to it.
+const typedDescription = pageState.field("typedDescription", () => ({
+  text: "",
+  edited: false,
+}));
 // Provisi follows the parameter rate until the user types their own amount.
 const loanProvision = pageState.field("loanProvision", () => ({
   amount: 0,
@@ -441,6 +447,7 @@ function openModal() {
     description: "",
     amount: 0,
   });
+  Object.assign(typedDescription.value, { text: "", edited: false });
   modalOpen.value = true;
 }
 const isSavings = computed(
@@ -490,6 +497,61 @@ function withdrawAllSavings() {
   Object.assign(savingsForm.value, savingsMemberBalances.value);
 }
 
+const memberName = (id: string) =>
+  members.find((member) => member.id === id)?.name ?? "";
+const savingsAccountWords = {
+  [SavingsAccountType.Principal]: "Pokok",
+  [SavingsAccountType.Mandatory]: "Wajib",
+  [SavingsAccountType.Voluntary]: "Manasuka",
+} satisfies Record<SavingsAccountType, string>;
+/** The Uraian the backend writes when none is typed; "" until it is known. */
+const generatedDescription = computed(() => {
+  if (category.value === Category.Payment) {
+    const loan = paymentLoans.value[0];
+    if (!loan) return "";
+    return `Setoran ${isNonMemberPayment.value ? loan.memberName : memberName(loan.memberId)}`;
+  }
+  if (isSavings.value) {
+    const name = memberName(savingsForm.value.memberId);
+    const words = savingsAmounts.value.map(
+      (item) => savingsAccountWords[item.accountType],
+    );
+    if (!name || !words.length) return "";
+    const accounts =
+      words.length === 1
+        ? `Simpanan ${words[0]}`
+        : `Simpanan ${words.slice(0, -1).join(", ")} & ${words.at(-1)}`;
+    return `${category.value === Category.SavingsWithdrawal ? "Pengambilan" : "Setoran"} ${accounts} ${name}`;
+  }
+  if (category.value === Category.Loan) {
+    const name =
+      loanForm.value.loanGroup === LoanGroup.Member
+        ? memberName(loanForm.value.memberId)
+        : loanForm.value.borrowerName.trim();
+    if (!name) return "";
+    return selectedPayoffs.value.length
+      ? `Suplesi ${name} Jk ${loanForm.value.tenor ?? ""} bulan`
+      : `Realisasi Pinjaman ${name}`;
+  }
+  return "";
+});
+const descriptionInput = computed({
+  get: () =>
+    typedDescription.value.edited
+      ? typedDescription.value.text
+      : generatedDescription.value,
+  set: (text: string) => {
+    typedDescription.value = { text, edited: true };
+  },
+});
+// Sent only when typed, so the backend's own text stays the source otherwise.
+const descriptionOverride = computed(() =>
+  typedDescription.value.edited ? typedDescription.value.text.trim() : "",
+);
+watch(category, () => {
+  typedDescription.value = { text: "", edited: false };
+});
+
 const submitLabel = computed(
   () =>
     (
@@ -522,6 +584,7 @@ async function submit() {
               interest: paymentForm.value.interest || 0,
               wajib: 0,
               voluntary: 0,
+              description: descriptionOverride.value,
               reference: "",
             }
           : {
@@ -535,6 +598,7 @@ async function submit() {
               })),
               wajib: paymentForm.value.wajib || 0,
               voluntary: paymentForm.value.voluntary || 0,
+              description: descriptionOverride.value,
               reference: "",
             },
         options,
@@ -549,6 +613,7 @@ async function submit() {
             category.value === Category.SavingsWithdrawal
               ? SavingsMovement.Withdrawal
               : SavingsMovement.Deposit,
+          description: descriptionOverride.value,
           reference: "",
         },
         options,
@@ -579,6 +644,7 @@ async function submit() {
               : "",
           borrowerName: loanForm.value.borrowerName.trim(),
           payoffs: selectedPayoffs.value,
+          description: descriptionOverride.value,
         },
         options,
       );
@@ -1031,6 +1097,14 @@ defineExpose({ open: openModal });
           />
         </label>
       </template>
+
+      <label v-if="!isCash" class="field">
+        <span>Uraian</span>
+        <input
+          v-model="descriptionInput"
+          placeholder="Terisi otomatis setelah anggota dan nominal diisi"
+        />
+      </label>
 
       <div class="modal-actions">
         <button
