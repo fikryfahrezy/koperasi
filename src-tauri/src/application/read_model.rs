@@ -31,6 +31,7 @@ fn transaction_dto(
     Ok(TransactionDto {
         components: components.remove(&id).unwrap_or_default(),
         id,
+        business_date: try_column!(row, "business_date"),
         date: try_column!(row, "display_date"),
         time: try_column!(row, "display_time"),
         member_name: try_column!(row, "member_name"),
@@ -340,7 +341,6 @@ pub(crate) async fn get_cash_book(
     let mut cash_rows = Vec::with_capacity(rows.len());
     for row in &rows {
         let excluded: bool = try_column!(row, "excluded");
-        let business_date: String = try_column!(row, "business_date");
         let transaction = transaction_dto(row, &mut components)?;
         if !excluded && transaction.channel == channel {
             if transaction.direction == TransactionDirection::In {
@@ -357,7 +357,6 @@ pub(crate) async fn get_cash_book(
             .unwrap_or_default();
         cash_rows.push(CashBookRowDto {
             transaction,
-            business_date,
             balance,
             savings_book_out,
             savings_book_in,
