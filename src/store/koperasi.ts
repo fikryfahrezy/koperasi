@@ -337,6 +337,8 @@ interface CreateLoanInput {
   provision?: number;
   /** Suplesi: old loans paid off from this loan (full principal + interest). */
   payoffs?: { loanId: string; principal: number; interest: number }[];
+  /** Uraian typed by the user; empty uses the generated text. */
+  description?: string;
 }
 
 type ChannelInput = { channel: Channel };
@@ -346,6 +348,8 @@ interface SavingsTransactionInput {
   movement: SavingsMovement;
   /** One row for every savings type moved together, e.g. Wajib & Manasuka. */
   amounts: { accountType: SavingsAccountType; amount: number }[];
+  /** Uraian typed by the user; empty uses the generated text. */
+  description?: string;
   reference: string;
 }
 
@@ -359,6 +363,8 @@ interface PaymentInput {
   loans?: { loanId: string; principal: number; interest: number }[];
   wajib: number;
   voluntary: number;
+  /** Uraian typed by the user; empty uses the generated text. */
+  description?: string;
   reference: string;
 }
 
