@@ -171,6 +171,9 @@ pub(crate) struct CreateLoanInput {
     /// its full remaining principal and the interest still due.
     #[serde(default)]
     pub(crate) payoffs: Vec<LoanPaymentLine>,
+    /// Uraian of the Realisasi/Suplesi row; empty uses the generated text.
+    #[serde(default)]
+    pub(crate) description: String,
     /// Loans are recorded when they are realised, as in PINJAMAN BULANAN.
     pub(crate) disbursement: DisbursementInput,
 }
@@ -199,6 +202,9 @@ pub(crate) struct PaymentInput {
     pub(crate) loans: Vec<LoanPaymentLine>,
     pub(crate) wajib: i64,
     pub(crate) voluntary: i64,
+    /// Uraian typed by the user; empty uses "Setoran {name}".
+    #[serde(default)]
+    pub(crate) description: String,
     pub(crate) reference: String,
     pub(crate) channel: String,
     pub(crate) business_date: String,
@@ -228,6 +234,9 @@ pub(crate) struct SavingsTransactionInput {
     /// instead of `account_type` and `amount`.
     #[serde(default)]
     pub(crate) amounts: Vec<SavingsAmountInput>,
+    /// Uraian typed by the user; empty uses the generated text.
+    #[serde(default)]
+    pub(crate) description: String,
     pub(crate) reference: String,
     pub(crate) channel: String,
     pub(crate) business_date: String,
