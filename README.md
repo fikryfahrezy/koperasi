@@ -15,6 +15,9 @@ menjalankan frontend sehingga command database tidak tersedia.
 
 Database dibuat otomatis saat startup pertama. Di Windows, lokasinya berada di
 `%APPDATA%\com.fikryfahrezy.koperasi\koperasi.db`.
+Menu **Database** di kanan bawah mengekspor seluruh database ke satu file `.db`
+dan mengimpornya kembali (misalnya untuk pindah komputer). Sebelum impor, data
+saat ini disalin ke `koperasi-sebelum-impor-*.db` di folder yang sama.
 
 ## Konfigurasi perusahaan
 

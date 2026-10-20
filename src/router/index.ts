@@ -40,6 +40,11 @@ export const router = createRouter({
       component: CashLedger,
       meta: { titleKey: "sidebar.nav.cashLedger", fitViewport: true },
     },
+    {
+      path: "/data",
+      component: () => import("../views/DataTransfer.vue"),
+      meta: { titleKey: "sidebar.nav.data" },
+    },
     { path: "/:pathMatch(.*)*", redirect: "/new-tab" },
   ],
 });

@@ -436,12 +436,19 @@ const command = {
   getFinancialParameters: "get_financial_parameters",
   setIncentiveRates: "set_incentive_rates",
   exportXlsx: "export_xlsx",
+  databaseLocation: "database_location",
+  exportDatabase: "export_database",
+  importDatabase: "import_database",
 } as const;
 
 /** Pages that can be exported to .xlsx, in the layout of their workbook. */
 export type ExportKind = "cash-book" | "savings" | "loans";
 
 const backend = {
+  databaseLocation: () => invoke<string>(command.databaseLocation),
+  exportDatabase: () => invoke<string | null>(command.exportDatabase),
+  // Restarts the app once the picked file replaces the database.
+  importDatabase: () => invoke<void>(command.importDatabase),
   exportXlsx: (kind: ExportKind, year: number, through?: string) =>
     invoke<string | null>(command.exportXlsx, {
       kind,
@@ -582,6 +589,39 @@ async function exportXlsx(kind: ExportKind) {
       "warning",
     );
     return false;
+  }
+}
+
+/** Saves a copy of the whole database where the user picks. */
+async function exportDatabase() {
+  try {
+    const path = await backend.exportDatabase();
+    if (path)
+      notify(
+        translate("notifications.databaseExported"),
+        path,
+        "success",
+        path,
+      );
+  } catch (error) {
+    notify(
+      translate("notifications.databaseExportFailed"),
+      errorMessage(error),
+      "warning",
+    );
+  }
+}
+
+/** Replaces the database with a file the user picks; the app then restarts. */
+async function importDatabase() {
+  try {
+    await backend.importDatabase();
+  } catch (error) {
+    notify(
+      translate("notifications.databaseImportFailed"),
+      errorMessage(error),
+      "warning",
+    );
   }
 }
 
@@ -1294,6 +1334,9 @@ export const useKoperasiStore = () => ({
   getCashBook,
   exportXlsx,
   openExportFolder,
+  databaseLocation: backend.databaseLocation,
+  exportDatabase,
+  importDatabase,
   snapshotVersion,
   loadFinancialParameters,
 });
