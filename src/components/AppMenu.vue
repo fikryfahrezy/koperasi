@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RouterLink, useRouter } from "vue-router";
-import { BookOpen, Coins, HandCoins, Users } from "lucide-vue-next";
+import { BookOpen, Coins, Database, HandCoins, Users } from "lucide-vue-next";
 import { useI18n } from "vue-i18n";
 import {
   navigateActiveWorkspaceTab,
@@ -15,6 +15,8 @@ const menuItems = [
   { to: "/loans", labelKey: "sidebar.nav.loans", icon: HandCoins },
   { to: "/members", labelKey: "sidebar.nav.members", icon: Users },
 ];
+// Kept apart on the right: it manages the whole database, not daily work.
+const dataItem = { to: "/data", labelKey: "sidebar.nav.data", icon: Database };
 
 function navigate(path: string) {
   navigateActiveWorkspaceTab(path, router);
@@ -34,6 +36,15 @@ function navigate(path: string) {
       >
         <component :is="item.icon" :size="16" />
         <span>{{ t(item.labelKey) }}</span>
+      </RouterLink>
+      <RouterLink
+        :to="dataItem.to"
+        class="app-menu__item app-menu__item--end"
+        active-class="app-menu__item--active"
+        @click="navigate(dataItem.to)"
+      >
+        <component :is="dataItem.icon" :size="16" />
+        <span>{{ t(dataItem.labelKey) }}</span>
       </RouterLink>
     </div>
   </nav>
@@ -71,6 +82,10 @@ function navigate(path: string) {
   font-size: 11.5px;
   font-weight: 600;
   white-space: nowrap;
+}
+.app-menu__item--end {
+  margin-left: auto;
+  border-left: 1px solid var(--line-strong);
 }
 .app-menu__item:hover {
   color: var(--green);

@@ -23,7 +23,10 @@ pub(crate) fn run() {
                 )?);
             let pool = tauri::async_runtime::block_on(database::initialize(&app_data_dir))
                 .map_err(std::io::Error::other)?;
-            app.manage(AppState { db: pool });
+            app.manage(AppState {
+                db: pool,
+                data_dir: app_data_dir,
+            });
             Ok(())
         })
         .plugin(tauri_plugin_log::Builder::new().build())
@@ -46,7 +49,10 @@ pub(crate) fn run() {
             crate::commands::get_transaction_group,
             crate::commands::get_financial_parameters,
             crate::commands::set_incentive_rates,
-            crate::commands::export_xlsx
+            crate::commands::export_xlsx,
+            crate::commands::database_location,
+            crate::commands::export_database,
+            crate::commands::import_database
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
