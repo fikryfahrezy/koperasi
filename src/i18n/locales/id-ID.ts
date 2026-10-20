@@ -28,6 +28,7 @@ export default {
       savings: "Simpanan",
       loans: "Pinjaman",
       cashLedger: "Buku kas",
+      data: "Database",
     },
   },
   modal: { close: "Tutup dialog" },
@@ -76,5 +77,8 @@ export default {
     exportFailed: "Ekspor Excel gagal",
     openFolder: "Buka folder",
     openFolderFailed: "Folder gagal dibuka",
+    databaseExported: "Database tersimpan",
+    databaseExportFailed: "Ekspor database gagal",
+    databaseImportFailed: "Impor database gagal",
   },
 } as const;

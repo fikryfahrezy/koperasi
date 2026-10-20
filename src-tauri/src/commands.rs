@@ -15,6 +15,7 @@ use crate::{
         ReverseTransactionInput, SavingsTransactionInput, SetIncentiveRatesInput,
         TransactionGroupDto, UpdateMemberInput,
     },
+    database,
     state::AppState,
 };
 
@@ -182,4 +183,83 @@ pub(crate) async fn export_xlsx(
             .await?;
     std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
     Ok(Some(path.display().to_string()))
+}
+
+/// The live database file, so the user can find it without opening the data
+/// folder by hand.
+#[tauri::command]
+pub(crate) fn database_location(state: State<'_, AppState>) -> String {
+    database::database_path(&state.data_dir)
+        .display()
+        .to_string()
+}
+
+/// Saves a copy of the whole database to a file the user picks. Returns the
+/// saved path, or nothing when cancelled.
+#[tauri::command]
+pub(crate) async fn export_database(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    let file_name = format!(
+        "koperasi-{}.db",
+        database::local_timestamp(&state.db).await?
+    );
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_file_name(file_name)
+            .add_filter("Database koperasi", &["db"])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|error| error.to_string())?;
+    database::backup(&state.db, &path).await?;
+    Ok(Some(path.display().to_string()))
+}
+
+/// Replaces the database with a file the user picks, then restarts the app on
+/// it. The current data is first copied to `koperasi-sebelum-impor-*.db` in the
+/// data folder. Returns only when cancelled or when the file is refused.
+#[tauri::command]
+pub(crate) async fn import_database(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let dialog = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        dialog
+            .dialog()
+            .file()
+            .add_filter("Database koperasi", &["db", "sqlite", "sqlite3"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(picked) = picked else {
+        return Ok(());
+    };
+    let source = picked.into_path().map_err(|error| error.to_string())?;
+    let prepared = database::prepare_import(&source, &state.data_dir).await?;
+    let kept = state.data_dir.join(format!(
+        "koperasi-sebelum-impor-{}.db",
+        database::local_timestamp(&state.db).await?
+    ));
+    if let Err(error) = database::backup(&state.db, &kept).await {
+        let _ = std::fs::remove_file(&prepared);
+        return Err(format!(
+            "Data saat ini gagal dicadangkan, impor dibatalkan: {error}"
+        ));
+    }
+    state.db.close().await;
+    if let Err(error) = database::replace(&state.data_dir, &prepared) {
+        return Err(format!(
+            "Database gagal diganti ({error}); data lama tidak berubah. Tutup lalu buka lagi aplikasinya."
+        ));
+    }
+    app.restart()
 }
