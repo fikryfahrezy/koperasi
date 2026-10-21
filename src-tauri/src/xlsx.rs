@@ -245,8 +245,9 @@ impl Sheet {
         self.put(row, col, Value::Formula(expr.formula(), value), style);
     }
 
-    /// Writes the formula when it evaluates to `expected` (the app's value),
+    /// Writes the formula when Excel shows it as `expected` (the app's value),
     /// otherwise `expected` itself, so the sheet never disagrees with the app.
+    /// Excel shows a value with sen rounded half away from zero, as `round`.
     /// Returns whether the formula was kept.
     pub(crate) fn checked(
         &mut self,
@@ -256,7 +257,10 @@ impl Sheet {
         expected: i64,
         style: Style,
     ) -> bool {
-        if (self.eval(expr) - expected as f64).abs() <= 0.5 + 1e-6 {
+        let value = self.eval(expr);
+        // Excel shows 160146.49999999994 as 160.147 (15 significant digits).
+        let shown = (value + value.signum() * 1e-6).round();
+        if (shown - expected as f64).abs() < 0.5 {
             self.formula(row, col, expr, style);
             true
         } else {
