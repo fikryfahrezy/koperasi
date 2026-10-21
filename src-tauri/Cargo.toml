@@ -1,6 +1,6 @@
 [package]
 name = "koperasi"
-version = "0.29.9"
+version = "0.30.9"
 description = "Koperasi App"
 authors = ["you"]
 edition = "2021"

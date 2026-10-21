@@ -333,6 +333,8 @@ interface CreateLoanInput {
   tenor: number;
   interestType: InterestType;
   loanType: LoanType;
+  /** Typed Bunga per tahun in percent; null uses the Bunga parameter. */
+  annualRate?: number | null;
   /** Typed provision fee; omitted uses the Provisi parameter rate. */
   provision?: number;
   /** Suplesi: old loans paid off from this loan (full principal + interest). */
@@ -1197,6 +1199,11 @@ const monthNames = [
   "November",
   "Desember",
 ];
+
+/** Monthly interest rounded up to a whole rupiah, as the backend's
+ * `round_up_interest`. */
+export const roundUpInterest = (value: number) =>
+  Math.max(0, Math.ceil(value - 1e-9));
 
 /** "2026-09" -> "September 2026". */
 export function formatPeriod(period: string) {

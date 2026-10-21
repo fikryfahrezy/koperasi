@@ -323,6 +323,7 @@ mod tests {
                     plafond: 3_000_000,
                     tenor: 10,
                     interest_type: InterestType::Flat.as_str().into(),
+                    annual_rate: None,
                     loan_type: LoanType::Temporary.as_str().into(),
                     provision: None,
                     payoffs: Vec::new(),
@@ -715,6 +716,7 @@ mod tests {
                     plafond: 1_000_000,
                     tenor: 10,
                     interest_type: InterestType::Declining.as_str().into(),
+                    annual_rate: None,
                     loan_type: LoanType::Monthly.as_str().into(),
                     provision: None,
                     payoffs: Vec::new(),
@@ -771,6 +773,7 @@ mod tests {
                 plafond,
                 tenor,
                 interest_type: InterestType::Declining.as_str().into(),
+                annual_rate: None,
                 loan_type: LoanType::Monthly.as_str().into(),
                 provision: None,
                 payoffs,
@@ -1058,6 +1061,7 @@ mod tests {
                     plafond: 1_000_000,
                     tenor: 10,
                     interest_type: InterestType::Declining.as_str().into(),
+                    annual_rate: None,
                 },
                 "testing",
                 &pool,
@@ -1065,6 +1069,25 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(preview.annual_rate, 24.0);
+            // A rate typed on the form replaces the parameter.
+            let typed = |annual_rate: f64| PreviewLoanInput {
+                plafond: 1_000_000,
+                tenor: 10,
+                interest_type: InterestType::Declining.as_str().into(),
+                annual_rate: Some(annual_rate),
+            };
+            let preview = preview_loan(typed(18.0), "testing", &pool).await.unwrap();
+            assert_eq!(
+                (preview.annual_rate, preview.first_interest),
+                (18.0, 15_000)
+            );
+            assert_eq!(
+                preview_loan(typed(150.0), "testing", &pool)
+                    .await
+                    .err()
+                    .unwrap(),
+                "Bunga pinjaman harus antara 0% dan 100% per tahun."
+            );
 
             // New loans entered through the cash ledger are disbursed immediately: principal flows out,
             // and the provision fee flows in.
@@ -1076,6 +1099,7 @@ mod tests {
                     plafond: 1_000_000,
                     tenor: 10,
                     interest_type: InterestType::Declining.as_str().into(),
+                    annual_rate: None,
                     loan_type: LoanType::Monthly.as_str().into(),
                     provision: None,
                     payoffs: Vec::new(),

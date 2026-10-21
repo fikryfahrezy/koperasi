@@ -699,7 +699,7 @@ fn installment_term(sheet: &Sheet, row: u32, col: u32, amount: i64) -> Option<Ex
     }
 }
 
-/// Interest falling due in a month: `ROUND(saldo bulan lalu*D/12,0)` for
+/// Interest falling due in a month: `ROUNDUP(saldo bulan lalu*D/12,0)` for
 /// Menurun, the `Kewajiban setor tiap bulan` Bunga cell for Plat.
 fn interest_term(
     sheet: &Sheet,
@@ -715,7 +715,7 @@ fn interest_term(
         let declining = Expr::cell(row, previous_balance)
             .mul(Expr::cell(row, RATE))
             .div(Expr::num(12.0))
-            .round(0);
+            .round_up(0);
         if (sheet.eval(&declining) - amount as f64).abs() < 0.5 {
             return Some(declining);
         }
@@ -1043,7 +1043,7 @@ fn loan_row(
     let interest = Expr::cell(row, PLAFOND)
         .mul(Expr::cell(row, RATE))
         .div(Expr::num(12.0))
-        .round(0);
+        .round_up(0);
     sheet.formula(row, INSTALLMENT + 1, &interest, Style::Number);
     let installment = Expr::cell(row, INSTALLMENT).add(Expr::cell(row, INSTALLMENT + 1));
     sheet.formula(row, INSTALLMENT + 2, &installment, Style::Number);
