@@ -292,6 +292,8 @@ pub(crate) struct FinancialParametersDto {
     pub(crate) mandatory_savings: i64,
     pub(crate) provision_rate: f64,
     pub(crate) annual_rate: f64,
+    /// Batas sisa pinjaman per peminjam; 0 when not set (no warning).
+    pub(crate) max_loan_outstanding: i64,
     pub(crate) effective_date: String,
 }
 
