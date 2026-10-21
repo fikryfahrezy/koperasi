@@ -371,6 +371,105 @@ mod tests {
             assert!(post_payment(loan_payment(5_000_000, 0), "default", &pool)
                 .await
                 .is_err());
+
+            // One deposit pays every running loan of the borrower, matched by
+            // name, in one Buku Kas row ("Setoran Ruslan").
+            let non_member_loan = |name: &str| CreateLoanInput {
+                loan_group: LoanGroup::NonMember.as_str().into(),
+                member_id: String::new(),
+                borrower_name: name.into(),
+                plafond: 1_000_000,
+                tenor: 10,
+                interest_type: InterestType::Flat.as_str().into(),
+                annual_rate: None,
+                loan_type: LoanType::Monthly.as_str().into(),
+                provision: None,
+                payoffs: Vec::new(),
+                description: String::new(),
+                disbursement: DisbursementInput {
+                    channel: Channel::Cash.as_str().into(),
+                    business_date: DATE.into(),
+                    display_date: "13 Sep 2026".into(),
+                    display_time: "10:30".into(),
+                },
+            };
+            let snapshot = create_loan(non_member_loan(" eko prasetyo"), "default", &pool)
+                .await
+                .unwrap();
+            let second_id = snapshot
+                .loans
+                .iter()
+                .find(|loan| loan.id != loan_id && loan.member_name == "eko prasetyo")
+                .unwrap()
+                .id
+                .clone();
+            let snapshot = create_loan(non_member_loan("Eko Purnomo"), "default", &pool)
+                .await
+                .unwrap();
+            let other_id = snapshot
+                .loans
+                .iter()
+                .find(|loan| loan.member_name == "Eko Purnomo")
+                .unwrap()
+                .id
+                .clone();
+            let line = |loan_id: &str, principal: i64, interest: i64| LoanPaymentLine {
+                loan_id: loan_id.into(),
+                principal,
+                interest,
+            };
+            let both = |reference: &str, loans: Vec<LoanPaymentLine>| {
+                let mut input = payment(0, reference, "KAS");
+                input.member_id = String::new();
+                (input.interest, input.wajib, input.voluntary) = (0, 0, 0);
+                input.loans = loans;
+                input
+            };
+            let paid = post_payment(
+                both(
+                    "BOTH",
+                    vec![
+                        line(&loan_id, 300_000, 60_000),
+                        line(&second_id, 100_000, 20_000),
+                    ],
+                ),
+                "default",
+                &pool,
+            )
+            .await
+            .unwrap();
+            let balance = |id: &str| {
+                paid.loans
+                    .iter()
+                    .find(|loan| loan.id == id)
+                    .unwrap()
+                    .balance
+            };
+            assert_eq!(
+                (balance(&loan_id), balance(&second_id)),
+                (2_400_000, 900_000)
+            );
+            let row = paid
+                .transactions
+                .iter()
+                .find(|row| row.reference == "BOTH")
+                .unwrap();
+            assert_eq!(row.amount, 480_000);
+            assert_eq!(row.description, "Setoran Eko Prasetyo");
+            assert_eq!(
+                post_payment(
+                    both(
+                        "OTHER",
+                        vec![line(&loan_id, 10_000, 0), line(&other_id, 10_000, 0)]
+                    ),
+                    "default",
+                    &pool,
+                )
+                .await
+                .err()
+                .unwrap(),
+                "Pinjaman tidak ditemukan untuk peminjam ini."
+            );
         });
     }
 

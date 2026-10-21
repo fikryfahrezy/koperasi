@@ -311,6 +311,8 @@ export interface FinancialParameters {
   mandatorySavings: number;
   provisionRate: number;
   annualRate: number;
+  /** Batas sisa pinjaman per peminjam; 0 when not set. */
+  maxLoanOutstanding: number;
   effectiveDate: string;
 }
 
@@ -413,6 +415,7 @@ const financialParameters = reactive<FinancialParameters>({
   mandatorySavings: 0,
   provisionRate: 0,
   annualRate: 0,
+  maxLoanOutstanding: 0,
   effectiveDate: "",
 });
 const toasts = ref<ToastMessage[]>([]);

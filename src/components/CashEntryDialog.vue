@@ -7,6 +7,7 @@ import {
   Coins,
   HandCoins,
   ReceiptText,
+  TriangleAlert,
   WalletMinimal,
 } from "lucide-vue-next";
 import type { useWorkspacePageState } from "../composables/useWorkspacePageState";
@@ -75,10 +76,9 @@ const posting = pageState.field("posting", () => ({
 const paymentForm = pageState.field("paymentForm", () => ({
   loanGroup: LoanGroup.Member as LoanGroup,
   memberId: "",
-  loanId: "",
-  principal: 0,
-  interest: 0,
-  // Anggota: principal and interest per running loan of the member.
+  // Non Anggota: the borrower, by name (see `borrowerKey`).
+  borrower: "",
+  // Principal and interest per running loan of the member or borrower.
   lines: {} as Record<string, { principal: number; interest: number }>,
   wajib: 0,
   voluntary: 0,
@@ -202,12 +202,15 @@ watch([() => otherForm.value.category, cashDirection], () => {
   )
     form.description = description;
 });
+/** Non Anggota borrowers have no member record, so their loans are grouped by
+ * name, ignoring case and outer spaces (the backend matches the same way). */
+const borrowerKey = (name: string) => name.trim().toLocaleLowerCase("id-ID");
 const isNonMemberPayment = computed(
   () => paymentForm.value.loanGroup === LoanGroup.NonMember,
 );
-// Non Anggota pays one loan, picked by borrower. Anggota picks the member,
-// and every running loan of that member gets its own pokok and bunga, so one
-// deposit can pay several loans in one Buku Kas row, as in the sheet.
+// Anggota picks the member and Non Anggota the borrower; every running loan
+// of theirs gets its own pokok and bunga, so one deposit can pay several
+// loans in one Buku Kas row, as in the sheet ("Setoran Ruslan").
 const memberNumbers = computed(
   () => new Map(members.map((member) => [member.id, member.memberNumber])),
 );
@@ -219,12 +222,29 @@ const runningLoans = computed(() =>
       (isNonMemberPayment.value || loan.memberId),
   ),
 );
-const paymentLoanOptions = computed(() =>
-  runningLoans.value
-    .map((loan) => ({
-      value: loan.id,
-      label: `${loan.memberName} · ${formatLoanLabel(loan)}`,
-    }))
+const paymentBorrowerOptions = computed(() =>
+  [
+    ...runningLoans.value.reduce((groups, loan) => {
+      const key = borrowerKey(loan.memberName);
+      groups.set(key, [...(groups.get(key) ?? []), loan]);
+      return groups;
+    }, new Map<string, typeof loans>()),
+  ]
+    .map(([key, borrowerLoans]) => {
+      const [first] = borrowerLoans;
+      const balance = borrowerLoans.reduce(
+        (sum, loan) => sum + loan.balance,
+        0,
+      );
+      return {
+        value: key,
+        label: `${first.memberName.trim()} · ${
+          borrowerLoans.length > 1
+            ? `${borrowerLoans.length} pinjaman · sisa ${formatCurrency(balance)}`
+            : formatLoanLabel(first)
+        }`,
+      };
+    })
     .sort((a, b) => a.label.localeCompare(b.label, "id-ID")),
 );
 const paymentMemberOptions = computed(() =>
@@ -244,11 +264,11 @@ watch(
   () => paymentForm.value.loanGroup,
   () => {
     if (
-      !paymentLoanOptions.value.some(
-        (option) => option.value === paymentForm.value.loanId,
+      !paymentBorrowerOptions.value.some(
+        (option) => option.value === paymentForm.value.borrower,
       )
     )
-      paymentForm.value.loanId = "";
+      paymentForm.value.borrower = "";
     if (
       !paymentMemberOptions.value.some(
         (option) => option.value === paymentForm.value.memberId,
@@ -257,19 +277,20 @@ watch(
       paymentForm.value.memberId = "";
   },
 );
-// The loans this payment goes to: the picked loan for Non Anggota, every
-// running loan of the picked member for Anggota.
+// The loans this payment goes to: every running loan of the picked member or
+// Non Anggota borrower.
 const paymentLoans = computed(() =>
   isNonMemberPayment.value
-    ? loans.filter((loan) => loan.id === paymentForm.value.loanId)
+    ? runningLoans.value.filter(
+        (loan) =>
+          !!paymentForm.value.borrower &&
+          borrowerKey(loan.memberName) === paymentForm.value.borrower,
+      )
     : runningLoans.value.filter(
         (loan) =>
           paymentForm.value.memberId &&
           loan.memberId === paymentForm.value.memberId,
       ),
-);
-const paymentLoanBalance = computed(() =>
-  paymentLoans.value.reduce((sum, loan) => sum + loan.balance, 0),
 );
 // Interest of the transaction month: this month's installment ("Kewajiban
 // setor tiap bulan") and what is still owed through it ("Kewajiban setor s/d"
@@ -344,7 +365,7 @@ watch(
   [
     () => pageState.tabId.value,
     () => paymentForm.value.memberId,
-    () => paymentForm.value.loanId,
+    () => paymentForm.value.borrower,
     () => paymentForm.value.loanGroup,
   ],
   ([tabId], [previousTabId]) => {
@@ -353,23 +374,20 @@ watch(
       (loan) => [loan.id, installmentOf(loan)] as const,
     );
     paymentForm.value.lines = Object.fromEntries(installments);
-    const [first] = installments;
-    paymentForm.value.principal = first?.[1].principal ?? 0;
-    paymentForm.value.interest = first?.[1].interest ?? 0;
   },
 );
-const paymentTotal = computed(() =>
-  isNonMemberPayment.value
-    ? (paymentForm.value.principal || 0) + (paymentForm.value.interest || 0)
-    : paymentLoans.value.reduce(
-        (sum, loan) =>
-          sum +
-          (paymentLine(loan.id).principal || 0) +
-          (paymentLine(loan.id).interest || 0),
-        0,
-      ) +
-      (paymentForm.value.wajib || 0) +
-      (paymentForm.value.voluntary || 0),
+const paymentTotal = computed(
+  () =>
+    paymentLoans.value.reduce(
+      (sum, loan) =>
+        sum +
+        (paymentLine(loan.id).principal || 0) +
+        (paymentLine(loan.id).interest || 0),
+      0,
+    ) +
+    (isNonMemberPayment.value
+      ? 0
+      : (paymentForm.value.wajib || 0) + (paymentForm.value.voluntary || 0)),
 );
 
 const topUpLoans = computed(() =>
@@ -416,6 +434,35 @@ const exceedsTopUpPlafond = computed(
   () =>
     selectedPayoffs.value.length > 0 &&
     payoffTotal.value + loanProvision.value.amount > loanForm.value.plafond,
+);
+/** Batas sisa pinjaman: the borrower's remaining principal on running loans,
+ * less what this suplesi pays off, plus the new plafond. Only a warning, since
+ * the board can allow more (notes/rules-and-formulas.md 1.12). Non Anggota
+ * loans are matched by borrower name. */
+const borrowerOutstanding = computed(() => {
+  const form = loanForm.value;
+  const name = borrowerKey(form.borrowerName);
+  return loans
+    .filter(
+      (loan) =>
+        loan.balance > 0 &&
+        loan.loanGroup === form.loanGroup &&
+        (form.loanGroup === LoanGroup.Member
+          ? !!form.memberId && loan.memberId === form.memberId
+          : !!name && borrowerKey(loan.memberName) === name),
+    )
+    .reduce((sum, loan) => sum + loan.balance, 0);
+});
+const outstandingAfterLoan = computed(
+  () =>
+    borrowerOutstanding.value -
+    selectedPayoffs.value.reduce((sum, payoff) => sum + payoff.principal, 0) +
+    (loanForm.value.plafond || 0),
+);
+const exceedsOutstandingLimit = computed(
+  () =>
+    financialParameters.maxLoanOutstanding > 0 &&
+    outstandingAfterLoan.value > financialParameters.maxLoanOutstanding,
 );
 const loanAnnualRate = computed({
   get: () => loanForm.value.annualRate ?? financialParameters.annualRate,
@@ -482,11 +529,8 @@ function openModal() {
   Object.assign(paymentForm.value, {
     loanGroup: LoanGroup.Member,
     memberId: "",
-    loanId: "",
-    principal: 0,
-    interest: 0,
-    // Setoran anggota usually includes the monthly simpanan wajib.
-    wajib: financialParameters.mandatorySavings,
+    borrower: "",
+    wajib: 0,
     voluntary: 0,
   });
   Object.assign(savingsForm.value, {
@@ -640,32 +684,22 @@ async function submit() {
     if (category.value === Category.Payment) {
       const loan = paymentLoans.value[0];
       if (!loan || paymentTotal.value <= 0) return;
+      const nonMember = isNonMemberPayment.value;
       saved = await postPayment(
-        isNonMemberPayment.value
-          ? {
-              memberId: "",
-              loanId: loan.id,
-              principal: paymentForm.value.principal || 0,
-              interest: paymentForm.value.interest || 0,
-              wajib: 0,
-              voluntary: 0,
-              description: descriptionOverride.value,
-              reference: "",
-            }
-          : {
-              memberId: loan.memberId,
-              principal: 0,
-              interest: 0,
-              loans: paymentLoans.value.map((item) => ({
-                loanId: item.id,
-                principal: paymentLine(item.id).principal || 0,
-                interest: paymentLine(item.id).interest || 0,
-              })),
-              wajib: paymentForm.value.wajib || 0,
-              voluntary: paymentForm.value.voluntary || 0,
-              description: descriptionOverride.value,
-              reference: "",
-            },
+        {
+          memberId: nonMember ? "" : loan.memberId,
+          principal: 0,
+          interest: 0,
+          loans: paymentLoans.value.map((item) => ({
+            loanId: item.id,
+            principal: paymentLine(item.id).principal || 0,
+            interest: paymentLine(item.id).interest || 0,
+          })),
+          wajib: nonMember ? 0 : paymentForm.value.wajib || 0,
+          voluntary: nonMember ? 0 : paymentForm.value.voluntary || 0,
+          description: descriptionOverride.value,
+          reference: "",
+        },
         options,
       );
     } else if (isSavings.value) {
@@ -832,8 +866,8 @@ defineExpose({ open: openModal });
         <label v-if="isNonMemberPayment" class="field">
           <span>Peminjam</span>
           <MemberCombobox
-            v-model="paymentForm.loanId"
-            :options="paymentLoanOptions"
+            v-model="paymentForm.borrower"
+            :options="paymentBorrowerOptions"
             aria-label="Peminjam"
             placeholder="Cari nama peminjam"
             required
@@ -850,19 +884,6 @@ defineExpose({ open: openModal });
             required
           />
         </label>
-        <template v-if="isNonMemberPayment">
-          <p v-if="paymentLoans.length" class="field-hint">
-            Sisa pokok pinjaman {{ formatCurrency(paymentLoanBalance) }}
-            <template
-              v-for="line in interestDueLines(
-                paymentLoans.map((loan) => loan.id),
-              )"
-              :key="line"
-            >
-              <br />{{ line }}
-            </template>
-          </p>
-        </template>
         <div v-if="!isNonMemberPayment" class="field-row">
           <label class="field">
             <span>Simpanan wajib</span>
@@ -881,10 +902,7 @@ defineExpose({ open: openModal });
             />
           </label>
         </div>
-        <section
-          v-if="!isNonMemberPayment && paymentLoans.length"
-          class="payment-loans"
-        >
+        <section v-if="paymentLoans.length" class="payment-loans">
           <p class="payment-loans__title">Angsuran pinjaman</p>
           <div v-for="loan in paymentLoans" :key="loan.id" class="payment-loan">
             <p v-if="paymentLoans.length > 1" class="payment-loan__title">
@@ -943,45 +961,6 @@ defineExpose({ open: openModal });
             </p>
           </div>
         </section>
-        <div v-if="isNonMemberPayment" class="field-row">
-          <label class="field">
-            <span>Angsuran pokok</span>
-            <RupiahInput
-              v-model="paymentForm.principal"
-              :min="0"
-              aria-label="Angsuran pokok"
-            />
-          </label>
-          <label class="field">
-            <span>Bunga</span>
-            <RupiahInput
-              v-model="paymentForm.interest"
-              :min="0"
-              aria-label="Bunga"
-            />
-          </label>
-        </div>
-        <p
-          v-if="
-            isNonMemberPayment &&
-            paymentLoans[0] &&
-            payoffInterestWarning(
-              paymentLoans[0],
-              paymentForm.principal,
-              paymentForm.interest,
-            )
-          "
-          class="field-hint field-hint--warning"
-          role="status"
-        >
-          {{
-            payoffInterestWarning(
-              paymentLoans[0],
-              paymentForm.principal,
-              paymentForm.interest,
-            )
-          }}
-        </p>
       </template>
 
       <template v-else-if="isSavings">
@@ -1223,6 +1202,34 @@ defineExpose({ open: openModal });
             pinjaman.
           </p>
         </div>
+        <div v-if="exceedsOutstandingLimit" class="limit-alert" role="alert">
+          <div class="limit-alert__title">
+            <TriangleAlert :size="20" />
+            Melebihi batas pinjaman
+            {{ formatCurrency(financialParameters.maxLoanOutstanding) }}
+          </div>
+          <dl>
+            <div>
+              <dt>Sisa pinjaman berjalan</dt>
+              <dd>{{ formatCurrency(borrowerOutstanding) }}</dd>
+            </div>
+            <div>
+              <dt>Setelah pinjaman ini</dt>
+              <dd>{{ formatCurrency(outstandingAfterLoan) }}</dd>
+            </div>
+            <div>
+              <dt>Lebih</dt>
+              <dd>
+                {{
+                  formatCurrency(
+                    outstandingAfterLoan -
+                      financialParameters.maxLoanOutstanding,
+                  )
+                }}
+              </dd>
+            </div>
+          </dl>
+        </div>
       </template>
 
       <template v-else-if="isCash">
@@ -1431,6 +1438,33 @@ defineExpose({ open: openModal });
 .movement-option svg {
   flex: 0 0 auto;
 }
+.limit-alert {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--red);
+  border-radius: 11px;
+  color: var(--red);
+  background: var(--red-soft);
+}
+.limit-alert__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.limit-alert dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  font-size: 11px;
+}
+.limit-alert dd {
+  margin: 0;
+  font-weight: 600;
+}
 .calculation-preview {
   padding: 16px;
   border: 1px solid #beced9;
@@ -1450,6 +1484,9 @@ defineExpose({ open: openModal });
   font-weight: 700;
 }
 @media (max-width: 540px) {
+  .limit-alert dl {
+    grid-template-columns: 1fr;
+  }
   .field-row {
     grid-template-columns: 1fr;
   }
