@@ -212,6 +212,16 @@ pub(crate) struct LoanCalculation {
     pub(crate) annual_rate: f64,
 }
 
+/// Monthly interest is rounded up to a multiple of this many rupiah (whole
+/// rupiah); principal installments are rounded up to 1.000.
+pub(crate) const INTEREST_ROUNDING: i64 = 1;
+
+/// Rounds a monthly interest amount up to [`INTEREST_ROUNDING`].
+pub(crate) fn round_up_interest(value: f64) -> i64 {
+    // Tolerate floating-point noise such as 52500.00000000001, as ROUNDUP does.
+    ((value / INTEREST_ROUNDING as f64 - 1e-9).ceil().max(0.0) as i64) * INTEREST_ROUNDING
+}
+
 pub(crate) fn calculate_rate_amount(amount: i64, rate: f64) -> Result<i64, String> {
     let value = amount as f64 * rate;
     if amount < 0 || rate < 0.0 || !value.is_finite() || value >= i64::MAX as f64 {
@@ -315,7 +325,7 @@ pub(crate) fn calculate_loan(
     let principal_installment = principal_installment
         .checked_mul(1000)
         .ok_or("Hasil perhitungan pinjaman terlalu besar.")?;
-    let first_interest = calculate_rate_amount(plafond, annual_rate / 12.0)?;
+    let first_interest = round_up_interest(plafond as f64 * annual_rate / 12.0);
     let provision = calculate_rate_amount(plafond, provision_rate)?;
     let first_total = principal_installment
         .checked_add(first_interest)

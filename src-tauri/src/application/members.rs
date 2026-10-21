@@ -2,13 +2,14 @@
 
 use sqlx::{Row, SqliteConnection, SqlitePool};
 
+use super::loans::{format_thousands, parameter};
 use super::posting::{append, audit, Component, Entry, APP_ACTOR};
 use super::read_model::get_app_snapshot;
 use crate::{
     contracts::{AddMemberInput, AppSnapshot, UpdateMemberInput},
     domain::{
         timestamp_id, validate_business_date, AuditAction, AuditEntityType, Channel, ComponentType,
-        SavingsAccountType, TransactionDirection,
+        ParameterKey, SavingsAccountType, TransactionDirection,
     },
 };
 
@@ -154,13 +155,24 @@ pub(crate) async fn add_member(
         .iter()
         .find_map(|(kind, amount)| (*kind == SavingsAccountType::Principal).then_some(*amount))
         .ok_or("Simpanan pokok wajib disertakan.")?;
-    if principal_savings < 50_000 {
-        return Err("Simpanan pokok minimal Rp50.000.".into());
-    }
 
     validate_business_date(&input.business_date)?;
     let member_number = input.member_number.trim();
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
+    // Simpanan pokok is at least the parameter in effect on the joining date.
+    let minimum = parameter(
+        &mut db,
+        company_id,
+        ParameterKey::PrincipalSavings,
+        &input.business_date,
+    )
+    .await? as i64;
+    if principal_savings < minimum {
+        return Err(format!(
+            "Simpanan pokok minimal Rp{}.",
+            format_thousands(minimum)
+        ));
+    }
     check_member_number(&mut db, company_id, member_number, None).await?;
     let next: i64 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(CAST(SUBSTR(id, INSTR(id, '-M') + 2) AS INTEGER)), 0) + 1 FROM members WHERE company_id = ?",

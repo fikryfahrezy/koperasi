@@ -12,7 +12,7 @@ use sqlx::{Row, SqlitePool};
 use super::ledger_report::{apply_loan_report, apply_savings_report};
 use super::parameters::incentive_rates;
 use crate::contracts::{LoanMonthDto, MonthlyLedgerDto, SavingsMonthDto};
-use crate::domain::{ComponentType, InterestType, LoanType, SavingsAccountType};
+use crate::domain::{round_up_interest, ComponentType, InterestType, LoanType, SavingsAccountType};
 
 macro_rules! col {
     ($row:expr, $column:literal) => {
@@ -100,6 +100,7 @@ fn iso_date(value: &str) -> Option<String> {
 /// Scheduled principal and interest installments for a month with an `opening` balance,
 /// following PINJAMAN BULANAN:
 /// - Bulanan: principal = loan limit / term, rounded up to the nearest thousand.
+/// - Interest is rounded up to a whole rupiah.
 /// - Sementara: no principal installments; the whole balance falls due in the
 ///   jatuh tempo month.
 /// - After the jatuh tempo month nothing new falls due; what is unpaid stays in arrears.
@@ -136,7 +137,7 @@ fn scheduled_installment(
     };
     (
         principal.min(opening),
-        (interest_base as f64 * annual_rate / 100.0 / 12.0).round() as i64,
+        round_up_interest(interest_base as f64 * annual_rate / 100.0 / 12.0),
     )
 }
 

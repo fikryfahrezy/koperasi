@@ -22,7 +22,7 @@ fn format_rate(value: f64) -> String {
 }
 
 /// 2500000 -> "2.500.000", as in provision fee descriptions in the daily cash ledger.
-fn format_thousands(value: i64) -> String {
+pub(super) fn format_thousands(value: i64) -> String {
     let digits = value.abs().to_string();
     let mut out = String::new();
     for (index, ch) in digits.chars().enumerate() {
@@ -38,7 +38,7 @@ fn format_thousands(value: i64) -> String {
     }
 }
 
-async fn parameter(
+pub(super) async fn parameter(
     db: &mut SqliteConnection,
     company_id: &str,
     key: ParameterKey,
@@ -54,6 +54,23 @@ async fn parameter(
         .ok_or_else(|| format!("Parameter {} belum diatur.", key.as_str()))
 }
 
+/// Annual interest rate as a fraction: the one typed on the form (in percent),
+/// otherwise the Bunga parameter.
+async fn annual_rate(
+    db: &mut SqliteConnection,
+    company_id: &str,
+    typed_percent: Option<f64>,
+) -> Result<f64, String> {
+    let rate = match typed_percent {
+        Some(percent) => percent / 100.0,
+        None => parameter(db, company_id, ParameterKey::LoanAnnualRate, "9999-12-31").await?,
+    };
+    if !rate.is_finite() || !(0.0..=1.0).contains(&rate) {
+        return Err("Bunga pinjaman harus antara 0% dan 100% per tahun.".into());
+    }
+    Ok(rate)
+}
+
 pub(crate) async fn preview_loan(
     input: PreviewLoanInput,
     company_id: &str,
@@ -64,13 +81,7 @@ pub(crate) async fn preview_loan(
     }
     InterestType::try_from(input.interest_type.as_str())?;
     let mut db = pool.acquire().await.map_err(|error| error.to_string())?;
-    let annual_rate = parameter(
-        &mut db,
-        company_id,
-        ParameterKey::LoanAnnualRate,
-        "9999-12-31",
-    )
-    .await?;
+    let annual_rate = annual_rate(&mut db, company_id, input.annual_rate).await?;
     let provision_rate = parameter(
         &mut db,
         company_id,
@@ -189,17 +200,7 @@ pub(crate) async fn create_loan(
         );
     }
     let provision_base = input.plafond - payoff_total;
-    let rate = parameter(
-        &mut db,
-        company_id,
-        ParameterKey::LoanAnnualRate,
-        "9999-12-31",
-    )
-    .await?;
-    let rate_percent = rate * 100.0;
-    if rate < 0.0 || !rate_percent.is_finite() {
-        return Err("Suku bunga pinjaman tidak valid.".into());
-    }
+    let rate_percent = annual_rate(&mut db, company_id, input.annual_rate).await? * 100.0;
     let provision_rate = parameter(
         &mut db,
         company_id,

@@ -23,26 +23,21 @@ export const cashBookLetters = letters([1, 2, 5, 6, 7, 9, 10, 11]);
 /** PINJAMAN BULANAN: No, Nama, Plafond, Bunga (2), PG/TN, Jenis, Realisasi, Jatuh Tempo, Jangka Waktu. */
 export const loanLeadingLetters = letters(range(1, 10));
 
-// Each month in the sheet is Kewajiban s/d (3), Mutasi (6), Saldo (1),
-// Tunggakan (3), starting at R for January; the last column is EG
-// (Kewajiban s/d Oktober), after which the income columns begin.
+// Saldo Posisi Desember (K), Kewajiban setor tiap bulan (L–N) and Tunggakan
+// s/d Desember (O–Q) come once, before January. Each month is then Kewajiban
+// s/d (3), Mutasi (6), Saldo (1), Tunggakan (3), starting at R for January;
+// the last column is EG (Kewajiban s/d Oktober), after which the income
+// columns begin.
 const LOAN_LAST_COLUMN = 137;
 
-/** The 20 columns of one month on the Pinjaman page. */
+/** Saldo Posisi, Kewajiban setor tiap bulan and Tunggakan before the first month. */
+export const loanOpeningLetters = letters(range(11, 7));
+
+/** The 13 columns of one month on the Pinjaman page. */
 export function loanMonthLetters(period: string) {
-  const month = monthOf(period);
-  const start = 18 + 13 * (month - 1);
-  const columns = [
-    month === 1 ? 11 : start - 4, // Saldo Posisi bulan lalu
-    ...range(12, 3), // Kewajiban setor tiap bulan
-    ...(month === 1 ? range(15, 3) : range(start - 3, 3)), // Tunggakan s/d bulan lalu
-    ...range(start, 3), // Kewajiban setor s/d bulan ini
-    ...range(start + 3, 6), // Mutasi
-    start + 9, // Saldo Posisi
-    ...range(start + 10, 3), // Tunggakan s/d bulan ini
-  ];
+  const start = 18 + 13 * (monthOf(period) - 1);
   return letters(
-    columns.map((column) => (column > LOAN_LAST_COLUMN ? 0 : column)),
+    range(start, 13).map((column) => (column > LOAN_LAST_COLUMN ? 0 : column)),
   );
 }
 
@@ -51,7 +46,7 @@ export function loanMonthLetters(period: string) {
  * Insentif Pinjaman. */
 export function loanTailLetters(nextPeriod: string) {
   return [
-    ...loanMonthLetters(nextPeriod).slice(7, 10), // Kewajiban s/d bulan depan
+    ...loanMonthLetters(nextPeriod).slice(0, 3), // Kewajiban s/d bulan depan
     ...letters([
       138, // EH Rekomendasi
       ...range(140, 3), // EJ–EL
@@ -94,7 +89,15 @@ function savingsBalanceColumn(month: number) {
   return block.next + 2 + (month === 1 ? 1 : 0);
 }
 
-/** The 15 (16 with SHU) columns of one month on the Simpanan page. */
+/** Saldo (3) + total of the month before the first month shown, once before it. */
+export function savingsOpeningLetters(firstPeriod: string, year: number) {
+  const month = monthOf(firstPeriod);
+  const previous =
+    year === 2026 && savingsMonths[month] ? savingsBalanceColumn(month - 1) : 0;
+  return previous ? letters(range(previous, 4)) : Array<string>(4).fill("");
+}
+
+/** The 11 (12 with SHU) columns of one month on the Simpanan page. */
 export function savingsMonthLetters(
   period: string,
   hasShu: boolean,
@@ -102,11 +105,9 @@ export function savingsMonthLetters(
 ) {
   const month = monthOf(period);
   const block = year === 2026 ? savingsMonths[month] : undefined;
-  if (!block) return Array<string>(hasShu ? 16 : 15).fill("");
-  const previous = savingsBalanceColumn(month - 1);
+  if (!block) return Array<string>(hasShu ? 12 : 11).fill("");
   const balance = savingsBalanceColumn(month);
   return letters([
-    ...range(previous, 4), // Saldo bulan lalu (3) + total
     block.date,
     ...block.pokok,
     ...block.wajib,
