@@ -12,7 +12,7 @@ use sqlx::{Row, SqlitePool};
 use super::ledger_report::{apply_loan_report, apply_savings_report};
 use super::parameters::incentive_rates;
 use crate::contracts::{LoanMonthDto, MonthlyLedgerDto, SavingsMonthDto};
-use crate::domain::{round_up_interest, ComponentType, InterestType, LoanType, SavingsAccountType};
+use crate::domain::{round_up_amount, ComponentType, InterestType, LoanType, SavingsAccountType};
 
 macro_rules! col {
     ($row:expr, $column:literal) => {
@@ -100,7 +100,8 @@ fn iso_date(value: &str) -> Option<String> {
 /// Scheduled principal and interest installments for a month with an `opening` balance,
 /// following PINJAMAN BULANAN:
 /// - Bulanan: principal = loan limit / term, rounded up to the nearest thousand.
-/// - Interest is rounded up to a whole rupiah.
+/// - Interest keeps its sen, as in the sheet; the ledger rounds up only what it
+///   shows (see `get_monthly_ledger`).
 /// - Sementara: no principal installments; the whole balance falls due in the
 ///   jatuh tempo month.
 /// - After the jatuh tempo month nothing new falls due; what is unpaid stays in arrears.
@@ -114,12 +115,12 @@ fn scheduled_installment(
     due_period: Option<&str>,
     period: &str,
     opening: i64,
-) -> (i64, i64) {
+) -> (i64, f64) {
     if opening <= 0 || plafond <= 0 || tenor <= 0 {
-        return (0, 0);
+        return (0, 0.0);
     }
     if due_period.is_some_and(|due| period > due) {
-        return (0, 0);
+        return (0, 0.0);
     }
     let principal = if loan_type == Some(LoanType::Temporary) {
         if due_period == Some(period) {
@@ -137,7 +138,7 @@ fn scheduled_installment(
     };
     (
         principal.min(opening),
-        round_up_interest(interest_base as f64 * annual_rate / 100.0 / 12.0),
+        interest_base as f64 * annual_rate / 100.0 / 12.0,
     )
 }
 
@@ -356,7 +357,11 @@ pub(crate) async fn get_monthly_ledger(
         let Some(first_period) = loan_first_period.get(&loan_id) else {
             continue;
         };
-        let (mut balance, mut arrears_principal, mut arrears_interest) = (0_i64, 0_i64, 0_i64);
+        // Interest arrears keep their sen from month to month, as the sheet
+        // does (e.g. DF = DC + DA*D/12); only the amounts shown are rounded up
+        // to a whole rupiah, so Tunggakan -30.000,12 shows as -30.000 and a
+        // Kewajiban of 160.146,50 as 160.147.
+        let (mut balance, mut arrears_principal, mut arrears_interest) = (0_i64, 0_i64, 0.0_f64);
         for period in timeline.iter().filter(|period| *period >= first_period) {
             let month = loan_months
                 .get(&(loan_id.clone(), period.clone()))
@@ -375,8 +380,9 @@ pub(crate) async fn get_monthly_ledger(
             );
             arrears_principal +=
                 month.opening_arrears_principal + scheduled_principal - month.principal_paid;
-            arrears_interest +=
-                month.opening_arrears_interest + scheduled_interest - month.interest_paid;
+            let prior_arrears_interest = arrears_interest + month.opening_arrears_interest as f64;
+            let due_interest = prior_arrears_interest + scheduled_interest;
+            arrears_interest = due_interest - month.interest_paid as f64;
             balance = opening + month.disbursed - month.principal_paid;
             // Arrears never exceed what is still owed, as in the sheet.
             arrears_principal = arrears_principal.min(balance.max(0));
@@ -395,7 +401,7 @@ pub(crate) async fn get_monthly_ledger(
                             balance,
                         )
                     })
-                    .unwrap_or((0, 0));
+                    .unwrap_or((0, 0.0));
                 loans.push(LoanMonthDto {
                     loan_id: loan_id.clone(),
                     period: period.clone(),
@@ -406,12 +412,15 @@ pub(crate) async fn get_monthly_ledger(
                     interest_paid: month.interest_paid,
                     provision: month.provision,
                     scheduled_principal,
-                    scheduled_interest,
+                    // Shown so that Tunggakan bulan lalu + this = Kewajiban s/d,
+                    // each rounded up, as the page and the export add them.
+                    scheduled_interest: round_up_amount(due_interest)
+                        - round_up_amount(prior_arrears_interest),
                     arrears_principal,
-                    arrears_interest,
+                    arrears_interest: round_up_amount(arrears_interest),
                     closing_balance: balance,
                     next_due_principal: arrears_principal + next_scheduled_principal,
-                    next_due_interest: arrears_interest + next_scheduled_interest,
+                    next_due_interest: round_up_amount(arrears_interest + next_scheduled_interest),
                     ..Default::default()
                 });
             }
@@ -499,7 +508,7 @@ mod tests {
                 opening,
             )
         };
-        assert_eq!(monthly("2026-01", 19_166_600), (834_000, 383_332));
+        assert_eq!(monthly("2026-01", 19_166_600), (834_000, 383_332.0));
         // Past jatuh tempo nothing new falls due.
         let overdue = scheduled_installment(
             35_000_000,
@@ -511,7 +520,7 @@ mod tests {
             "2026-01",
             20_000_000,
         );
-        assert_eq!(overdue, (0, 0));
+        assert_eq!(overdue, (0, 0.0));
         // Sementara: interest monthly, the whole balance in the jatuh tempo month.
         let temporary = |period| {
             scheduled_installment(
@@ -525,9 +534,9 @@ mod tests {
                 5_000_000,
             )
         };
-        assert_eq!(temporary("2026-02"), (0, 100_000));
-        assert_eq!(temporary("2026-04"), (5_000_000, 100_000));
-        assert_eq!(temporary("2026-05"), (0, 0));
+        assert_eq!(temporary("2026-02"), (0, 100_000.0));
+        assert_eq!(temporary("2026-04"), (5_000_000, 100_000.0));
+        assert_eq!(temporary("2026-05"), (0, 0.0));
     }
 
     #[test]
@@ -635,7 +644,7 @@ mod tests {
                 "2026-01",
                 24_305_000
             ),
-            (695_000, 486_100)
+            (695_000, 486_100.0)
         );
         // Flat interest still uses the loan limit rather than the opening balance.
         assert_eq!(
@@ -649,7 +658,7 @@ mod tests {
                 "2026-01",
                 24_305_000
             ),
-            (695_000, 500_000)
+            (695_000, 500_000.0)
         );
         // The remaining balance is smaller than the installment.
         assert_eq!(
@@ -663,8 +672,20 @@ mod tests {
                 "2026-01",
                 100_000
             ),
-            (100_000, 2_000)
+            (100_000, 2_000.0)
         );
+        // Interest keeps its sen (YULIATUN, Agustus 2026: 9.507.331 * 2%).
+        let (_, interest) = scheduled_installment(
+            13_900_000,
+            30,
+            24.0,
+            InterestType::Declining,
+            Some(LoanType::Monthly),
+            None,
+            "2026-08",
+            9_507_331,
+        );
+        assert!((interest - 190_146.62).abs() < 1e-6);
         // No loan limit provided: no repayment schedule.
         assert_eq!(
             scheduled_installment(
@@ -677,7 +698,7 @@ mod tests {
                 "2026-01",
                 5_000_000
             ),
-            (0, 0)
+            (0, 0.0)
         );
     }
 }
