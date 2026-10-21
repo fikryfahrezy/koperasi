@@ -106,7 +106,8 @@ describe("Member ledger", () => {
     await expect(modal).toBeDisplayed();
     await expect(amount).toHaveElementProperty(
       "validationMessage",
-      "Simpanan pokok minimal Rp50.000.",
+      // formatCurrency puts a non-breaking space after "Rp".
+      /^Simpanan pokok minimal Rp\s?50\.000\.$/,
     );
     await clickWhenReady(modal.$("button=Batal"));
     await restartApp();
