@@ -26,9 +26,9 @@ export const loanLeadingLetters = letters(range(1, 10));
 // Saldo Posisi Desember (K), Kewajiban setor tiap bulan (L–N) and Tunggakan
 // s/d Desember (O–Q) come once, before January. Each month is then Kewajiban
 // s/d (3), Mutasi (6), Saldo (1), Tunggakan (3), starting at R for January;
-// the last column is EG (Kewajiban s/d Oktober), after which the income
+// the last column is ET (Kewajiban s/d November), after which the income
 // columns begin.
-const LOAN_LAST_COLUMN = 137;
+const LOAN_LAST_COLUMN = 150;
 
 /** Saldo Posisi, Kewajiban setor tiap bulan and Tunggakan before the first month. */
 export const loanOpeningLetters = letters(range(11, 7));
@@ -41,22 +41,22 @@ export function loanMonthLetters(period: string) {
   );
 }
 
-/** After the last month: Kewajiban s/d bulan depan, Rekomendasi (EH),
+/** After the last month: Kewajiban s/d bulan depan, Rekomendasi (EV),
  * Jumlah pemasukan per triwulan (Okt s/d Des is not in the sheet yet) and
  * Insentif Pinjaman. */
 export function loanTailLetters(nextPeriod: string) {
   return [
     ...loanMonthLetters(nextPeriod).slice(0, 3), // Kewajiban s/d bulan depan
     ...letters([
-      138, // EH Rekomendasi
-      ...range(140, 3), // EJ–EL
-      ...range(144, 3), // EN–EP
-      ...range(148, 3), // ER–ET
+      152, // EV Rekomendasi
+      ...range(154, 3), // EX–EZ
+      ...range(158, 3), // FB–FD
+      ...range(162, 3), // FF–FH
       0,
       0,
       0,
-      152, // EV
-      153, // EW
+      166, // FJ
+      167, // FK
     ]),
   ];
 }
@@ -79,6 +79,7 @@ const savingsMonths: Record<
   7: { date: 70, pokok: [71, 72], wajib: [73, 74], next: 75 },
   8: { date: 81, pokok: [82, 83], wajib: [84, 85], next: 86 },
   9: { date: 92, pokok: [93, 94], wajib: [95, 96], next: 97 },
+  10: { date: 103, pokok: [104, 105], wajib: [106, 107], next: 108 },
 };
 
 /** Saldo Pokok column of a month; Wajib, Manasuka and the total follow it. */
@@ -118,7 +119,7 @@ export function savingsMonthLetters(
   ]);
 }
 
-/** After the last month: Ratas Simpanan (DA), Insentif Simpanan 3,65% (DC) and Pembulatan (DD). */
+/** After the last month: Ratas Simpanan (DL), Insentif Simpanan 3,65% (DN) and Pembulatan (DO). */
 export function savingsTailLetters(year: number) {
-  return year === 2026 ? letters([105, 107, 108]) : ["", "", ""];
+  return year === 2026 ? letters([116, 118, 119]) : ["", "", ""];
 }
