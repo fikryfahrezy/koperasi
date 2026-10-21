@@ -12,13 +12,16 @@ pub(crate) async fn get_financial_parameters(
     pool: &SqlitePool,
 ) -> Result<FinancialParametersDto, String> {
     // The yearly incentive rates have their own dates; see `incentive_rates`.
-    let parameter_rows = sqlx::query("SELECT parameter_key, value, effective_date FROM parameters WHERE company_id = ? AND parameter_key NOT IN (?, ?) AND effective_date = (SELECT MAX(effective_date) FROM parameters WHERE company_id = ? AND parameter_key NOT IN (?, ?) AND effective_date <= '2026-09-13')")
+    // The loan limit was added later with its own date, so it is read alone.
+    let parameter_rows = sqlx::query("SELECT parameter_key, value, effective_date FROM parameters WHERE company_id = ? AND parameter_key NOT IN (?, ?, ?) AND effective_date = (SELECT MAX(effective_date) FROM parameters WHERE company_id = ? AND parameter_key NOT IN (?, ?, ?) AND effective_date <= '2026-09-13')")
         .bind(company_id)
         .bind(ParameterKey::LoanIncentiveRate.as_str())
         .bind(ParameterKey::SavingsIncentiveRate.as_str())
+        .bind(ParameterKey::LoanMaxOutstanding.as_str())
         .bind(company_id)
         .bind(ParameterKey::LoanIncentiveRate.as_str())
         .bind(ParameterKey::SavingsIncentiveRate.as_str())
+        .bind(ParameterKey::LoanMaxOutstanding.as_str())
         .fetch_all(pool)
         .await
         .map_err(|error| error.to_string())?;
@@ -38,6 +41,14 @@ pub(crate) async fn get_financial_parameters(
             .try_get("effective_date")
             .map_err(|error| error.to_string())?;
     }
+    let max_loan_outstanding: Option<f64> = sqlx::query_scalar(
+        "SELECT value FROM parameters WHERE company_id = ? AND parameter_key = ? ORDER BY effective_date DESC LIMIT 1",
+    )
+    .bind(company_id)
+    .bind(ParameterKey::LoanMaxOutstanding.as_str())
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| error.to_string())?;
     Ok(FinancialParametersDto {
         principal_savings: values
             .get(&ParameterKey::PrincipalSavings)
@@ -57,6 +68,7 @@ pub(crate) async fn get_financial_parameters(
             .copied()
             .unwrap_or(0.0)
             * 100.0,
+        max_loan_outstanding: max_loan_outstanding.unwrap_or(0.0) as i64,
         effective_date,
     })
 }
@@ -174,6 +186,7 @@ mod tests {
             // The operational parameters are unaffected.
             let parameters = get_financial_parameters("default", &pool).await.unwrap();
             assert_eq!(parameters.mandatory_savings, 50_000);
+            assert_eq!(parameters.max_loan_outstanding, 25_000_000);
         });
     }
 }
