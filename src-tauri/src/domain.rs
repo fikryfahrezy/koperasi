@@ -221,7 +221,15 @@ pub(crate) const INTEREST_ROUNDING: i64 = 1;
 /// Rounds a monthly interest amount up to [`INTEREST_ROUNDING`].
 pub(crate) fn round_up_interest(value: f64) -> i64 {
     // Tolerate floating-point noise such as 52500.00000000001, as ROUNDUP does.
-    ((value / INTEREST_ROUNDING as f64 - 1e-9).ceil().max(0.0) as i64) * INTEREST_ROUNDING
+    round_up_amount(value).max(0)
+}
+
+/// Rounds an amount that may carry sen, such as an interest arrears that
+/// keeps the sen of each month as the sheet does, up to [`INTEREST_ROUNDING`]:
+/// 160.146,50 -> 160.147, -30.000,12 -> -30.000 and -0,50 -> 0.
+pub(crate) fn round_up_amount(value: f64) -> i64 {
+    // Tolerate floating-point noise such as 52500.00000000001, as ROUNDUP does.
+    ((value / INTEREST_ROUNDING as f64 - 1e-6).ceil() as i64) * INTEREST_ROUNDING
 }
 
 pub(crate) fn calculate_rate_amount(amount: i64, rate: f64) -> Result<i64, String> {
@@ -356,6 +364,15 @@ mod tests {
         assert!(validate_business_date("2026-02-29").is_err());
         assert!(validate_business_date("2026-9-13").is_err());
         assert!(validate_business_date("not-a-date").is_err());
+    }
+
+    #[test]
+    fn rounds_amounts_with_sen_up() {
+        assert_eq!(round_up_amount(-30_000.12 + 190_146.62), 160_147);
+        assert_eq!(round_up_amount(-30_000.12), -30_000);
+        assert_eq!(round_up_amount(160_146.5 - 160_147.0), 0);
+        assert_eq!(round_up_amount(52_500.000_000_01), 52_500);
+        assert_eq!(round_up_interest(-0.5), 0);
     }
 
     #[test]
