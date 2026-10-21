@@ -11,7 +11,7 @@ use crate::{
     contracts::{AppSnapshot, PaymentInput, SavingsTransactionInput},
     domain::{
         timestamp_id, validate_business_date, AuditAction, AuditEntityType, Channel, ComponentType,
-        SavingsAccountType, SavingsMovement, TransactionDirection,
+        LoanGroup, SavingsAccountType, SavingsMovement, TransactionDirection,
     },
 };
 
@@ -218,7 +218,7 @@ pub(crate) async fn post_payment(
     // A loan without a member is a Non Anggota installment; with a member, the
     // principal and interest go to that loan and the savings to the member.
     let loan_id = input.loan_id.trim();
-    if !loan_id.is_empty() && input.member_id.trim().is_empty() {
+    if (!loan_id.is_empty() || !input.loans.is_empty()) && input.member_id.trim().is_empty() {
         return post_loan_payment(input, channel, company_id, pool).await;
     }
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
@@ -229,7 +229,13 @@ pub(crate) async fn post_payment(
 
     let mut components = Vec::new();
     if !input.loans.is_empty() {
-        components = loan_lines(&input, company_id, &mut db).await?;
+        components = loan_lines(
+            &input,
+            LoanOwner::Member(&input.member_id),
+            company_id,
+            &mut db,
+        )
+        .await?;
     }
     // Principal is allocated to the chosen loan, or else to the oldest
     // outstanding loan first.
@@ -330,10 +336,19 @@ pub(crate) async fn post_payment(
     get_app_snapshot(company_id, pool).await
 }
 
+/// Whose loans a per-loan payment may list: a member's, or a Non Anggota
+/// borrower's, matched by name as on the loan form (case and outer spaces
+/// ignored), since Non Anggota borrowers have no member record.
+enum LoanOwner<'a> {
+    Member(&'a str),
+    NonMember(&'a str),
+}
+
 /// Principal and interest components for a payment that lists each loan, as
 /// in a Buku Kas row like "Setoran Pinjaman <nama>" that pays two loans.
 async fn loan_lines(
     input: &PaymentInput,
+    owner: LoanOwner<'_>,
     company_id: &str,
     db: &mut SqliteConnection,
 ) -> Result<Vec<Component>, String> {
@@ -354,17 +369,29 @@ async fn loan_lines(
         if line.principal == 0 && line.interest == 0 {
             continue;
         }
-        let belongs: Option<String> = sqlx::query_scalar(
-            "SELECT id FROM loans WHERE company_id = ? AND id = ? AND member_id = ?",
-        )
-        .bind(company_id)
-        .bind(loan_id)
-        .bind(&input.member_id)
+        let belongs: Option<String> = match owner {
+            LoanOwner::Member(member_id) => sqlx::query_scalar(
+                "SELECT id FROM loans WHERE company_id = ? AND id = ? AND member_id = ?",
+            )
+            .bind(company_id)
+            .bind(loan_id)
+            .bind(member_id),
+            LoanOwner::NonMember(name) => sqlx::query_scalar(
+                "SELECT id FROM loans WHERE company_id = ? AND id = ? AND loan_group = ? AND COALESCE(member_id, '') = '' AND lower(trim(member_name)) = lower(trim(?))",
+            )
+            .bind(company_id)
+            .bind(loan_id)
+            .bind(LoanGroup::NonMember.as_str())
+            .bind(name),
+        }
         .fetch_optional(&mut *db)
         .await
         .map_err(|error| error.to_string())?;
         if belongs.is_none() {
-            return Err("Pinjaman tidak ditemukan untuk anggota ini.".into());
+            return Err(match owner {
+                LoanOwner::Member(_) => "Pinjaman tidak ditemukan untuk anggota ini.".into(),
+                LoanOwner::NonMember(_) => "Pinjaman tidak ditemukan untuk peminjam ini.".into(),
+            });
         }
         if line.principal > loan_balance(db, company_id, loan_id).await? {
             return Err("Pembayaran pokok melebihi saldo pinjaman berjalan.".into());
@@ -390,7 +417,8 @@ async fn loan_lines(
 }
 
 /// Installment for one loan, as in the daily cash ledger rows for Non Anggota borrowers
-/// (e.g. "Mas Roby 13 feb 25 15 juta"). Only principal and interest; there are no savings.
+/// (e.g. "Mas Roby 13 feb 25 15 juta"), or for each running loan of one borrower in a
+/// single row (e.g. "Setoran Ruslan"). Only principal and interest; there are no savings.
 async fn post_loan_payment(
     input: PaymentInput,
     channel: Channel,
@@ -400,7 +428,11 @@ async fn post_loan_payment(
     if input.wajib != 0 || input.voluntary != 0 {
         return Err("Pembayaran per pinjaman tidak memuat simpanan.".into());
     }
-    let loan_id = input.loan_id.trim();
+    // Paying several loans: the borrower is the one of the first listed loan.
+    let loan_id = match input.loans.first() {
+        Some(line) => line.loan_id.trim(),
+        None => input.loan_id.trim(),
+    };
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
     let loan =
         sqlx::query("SELECT member_id, member_name FROM loans WHERE company_id = ? AND id = ?")
@@ -416,9 +448,33 @@ async fn post_loan_payment(
     let borrower_name: String = loan
         .try_get("member_name")
         .map_err(|error| error.to_string())?;
-    if input.principal > loan_balance(&mut db, company_id, loan_id).await? {
-        return Err("Pembayaran pokok melebihi saldo pinjaman berjalan.".into());
-    }
+    let components = if input.loans.is_empty() {
+        if input.principal > loan_balance(&mut db, company_id, loan_id).await? {
+            return Err("Pembayaran pokok melebihi saldo pinjaman berjalan.".into());
+        }
+        vec![
+            Component::new(
+                ComponentType::LoanPrincipal,
+                "Pokok pinjaman",
+                input.principal,
+            )
+            .for_loan(loan_id),
+            Component::new(
+                ComponentType::LoanInterest,
+                "Bunga pinjaman",
+                input.interest,
+            )
+            .for_loan(loan_id),
+        ]
+    } else {
+        loan_lines(
+            &input,
+            LoanOwner::NonMember(&borrower_name),
+            company_id,
+            &mut db,
+        )
+        .await?
+    };
     let id = timestamp_id("TRX");
     let reference = trimmed_or(&input.reference, format!("KBS/RCPT/{id}"));
     ensure_reference_unused(&mut db, company_id, &reference).await?;
@@ -438,20 +494,7 @@ async fn post_loan_payment(
             direction: TransactionDirection::In,
             actor: APP_ACTOR,
             reversed_transaction_id: None,
-            components: vec![
-                Component::new(
-                    ComponentType::LoanPrincipal,
-                    "Pokok pinjaman",
-                    input.principal,
-                )
-                .for_loan(loan_id),
-                Component::new(
-                    ComponentType::LoanInterest,
-                    "Bunga pinjaman",
-                    input.interest,
-                )
-                .for_loan(loan_id),
-            ],
+            components,
         },
     )
     .await?;
@@ -461,7 +504,12 @@ async fn post_loan_payment(
         AuditEntityType::Transaction,
         &id,
         AuditAction::Posted,
-        serde_json::json!({"amount": amount, "loanId": loan_id, "channel": channel.as_str(), "reference": reference}),
+        if input.loans.is_empty() {
+            serde_json::json!({"amount": amount, "loanId": loan_id, "channel": channel.as_str(), "reference": reference})
+        } else {
+            let loan_ids: Vec<&str> = input.loans.iter().map(|line| line.loan_id.trim()).collect();
+            serde_json::json!({"amount": amount, "loanIds": loan_ids, "channel": channel.as_str(), "reference": reference})
+        },
     )
     .await?;
     db.commit().await.map_err(|error| error.to_string())?;
