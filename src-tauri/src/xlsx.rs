@@ -57,7 +57,6 @@ pub(crate) enum Expr {
     Div(Box<Expr>, Box<Expr>),
     /// `SUM(first:last)` over a rectangle.
     Sum((u32, u32), (u32, u32)),
-    Round(Box<Expr>, i32),
     RoundUp(Box<Expr>, i32),
 }
 
@@ -79,9 +78,6 @@ impl Expr {
     }
     pub(crate) fn div(self, other: Expr) -> Self {
         Self::Div(Box::new(self), Box::new(other))
-    }
-    pub(crate) fn round(self, digits: i32) -> Self {
-        Self::Round(Box::new(self), digits)
     }
     pub(crate) fn round_up(self, digits: i32) -> Self {
         Self::RoundUp(Box::new(self), digits)
@@ -125,7 +121,6 @@ impl Expr {
                 cell_ref(first.0, first.1),
                 cell_ref(last.0, last.1)
             ),
-            Self::Round(a, digits) => format!("ROUND({},{digits})", a.formula()),
             Self::RoundUp(a, digits) => format!("ROUNDUP({},{digits})", a.formula()),
         }
     }
@@ -155,16 +150,11 @@ pub(crate) fn cell_ref(row: u32, col: u32) -> String {
     format!("{}{row}", column_name(col))
 }
 
-/// Excel's ROUND/ROUNDUP: half away from zero, and away from zero.
-fn round_digits(value: f64, digits: i32, up: bool) -> f64 {
+/// Excel's ROUNDUP: away from zero.
+fn round_up_digits(value: f64, digits: i32) -> f64 {
     let factor = 10f64.powi(digits);
-    let scaled = value.abs() * factor;
     // Tolerate floating-point noise such as 51762.50000000001.
-    let rounded = if up {
-        (scaled - 1e-9).ceil()
-    } else {
-        (scaled + 1e-9).round()
-    };
+    let rounded = (value.abs() * factor - 1e-9).ceil();
     value.signum() * rounded / factor
 }
 
@@ -332,8 +322,7 @@ impl Sheet {
                 }
                 total
             }
-            Expr::Round(a, digits) => round_digits(self.eval(a), *digits, false),
-            Expr::RoundUp(a, digits) => round_digits(self.eval(a), *digits, true),
+            Expr::RoundUp(a, digits) => round_up_digits(self.eval(a), *digits),
         }
     }
 
@@ -597,7 +586,7 @@ mod tests {
         assert_eq!(nested.formula(), "A1-(B1+C1)");
         let incentive = Expr::num(51_762.5).round_up(-3);
         assert_eq!(sheet.eval(&incentive), 52_000.0);
-        assert_eq!(sheet.eval(&Expr::num(2.5).round(0)), 3.0);
+        assert_eq!(sheet.eval(&Expr::num(190_146.62).round_up(0)), 190_147.0);
     }
 
     #[test]

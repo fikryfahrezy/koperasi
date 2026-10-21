@@ -17,6 +17,7 @@ import {
   type Loan,
   LoanGroup,
   matchesMember,
+  roundUpInterest,
   useKoperasiStore,
   useMonthlyLedger,
 } from "../store/koperasi";
@@ -24,6 +25,7 @@ import {
   loanTailLetters,
   loanLeadingLetters,
   loanMonthLetters,
+  loanOpeningLetters,
 } from "../sheet-columns";
 
 const pageState = useWorkspacePageState("/loans");
@@ -68,6 +70,14 @@ const memberNumbers = computed(
 // Spreadsheet rows follow loan numbers (L001, L002, ...). Derived columns:
 // opening arrears = closing arrears - this month's payment obligation + amount paid;
 // payment obligation through this month = opening arrears + this month's payment obligation.
+// Kewajiban setor tiap bulan is the loan's fixed installment (kolom L–N), as
+// the export writes it: ROUNDUP(plafond/jangka waktu,-3) and ROUNDUP(plafond*bunga/12,0).
+const fixedInstallment = (loan: Loan) => {
+  const principal =
+    loan.tenor > 0 ? Math.ceil(loan.plafond / loan.tenor / 1000) * 1000 : 0;
+  const interest = roundUpInterest((loan.plafond * loan.rate) / 100 / 12);
+  return { principal, interest };
+};
 const monthRowsForPeriod = (selectedPeriod: string) =>
   monthlyLedger.value.loans
     .filter((row) => row.period === selectedPeriod)
@@ -79,10 +89,13 @@ const monthRowsForPeriod = (selectedPeriod: string) =>
         row.arrearsPrincipal - row.scheduledPrincipal + row.principalPaid;
       const priorArrearsInterest =
         row.arrearsInterest - row.scheduledInterest + row.interestPaid;
+      const installment = fixedInstallment(row.loan);
       return {
         ...row,
         plafond: row.loan.plafond,
-        scheduledTotal: row.scheduledPrincipal + row.scheduledInterest,
+        installmentPrincipal: installment.principal,
+        installmentInterest: installment.interest,
+        installmentTotal: installment.principal + installment.interest,
         priorArrearsPrincipal,
         priorArrearsInterest,
         priorArrearsTotal: priorArrearsPrincipal + priorArrearsInterest,
@@ -157,19 +170,19 @@ const rowsForPeriod = (selectedPeriod: string) =>
     });
 type MonthRow = ReturnType<typeof rowsForPeriod>[number];
 
-// Numeric columns after the loan term, in spreadsheet order.
-const beforeMutation = [
+// Numeric columns after the loan term, in spreadsheet order. Saldo Posisi,
+// Kewajiban setor tiap bulan and Tunggakan before the first month shown appear
+// once (kolom K–Q), as in the sheet; each month then starts at Kewajiban s/d.
+const openingKeys = [
   "openingBalance",
-  "scheduledPrincipal",
-  "scheduledInterest",
-  "scheduledTotal",
+  "installmentPrincipal",
+  "installmentInterest",
+  "installmentTotal",
   "priorArrearsPrincipal",
   "priorArrearsInterest",
   "priorArrearsTotal",
-  "duePrincipal",
-  "dueInterest",
-  "dueTotal",
 ] as const;
+const beforeMutation = ["duePrincipal", "dueInterest", "dueTotal"] as const;
 const mutation = [
   "cashIn",
   "disbursed",
@@ -185,6 +198,7 @@ const afterMutation = [
 ] as const;
 type TotalKey =
   | "plafond"
+  | (typeof openingKeys)[number]
   | (typeof beforeMutation)[number]
   | (typeof mutation)[number]
   | (typeof afterMutation)[number]
@@ -193,6 +207,7 @@ type TotalKey =
 function sumRows(rows: MonthRow[]) {
   const keys: TotalKey[] = [
     "plafond",
+    ...openingKeys,
     ...beforeMutation,
     ...mutation,
     ...afterMutation,
@@ -258,18 +273,25 @@ const sections = computed(() => {
 const plafondTotal = computed(() =>
   sections.value.reduce((sum, section) => sum + section.totals.plafond, 0),
 );
-// The month groups, then one "Pemasukan" group as of the last month shown
-// (JUMLAH PEMASUKAN per triwulan and Insentif Pinjaman in the sheet).
+// The opening columns of the first month shown, the month groups, then one
+// "Pemasukan" group as of the last month shown (JUMLAH PEMASUKAN per triwulan
+// and Insentif Pinjaman in the sheet).
 const columnGroups = computed(() => {
   const months = periodTables.value.map((table) => ({
     ...table,
-    kind: "month" as const,
+    kind: "month" as "opening" | "month" | "tail",
   }));
+  const first = periodTables.value[0];
   const last = periodTables.value[periodTables.value.length - 1];
-  return last
-    ? [...months, { ...last, kind: "tail" as const, period: "tail" }]
+  return first && last
+    ? [
+        { ...first, kind: "opening" as const, period: "opening" },
+        ...months,
+        { ...last, kind: "tail" as const, period: "tail" },
+      ]
     : months;
 });
+const firstPeriod = computed(() => periodTables.value[0]?.period ?? "");
 const incomePeriod = computed(
   () => periodTables.value[periodTables.value.length - 1]?.period ?? "",
 );
@@ -284,11 +306,12 @@ const monthlyRate = (loan: Loan) =>
 // the numeric blocks and the mutation date.
 const monthColumnCount =
   beforeMutation.length + 1 + mutation.length + afterMutation.length;
+const openingColumnCount = openingKeys.length;
 const totalColumnCount = computed(
   () =>
     10 +
     monthColumnCount * periodTables.value.length +
-    (periodTables.value.length ? tailColumnCount : 0),
+    (periodTables.value.length ? openingColumnCount + tailColumnCount : 0),
 );
 const totalColumns = (key: string) =>
   key === "openingBalance" || key === "closingBalance";
@@ -342,7 +365,12 @@ const {
   scrollToColumn,
 } = useVirtualSheetColumns(
   columnGroups,
-  (group) => (group.kind === "month" ? monthColumnCount : tailColumnCount),
+  (group) =>
+    group.kind === "month"
+      ? monthColumnCount
+      : group.kind === "opening"
+        ? openingColumnCount
+        : tailColumnCount,
   [56, 240, 120, 80, 80, 80, 100, 120, 120, 90],
   scroller,
   pageState.active,
@@ -465,7 +493,9 @@ const navigation = computed(() => ({
                 <th
                   v-for="(letter, index) in kind === 'month'
                     ? loanMonthLetters(period)
-                    : loanTailLetters(nextPeriod(incomePeriod))"
+                    : kind === 'opening'
+                      ? loanOpeningLetters
+                      : loanTailLetters(nextPeriod(incomePeriod))"
                   :key="index"
                 >
                   {{ letter }}
@@ -505,6 +535,17 @@ const navigation = computed(() => ({
                 >
                   {{ formatPeriod(period) }}
                 </th>
+                <template v-else-if="kind === 'opening'">
+                  <th rowspan="4" class="sheet-total">
+                    Saldo Posisi<br />{{ formatPreviousPeriod(firstPeriod) }}
+                  </th>
+                  <th colspan="3" rowspan="3" class="sheet-group">
+                    Kewajiban setor tiap bulan
+                  </th>
+                  <th colspan="3" rowspan="3" class="sheet-group">
+                    Tunggakan s/d {{ formatPreviousPeriod(firstPeriod) }}
+                  </th>
+                </template>
                 <template v-else>
                   <th colspan="3" rowspan="3" class="sheet-group">
                     Kewajiban s/d {{ formatPeriod(nextPeriod(incomePeriod)) }}
@@ -541,16 +582,7 @@ const navigation = computed(() => ({
                     Insentif Pinjaman
                   </th>
                 </template>
-                <template v-else>
-                  <th rowspan="3" class="sheet-total">
-                    Saldo Posisi<br />{{ formatPreviousPeriod(period) }}
-                  </th>
-                  <th colspan="3" rowspan="2" class="sheet-group">
-                    Kewajiban setor tiap bulan
-                  </th>
-                  <th colspan="3" rowspan="2" class="sheet-group">
-                    Tunggakan s/d {{ formatPreviousPeriod(period) }}
-                  </th>
+                <template v-else-if="kind === 'month'">
                   <th colspan="3" rowspan="2" class="sheet-group">
                     Kewajiban setor s/d {{ formatPeriod(period) }}
                   </th>
@@ -600,7 +632,11 @@ const navigation = computed(() => ({
                   <th>Pembulatan</th>
                 </template>
                 <template
-                  v-for="block in kind === 'month' ? 3 : 0"
+                  v-for="block in kind === 'opening'
+                    ? 2
+                    : kind === 'month'
+                      ? 1
+                      : 0"
                   :key="block"
                 >
                   <th>Pokok</th>
@@ -693,6 +729,16 @@ const navigation = computed(() => ({
                         {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
                       </td>
                     </template>
+                    <template v-else-if="table.kind === 'opening'">
+                      <td
+                        v-for="key in openingKeys"
+                        :key="key"
+                        class="num-cell"
+                        :class="{ 'sheet-total': totalColumns(key) }"
+                      >
+                        {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
+                      </td>
+                    </template>
                     <template v-else>
                       <td
                         v-for="key in beforeMutation"
@@ -759,6 +805,20 @@ const navigation = computed(() => ({
                     </td>
                     <td></td>
                     <td v-for="key in incomeKeys" :key="key" class="num-cell">
+                      {{
+                        formatSheetNumber(
+                          sectionTotals(table, item.section.group)[key],
+                        )
+                      }}
+                    </td>
+                  </template>
+                  <template v-else-if="table.kind === 'opening'">
+                    <td
+                      v-for="key in openingKeys"
+                      :key="key"
+                      class="num-cell"
+                      :class="{ 'sheet-total': totalColumns(key) }"
+                    >
                       {{
                         formatSheetNumber(
                           sectionTotals(table, item.section.group)[key],
@@ -845,6 +905,16 @@ const navigation = computed(() => ({
                   </td>
                   <td></td>
                   <td v-for="key in incomeKeys" :key="key" class="num-cell">
+                    {{ formatSheetNumber(table.totals[key]) }}
+                  </td>
+                </template>
+                <template v-else-if="table.kind === 'opening'">
+                  <td
+                    v-for="key in openingKeys"
+                    :key="key"
+                    class="num-cell"
+                    :class="{ 'sheet-total': totalColumns(key) }"
+                  >
                     {{ formatSheetNumber(table.totals[key]) }}
                   </td>
                 </template>

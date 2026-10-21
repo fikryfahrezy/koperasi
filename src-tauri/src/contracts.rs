@@ -148,6 +148,9 @@ pub(crate) struct PreviewLoanInput {
     pub(crate) plafond: i64,
     pub(crate) tenor: i64,
     pub(crate) interest_type: String,
+    /// Bunga per tahun in percent typed by the user; empty uses the parameter.
+    #[serde(default)]
+    pub(crate) annual_rate: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -164,6 +167,9 @@ pub(crate) struct CreateLoanInput {
     pub(crate) tenor: i64,
     pub(crate) interest_type: String,
     pub(crate) loan_type: String,
+    /// Bunga per tahun in percent typed by the user; empty uses the parameter.
+    #[serde(default)]
+    pub(crate) annual_rate: Option<f64>,
     /// Provision fee typed by the user; empty uses the Provisi parameter rate.
     #[serde(default)]
     pub(crate) provision: Option<i64>,
