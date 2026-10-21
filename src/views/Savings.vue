@@ -22,6 +22,7 @@ import {
 import {
   savingsLeadingLetters,
   savingsMonthLetters,
+  savingsOpeningLetters,
   savingsTailLetters,
 } from "../sheet-columns";
 
@@ -166,8 +167,19 @@ const incentiveById = computed(
     ),
 );
 const incentiveKeys = ["average", "incentiveRaw", "incentive"] as const;
-// The month groups, then Ratas and Insentif Simpanan once at the end.
+// Saldo before the first month shown once (as SALDO BULAN DESEMBER in the
+// sheet), the month groups, then Ratas and Insentif Simpanan once at the end.
+const firstPeriod = computed(() => visiblePeriods.value[0] ?? "");
 const columnGroups = computed(() => [
+  ...(periodTables.value.length
+    ? [
+        {
+          ...periodTables.value[0]!,
+          kind: "opening" as "opening" | "month" | "tail",
+          period: "opening",
+        },
+      ]
+    : []),
   ...periodTables.value.map((table) => ({ ...table, kind: "month" as const })),
   ...(periodTables.value.length
     ? [
@@ -180,7 +192,13 @@ const columnGroups = computed(() => [
     : []),
 ]);
 const groupColumns = (group: (typeof columnGroups.value)[number]) =>
-  group.kind === "tail" ? incentiveKeys.length : group.hasShu ? 16 : 15;
+  group.kind === "tail"
+    ? incentiveKeys.length
+    : group.kind === "opening"
+      ? openingKeys.length + 1
+      : group.hasShu
+        ? 12
+        : 11;
 
 const monthRows = computed(() => {
   const rowsById = new Map<string, ReturnType<typeof rowsForPeriod>[number]>();
@@ -346,6 +364,17 @@ const navigation = computed(() => ({
                     {{ letter }}
                   </th>
                 </template>
+                <template v-else-if="kind === 'opening'">
+                  <th
+                    v-for="(letter, index) in savingsOpeningLetters(
+                      firstPeriod,
+                      selectedYear,
+                    )"
+                    :key="index"
+                  >
+                    {{ letter }}
+                  </th>
+                </template>
                 <template v-else>
                   <th
                     v-for="(letter, index) in savingsTailLetters(selectedYear)"
@@ -378,11 +407,19 @@ const navigation = computed(() => ({
               >
                 <template v-if="kind === 'month'">
                   <th
-                    :colspan="hasShu ? 16 : 15"
+                    :colspan="hasShu ? 12 : 11"
                     class="sheet-group"
                     :data-period="period"
                   >
                     {{ formatPeriod(period) }}
+                  </th>
+                </template>
+                <template v-else-if="kind === 'opening'">
+                  <th colspan="3" rowspan="2" class="sheet-group">
+                    Saldo bulan {{ formatPreviousPeriod(firstPeriod) }}
+                  </th>
+                  <th rowspan="4" class="sheet-total">
+                    Total simpanan<br />{{ formatPreviousPeriod(firstPeriod) }}
                   </th>
                 </template>
                 <template v-else>
@@ -407,12 +444,6 @@ const navigation = computed(() => ({
                 :key="period"
               >
                 <template v-if="kind === 'month'">
-                  <th colspan="3" class="sheet-group">
-                    Saldo bulan {{ formatPreviousPeriod(period) }}
-                  </th>
-                  <th rowspan="3" class="sheet-total">
-                    Total simpanan<br />{{ formatPreviousPeriod(period) }}
-                  </th>
                   <th
                     :colspan="hasShu ? 8 : 7"
                     class="sheet-group sheet-group--mutasi"
@@ -433,10 +464,12 @@ const navigation = computed(() => ({
                 v-for="{ period, hasShu, kind } in renderedPeriodTables"
                 :key="period"
               >
-                <template v-if="kind === 'month'">
+                <template v-if="kind === 'opening'">
                   <th rowspan="2">Pokok</th>
                   <th rowspan="2">Wajib</th>
                   <th rowspan="2">Manasuka</th>
+                </template>
+                <template v-else-if="kind === 'month'">
                   <th rowspan="2">Tanggal</th>
                   <th colspan="2">Simpanan Pokok</th>
                   <th colspan="2">Simpanan Wajib</th>
@@ -510,7 +543,7 @@ const navigation = computed(() => ({
                   </td>
                 </template>
                 <template
-                  v-for="monthRow in table.kind === 'month'
+                  v-for="monthRow in table.kind === 'opening'
                     ? [table.rowsById.get(row.memberId)]
                     : []"
                   :key="table.period"
@@ -523,6 +556,13 @@ const navigation = computed(() => ({
                       monthRow ? formatSheetNumber(openingTotal(monthRow)) : "-"
                     }}
                   </td>
+                </template>
+                <template
+                  v-for="monthRow in table.kind === 'month'
+                    ? [table.rowsById.get(row.memberId)]
+                    : []"
+                  :key="table.period"
+                >
                   <td>
                     {{
                       monthRow
@@ -585,13 +625,15 @@ const navigation = computed(() => ({
                     {{ formatSheetNumber(incentiveTotals[key]) }}
                   </td>
                 </template>
-                <template v-else>
+                <template v-else-if="table.kind === 'opening'">
                   <td v-for="key in openingKeys" :key="key" class="num-cell">
                     {{ formatSheetNumber(table.totals[key]) }}
                   </td>
                   <td class="num-cell sheet-total">
                     {{ formatSheetNumber(openingTotal(table.totals)) }}
                   </td>
+                </template>
+                <template v-else>
                   <td></td>
                   <td
                     v-for="key in table.movementKeys"

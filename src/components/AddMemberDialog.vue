@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import type { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import RupiahInput from "./RupiahInput.vue";
 import UiModal from "./UiModal.vue";
-import { SavingsAccountType, useKoperasiStore } from "../store/koperasi";
+import {
+  formatCurrency,
+  SavingsAccountType,
+  useKoperasiStore,
+} from "../store/koperasi";
 
 /** Tambah anggota baru: registers a member with their ID and simpanan pokok. */
 const props = defineProps<{
@@ -12,14 +16,28 @@ const props = defineProps<{
 }>();
 const pageState = props.pageState;
 
-const { addMember, memberNumberOwner } = useKoperasiStore();
+const { addMember, memberNumberOwner, financialParameters } =
+  useKoperasiStore();
+// Simpanan pokok: the parameter is both the starting amount and the minimum.
+const minimumPrincipal = computed(
+  () => financialParameters.principalSavings || 50_000,
+);
 const open = pageState.field("open", () => false);
 const form = pageState.field("form", () => ({
   memberNumber: "",
   name: "",
   joinedAt: "2026-09-13",
-  principalSavings: 50_000,
+  // 0 until the form opens, then the Simpanan Pokok parameter.
+  principalSavings: 0,
 }));
+watch(
+  () => open.value,
+  (isOpen) => {
+    if (isOpen && !form.value.principalSavings)
+      form.value.principalSavings = minimumPrincipal.value;
+  },
+  { immediate: true },
+);
 
 const memberNumberTaken = computed(() =>
   memberNumberOwner(form.value.memberNumber),
@@ -33,7 +51,7 @@ async function submit() {
     memberNumberTaken.value ||
     !form.value.name ||
     !Number.isFinite(form.value.principalSavings) ||
-    form.value.principalSavings < 50_000
+    form.value.principalSavings < minimumPrincipal.value
   )
     return;
   const saved = await addMember({
@@ -53,7 +71,7 @@ async function submit() {
     memberNumber: "",
     name: "",
     joinedAt: "2026-09-13",
-    principalSavings: 50_000,
+    principalSavings: 0,
   });
 }
 </script>
@@ -94,8 +112,8 @@ async function submit() {
         ><span>Simpanan pokok</span
         ><RupiahInput
           v-model="form.principalSavings"
-          :min="50000"
-          min-message="Simpanan pokok minimal Rp50.000."
+          :min="minimumPrincipal"
+          :min-message="`Simpanan pokok minimal ${formatCurrency(minimumPrincipal)}.`"
           aria-label="Simpanan pokok dalam Rupiah"
           required
       /></label>

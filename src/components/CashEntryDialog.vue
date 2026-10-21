@@ -26,6 +26,7 @@ import {
   LoanGroup,
   LoanType,
   type LoanPreview,
+  roundUpInterest,
   SavingsAccountType,
   SavingsMovement,
   todayIso,
@@ -97,6 +98,8 @@ const loanForm = pageState.field("loanForm", () => ({
   tenor: null as number | null,
   interestType: InterestType.Declining as InterestType,
   loanType: LoanType.Monthly as LoanType,
+  // Bunga per tahun (%); null follows the Bunga parameter until typed.
+  annualRate: null as number | null,
 }));
 const otherForm = pageState.field("otherForm", () => ({
   category: "" as CashCategory | typeof SAVINGS_BOOK_ONLY | "",
@@ -325,7 +328,7 @@ function installmentOf(loan: (typeof loans)[number]) {
       Math.ceil(loan.plafond / loan.tenor / 1000) * 1000,
       loan.balance,
     ),
-    interest: Math.round(
+    interest: roundUpInterest(
       ((loan.interestType === InterestType.Flat ? loan.plafond : loan.balance) *
         loan.rate) /
         100 /
@@ -414,6 +417,15 @@ const exceedsTopUpPlafond = computed(
     selectedPayoffs.value.length > 0 &&
     payoffTotal.value + loanProvision.value.amount > loanForm.value.plafond,
 );
+const loanAnnualRate = computed({
+  get: () => loanForm.value.annualRate ?? financialParameters.annualRate,
+  set: (value: number) => {
+    loanForm.value.annualRate = Number.isFinite(value) ? value : null;
+  },
+});
+const annualRateValid = computed(
+  () => loanAnnualRate.value >= 0 && loanAnnualRate.value <= 100,
+);
 /** Provisi at the parameter rate. A suplesi charges it on the new money
  * only, as in the sheet: plafond minus what pays off the old loans. */
 function rateProvision(preview: LoanPreview | null) {
@@ -473,7 +485,8 @@ function openModal() {
     loanId: "",
     principal: 0,
     interest: 0,
-    wajib: 0,
+    // Setoran anggota usually includes the monthly simpanan wajib.
+    wajib: financialParameters.mandatorySavings,
     voluntary: 0,
   });
   Object.assign(savingsForm.value, {
@@ -490,6 +503,7 @@ function openModal() {
     tenor: null,
     interestType: InterestType.Declining,
     loanType: LoanType.Monthly,
+    annualRate: null,
   });
   Object.assign(loanProvision.value, { amount: 0, edited: false });
   loanPayoffs.value = {};
@@ -681,6 +695,7 @@ async function submit() {
         !tenor ||
         tenor <= 0 ||
         !Number.isFinite(loanProvision.value.amount) ||
+        !annualRateValid.value ||
         exceedsTopUpPlafond.value
       )
         return;
@@ -1132,6 +1147,21 @@ defineExpose({ open: openModal });
               aria-label="Jenis bunga"
             />
           </label>
+          <label class="field">
+            <span>Bunga (% per tahun)</span>
+            <input
+              v-model.number="loanAnnualRate"
+              type="number"
+              inputmode="decimal"
+              min="0"
+              max="100"
+              step="0.01"
+              aria-label="Bunga pinjaman dalam persen per tahun"
+              required
+            />
+          </label>
+        </div>
+        <div class="field-row">
           <label class="field">
             <span>Provisi</span>
             <RupiahInput
