@@ -3,6 +3,10 @@
   "private": true,
   "version": "0.32.9",
   "type": "module",
+  "packageManager": "bun@1.4.4",
+  "engines": {
+    "bun": "1.4.4"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
@@ -52,7 +56,6 @@
     "vue-tsc": "3.2.6",
     "webdriverio": "^9.32.0"
   },
-  "packageManager": "bun@1.3.14",
   "trustedDependencies": [
     "esbuild",
     "vue-demi"
