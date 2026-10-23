@@ -21,7 +21,7 @@ tampilan sebelum memindahkan fokus.
 ## Pengujian browser
 
 ```bash
-pnpm test:virtualization
+bun run test:virtualization
 ```
 
 Chrome harus tersedia, atau tetapkan `CHROME_BINARY` ke executable Chrome/Chromium.

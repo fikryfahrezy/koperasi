@@ -25,17 +25,17 @@ Rust toolchain:
 ```sh
 rustup toolchain install stable --profile minimal
 cargo +stable install tauri-driver --version 2.0.6 --locked
-pnpm install --frozen-lockfile
-xvfb-run -a pnpm test:e2e
+bun install --frozen-lockfile
+xvfb-run -a bun run test:e2e
 ```
 
 Run a single spec with the same native build and database isolation:
 
 ```sh
-xvfb-run -a pnpm test:e2e --spec ./e2e/specs/savings.e2e.js
+xvfb-run -a bun run test:e2e --spec ./e2e/specs/savings.e2e.js
 ```
 
-With a graphical desktop already available, `pnpm test:e2e` also works without
+With a graphical desktop already available, `bun run test:e2e` also works without
 Xvfb. Ensure `~/.cargo/bin` is in PATH. Set `TAURI_DRIVER` if the executable is
 elsewhere; `KOPERASI_E2E_PORT` overrides the default port 4444.
 
@@ -44,7 +44,7 @@ elsewhere; `KOPERASI_E2E_PORT` overrides the default port 4444.
 Install the normal Tauri Windows build prerequisites, `tauri-driver` as above,
 and `msedgedriver.exe` in PATH. The Edge driver must match the WebView2 runtime
 actually used by the debug app (normally the system WebView2 runtime).
-Then run `pnpm test:e2e`. The Linux CI job is the automated baseline; Windows
+Then run `bun run test:e2e`. The Linux CI job is the automated baseline; Windows
 execution still needs validation on a Windows machine.
 
 ## macOS and CI
@@ -70,7 +70,7 @@ back to the normal database. Updater, single-instance, and window-state plugins
 are omitted, and automatic frontend update checks are disabled in test builds.
 
 Production builds do not enable the `e2e` feature or `VITE_E2E`; use the normal
-`pnpm tauri build` command for those. WebdriverIO records logs and failure
+`bun tauri build` command for those. WebdriverIO records logs and failure
 screenshots under `e2e/artifacts/`, which CI uploads when a run fails.
 
 The runner shares one temporary database for the suite. Each scenario creates
