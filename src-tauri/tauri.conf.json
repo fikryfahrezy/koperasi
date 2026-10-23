@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "KOPERASI PP BRI KUNINGAN - BINA SEJAHTERA",
-  "version": "0.31.9",
+  "version": "0.32.9",
   "identifier": "com.fikryfahrezy.koperasi",
   "build": {
-    "beforeDevCommand": "pnpm run dev",
+    "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm run build",
+    "beforeBuildCommand": "bun run build",
     "frontendDist": "../dist"
   },
   "app": {
