@@ -3,7 +3,7 @@
 //! paid-off loans, Jumlah Pemasukan per triwulan, Insentif Pinjaman, Ratas
 //! Simpanan and Insentif Simpanan. See notes/rules-and-formulas.md 1.10, 2.3a.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::contracts::{LoanMonthDto, SavingsMonthDto};
 
@@ -38,10 +38,17 @@ fn is_closed(row: &LoanMonthDto) -> bool {
 /// A borrower with only paid-off loans keeps just the one realized last, which
 /// takes over the income of the others. A loan without a borrower key is its
 /// own borrower.
+///
+/// A Pinjaman Sementara (`temporary`: loan ids) takes the income only when the
+/// borrower has no running Bulanan loan. Otherwise the running Bulanan loan
+/// realized last takes it, and a running Sementara loan stays listed with its
+/// income moved there too, as one borrower in DATA PINJAMAN POSISI
+/// DESEMBER 2025 (see notes/rules-and-formulas.md 1.10).
 pub(crate) fn apply_loan_report(
     loans: &mut [LoanMonthDto],
     borrowers: &HashMap<String, String>,
     realized: &HashMap<String, String>,
+    temporary: &HashSet<String>,
     incentive_rate: f64,
 ) {
     let mut order: Vec<usize> = (0..loans.len()).collect();
@@ -91,10 +98,31 @@ pub(crate) fn apply_loan_report(
                     .then_with(|| loans[b].loan_id.cmp(&loans[a].loan_id))
             })
         };
-        let Some(host) = realized_last(&open).or_else(|| realized_last(&closed)) else {
+        let is_temporary = |index: usize| temporary.contains(&loans[index].loan_id);
+        let running_monthly: Vec<usize> = open
+            .iter()
+            .copied()
+            .filter(|&index| !is_temporary(index))
+            .collect();
+        let Some(host) = realized_last(&running_monthly)
+            .or_else(|| realized_last(&open))
+            .or_else(|| realized_last(&closed))
+        else {
             continue;
         };
-        for index in closed.into_iter().filter(|&index| index != host) {
+        let running_temporary: Vec<usize> = if is_temporary(host) {
+            Vec::new()
+        } else {
+            open.iter()
+                .copied()
+                .filter(|&index| is_temporary(index))
+                .collect()
+        };
+        let carried = closed
+            .iter()
+            .map(|&index| (index, false))
+            .chain(running_temporary.iter().map(|&index| (index, true)));
+        for (index, shown) in carried.filter(|&(index, _)| index != host) {
             let (interest, provision) =
                 (loans[index].income_interest, loans[index].income_provision);
             for quarter in 0..4 {
@@ -102,7 +130,7 @@ pub(crate) fn apply_loan_report(
                 loans[host].income_provision[quarter] += provision[quarter];
             }
             let row = &mut loans[index];
-            row.shown = false;
+            row.shown = shown;
             row.income_interest = [0; 4];
             row.income_provision = [0; 4];
         }
@@ -192,7 +220,7 @@ mod tests {
             ("old".to_string(), "2025-12-10".to_string()),
             ("new".to_string(), "2026-01-28".to_string()),
         ]);
-        apply_loan_report(&mut loans, &borrowers, &realized, 0.101);
+        apply_loan_report(&mut loans, &borrowers, &realized, &HashSet::new(), 0.101);
 
         // January: both rows shown, each with its own income.
         assert!(loans[0].shown && loans[1].shown);
@@ -214,7 +242,13 @@ mod tests {
         paid.interest_paid = 0;
         let mut loans = vec![paid];
         let borrowers = HashMap::from([("paid".to_string(), "M001".to_string())]);
-        apply_loan_report(&mut loans, &borrowers, &HashMap::new(), 0.101);
+        apply_loan_report(
+            &mut loans,
+            &borrowers,
+            &HashMap::new(),
+            &HashSet::new(),
+            0.101,
+        );
         assert!(loans[0].shown);
     }
 
@@ -240,7 +274,7 @@ mod tests {
             ("old".to_string(), "2025-05-21".to_string()),
             ("new".to_string(), "2026-04-22".to_string()),
         ]);
-        apply_loan_report(&mut loans, &borrowers, &realized, 0.101);
+        apply_loan_report(&mut loans, &borrowers, &realized, &HashSet::new(), 0.101);
         assert!(!loans[2].shown);
         assert_eq!(loans[2].income_interest, [0; 4]);
         assert!(loans[3].shown);
@@ -251,7 +285,13 @@ mod tests {
     #[test]
     fn does_not_merge_loans_without_a_borrower() {
         let mut loans = vec![loan("a", "2026-09", 0, 0), loan("b", "2026-09", 0, 0)];
-        apply_loan_report(&mut loans, &HashMap::new(), &HashMap::new(), 0.101);
+        apply_loan_report(
+            &mut loans,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashSet::new(),
+            0.101,
+        );
         assert!(loans[0].shown && loans[1].shown);
     }
 
@@ -277,10 +317,81 @@ mod tests {
             ("b".to_string(), "2025-06-01".to_string()),
             ("c".to_string(), "2023-01-01".to_string()),
         ]);
-        apply_loan_report(&mut loans, &borrowers, &realized, 0.101);
+        apply_loan_report(&mut loans, &borrowers, &realized, &HashSet::new(), 0.101);
         assert!(!loans[1].shown);
         assert_eq!(loans[2].income_interest, [0; 4]);
         assert_eq!(loans[3].income_interest, [20_000, 0, 0, 0]);
+    }
+
+    #[test]
+    fn carries_income_to_the_last_monthly_loan_not_a_temporary_one() {
+        // DATA PINJAMAN POSISI DESEMBER 2025 (row 16): the
+        // paid-off loans and the running Sementara loan of 22-Okt-2025 all go
+        // to the Bulanan loan of 01-Okt-2025; the Sementara row stays, empty.
+        let mut paid = loan("paid", "2025-05", 5_000_000, 0);
+        paid.interest_paid = 450_000;
+        paid.provision = 12_500;
+        let mut monthly = loan("monthly", "2025-10", 0, 5_000_000);
+        monthly.disbursed = 5_000_000;
+        monthly.interest_paid = 195_000;
+        monthly.provision = 12_500;
+        let mut temporary = loan("temporary", "2025-10", 0, 500_000);
+        temporary.disbursed = 500_000;
+        temporary.interest_paid = 30_000;
+        let mut loans = vec![
+            paid,
+            monthly,
+            temporary,
+            loan("paid", "2025-12", 0, 0),
+            loan("monthly", "2025-12", 5_000_000, 4_500_000),
+            loan("temporary", "2025-12", 500_000, 500_000),
+        ];
+        let borrowers = HashMap::from([
+            ("paid".to_string(), "M053".to_string()),
+            ("monthly".to_string(), "M053".to_string()),
+            ("temporary".to_string(), "M053".to_string()),
+        ]);
+        let realized = HashMap::from([
+            ("paid".to_string(), "2024-12-02".to_string()),
+            ("monthly".to_string(), "2025-10-01".to_string()),
+            ("temporary".to_string(), "2025-10-22".to_string()),
+        ]);
+        let temporary_ids = HashSet::from(["temporary".to_string()]);
+        apply_loan_report(&mut loans, &borrowers, &realized, &temporary_ids, 0.101);
+
+        // December: the paid-off loan is hidden, the Sementara loan is listed
+        // without income, and the Bulanan loan carries all of it.
+        assert!(!loans[3].shown);
+        assert!(loans[5].shown);
+        assert_eq!(loans[5].income_interest, [0; 4]);
+        assert_eq!(loans[4].income_interest, [0, 450_000, 0, 225_000]);
+        assert_eq!(loans[4].income_provision, [0, 12_500, 0, 12_500]);
+        assert_eq!(loans[5].incentive, 0);
+    }
+
+    #[test]
+    fn a_temporary_loan_takes_the_income_without_a_monthly_loan() {
+        let mut paid = loan("paid", "2026-01", 1_000_000, 0);
+        paid.interest_paid = 20_000;
+        let mut loans = vec![
+            paid,
+            loan("paid", "2026-02", 0, 0),
+            loan("temporary", "2026-02", 2_000_000, 2_000_000),
+        ];
+        let borrowers = HashMap::from([
+            ("paid".to_string(), "M001".to_string()),
+            ("temporary".to_string(), "M001".to_string()),
+        ]);
+        let temporary_ids = HashSet::from(["temporary".to_string()]);
+        apply_loan_report(
+            &mut loans,
+            &borrowers,
+            &HashMap::new(),
+            &temporary_ids,
+            0.101,
+        );
+        assert!(!loans[1].shown);
+        assert_eq!(loans[2].income_interest, [20_000, 0, 0, 0]);
     }
 
     #[test]
