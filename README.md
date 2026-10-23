@@ -6,11 +6,11 @@ pinjaman, pembayaran anggota, dan buku kas. Data disimpan di SQLite lokal.
 ## Menjalankan aplikasi
 
 ```bash
-pnpm install
-pnpm tauri dev
+bun install
+bun tauri dev
 ```
 
-`pnpm tauri dev` menjalankan frontend dan backend Rust. `pnpm run dev` hanya
+`bun tauri dev` menjalankan frontend dan backend Rust. `bun run dev` hanya
 menjalankan frontend sehingga command database tidak tersedia.
 
 Database dibuat otomatis saat startup pertama. Di Windows, lokasinya berada di
@@ -35,12 +35,12 @@ konfigurasi. Setelah mengubah nilai ini, restart proses dev atau build ulang.
 ## Build dan pengujian
 
 ```bash
-pnpm run build
+bun run build
 cargo test --manifest-path src-tauri/Cargo.toml --locked --offline
 ```
 
-- Pengujian desktop: `pnpm test:e2e` pada Linux/Windows. Lihat [panduan E2E](e2e/README.md).
-- Pengujian laporan: `pnpm test:virtualization`. Lihat [panduan pengujian laporan](docs/pengujian-laporan.md).
+- Pengujian desktop: `bun run test:e2e` pada Linux/Windows. Lihat [panduan E2E](e2e/README.md).
+- Pengujian laporan: `bun run test:virtualization`. Lihat [panduan pengujian laporan](docs/pengujian-laporan.md).
 
 ## Kompatibilitas desktop
 

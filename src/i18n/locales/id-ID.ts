@@ -50,7 +50,7 @@ export default {
     refreshFailed: "Data gagal dimuat ulang",
     backendUnavailable: "Backend tidak tersedia",
     backendHint:
-      "Jalankan aplikasi melalui `pnpm tauri dev`, bukan server web biasa.",
+      "Jalankan aplikasi melalui `bun tauri dev`, bukan server web biasa.",
     memberAdded: "Anggota berhasil ditambahkan",
     memberAddedMessage:
       "{name} dan tiga rekening simpanannya tersimpan di SQLite.",
