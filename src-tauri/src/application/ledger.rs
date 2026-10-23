@@ -329,6 +329,7 @@ pub(crate) async fn get_monthly_ledger(
     let mut loans = Vec::new();
     let mut borrowers = HashMap::new();
     let mut realized = HashMap::new();
+    let mut temporary = HashSet::new();
     for row in sqlx::query(
         "SELECT id, COALESCE(NULLIF(member_id, ''), 'name:' || member_name) borrower, plafond, rate_annual, tenor, interest_type, loan_type, realization_date, due_date FROM loans WHERE company_id = ?",
     )
@@ -352,6 +353,9 @@ pub(crate) async fn get_monthly_ledger(
         let loan_type = loan_type
             .map(|value| LoanType::try_from(value.as_str()))
             .transpose()?;
+        if loan_type == Some(LoanType::Temporary) {
+            temporary.insert(loan_id.clone());
+        }
         let due_date: String = col!(row, "due_date");
         let due_period = date_period(&due_date);
         let Some(first_period) = loan_first_period.get(&loan_id) else {
@@ -474,7 +478,13 @@ pub(crate) async fn get_monthly_ledger(
     );
     let (loan_incentive_rate, savings_incentive_rate) =
         incentive_rates(company_id, year, pool).await?;
-    apply_loan_report(&mut loans, &borrowers, &realized, loan_incentive_rate);
+    apply_loan_report(
+        &mut loans,
+        &borrowers,
+        &realized,
+        &temporary,
+        loan_incentive_rate,
+    );
     apply_savings_report(&mut savings, &periods, savings_incentive_rate);
     Ok(MonthlyLedgerDto {
         loan_incentive_rate,
