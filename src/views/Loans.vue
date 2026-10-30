@@ -113,7 +113,8 @@ const monthRowsForPeriod = (selectedPeriod: string) =>
 
 // Jumlah pemasukan per triwulan and Insentif Pinjaman (kolom EJ–EW) come from
 // the backend, which also hides paid-off loans whose borrower has another loan
-// running and moves their income to that loan (rules 1.10).
+// running and moves their income to that loan (rules 1.10). Jumlah pemasukan
+// total, between them, adds up the four quarters: the base of the insentif.
 const quarterLabels = [
   "Jan s/d Mar",
   "Apr s/d Jun",
@@ -129,6 +130,7 @@ const incomeKeys = [
         `q${quarter + 1}Total`,
       ] as const,
   ),
+  "incomeTotal",
   "incentiveRaw",
   "incentive",
 ] as const;
@@ -160,6 +162,9 @@ const rowsForPeriod = (selectedPeriod: string) =>
         income[`q${quarter + 1}Provision` as IncomeKey] = provision;
         income[`q${quarter + 1}Total` as IncomeKey] = amount + provision;
       });
+      income.incomeTotal =
+        row.incomeInterest.reduce((sum, amount) => sum + amount, 0) +
+        row.incomeProvision.reduce((sum, amount) => sum + amount, 0);
       income.incentiveRaw = row.incentiveRaw;
       income.incentive = row.incentive;
       return {
@@ -578,6 +583,9 @@ const navigation = computed(() => ({
                   >
                     Jumlah pemasukan {{ label }}
                   </th>
+                  <th rowspan="3" class="sheet-total">
+                    Jumlah pemasukan<br />total
+                  </th>
                   <th colspan="2" rowspan="2" class="sheet-group">
                     Insentif Pinjaman
                   </th>
@@ -725,7 +733,12 @@ const navigation = computed(() => ({
                         {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
                       </td>
                       <td>{{ item.row.loan.recommender }}</td>
-                      <td v-for="key in incomeKeys" :key="key" class="num-cell">
+                      <td
+                        v-for="key in incomeKeys"
+                        :key="key"
+                        class="num-cell"
+                        :class="{ 'sheet-total': key === 'incomeTotal' }"
+                      >
                         {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
                       </td>
                     </template>
@@ -804,7 +817,12 @@ const navigation = computed(() => ({
                       }}
                     </td>
                     <td></td>
-                    <td v-for="key in incomeKeys" :key="key" class="num-cell">
+                    <td
+                      v-for="key in incomeKeys"
+                      :key="key"
+                      class="num-cell"
+                      :class="{ 'sheet-total': key === 'incomeTotal' }"
+                    >
                       {{
                         formatSheetNumber(
                           sectionTotals(table, item.section.group)[key],
@@ -904,7 +922,12 @@ const navigation = computed(() => ({
                     {{ formatSheetNumber(table.totals[key]) }}
                   </td>
                   <td></td>
-                  <td v-for="key in incomeKeys" :key="key" class="num-cell">
+                  <td
+                    v-for="key in incomeKeys"
+                    :key="key"
+                    class="num-cell"
+                    :class="{ 'sheet-total': key === 'incomeTotal' }"
+                  >
                     {{ formatSheetNumber(table.totals[key]) }}
                   </td>
                 </template>
