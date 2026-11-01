@@ -24,10 +24,12 @@ export default {
     cooperativeName: "Koperasi Pensiunan BRI Kuningan",
     cooperativeShortName: "Bina Sejahtera",
     nav: {
+      dashboard: "Dashboard",
       members: "Anggota",
       savings: "Simpanan",
       loans: "Pinjaman",
       cashLedger: "Buku kas",
+      balanceSheet: "Neraca",
       data: "Database",
     },
   },
