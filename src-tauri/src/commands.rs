@@ -12,8 +12,8 @@ use crate::{
     contracts::{
         AddMemberInput, AppSnapshot, CashBookDto, CashEntryInput, CompanyDto, CreateLoanInput,
         FinancialParametersDto, LoanPreview, MonthlyLedgerDto, PaymentInput, PreviewLoanInput,
-        ReverseTransactionInput, SavingsTransactionInput, SetIncentiveRatesInput,
-        TransactionGroupDto, UpdateMemberInput,
+        ReverseTransactionInput, SavingsTransactionInput, SetBalanceSheetItemsInput,
+        SetIncentiveRatesInput, TransactionGroupDto, UpdateMemberInput,
     },
     database,
     state::AppState,
@@ -139,6 +139,24 @@ pub(crate) async fn get_financial_parameters(
     state: State<'_, AppState>,
 ) -> Result<FinancialParametersDto, String> {
     application::get_financial_parameters(&company_id, &state.db).await
+}
+
+#[tauri::command]
+pub(crate) async fn get_balance_sheet_items(
+    company_id: String,
+    year: i32,
+    state: State<'_, AppState>,
+) -> Result<std::collections::BTreeMap<String, i64>, String> {
+    application::get_balance_sheet_items(&company_id, year, &state.db).await
+}
+
+#[tauri::command]
+pub(crate) async fn set_balance_sheet_items(
+    input: SetBalanceSheetItemsInput,
+    company_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    application::set_balance_sheet_items(input, &company_id, &state.db).await
 }
 
 #[tauri::command]

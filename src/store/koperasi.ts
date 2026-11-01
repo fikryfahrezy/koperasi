@@ -440,6 +440,8 @@ const command = {
   getTransactionGroup: "get_transaction_group",
   getFinancialParameters: "get_financial_parameters",
   setIncentiveRates: "set_incentive_rates",
+  getBalanceSheetItems: "get_balance_sheet_items",
+  setBalanceSheetItems: "set_balance_sheet_items",
   exportXlsx: "export_xlsx",
   databaseLocation: "database_location",
   exportDatabase: "export_database",
@@ -554,6 +556,19 @@ const backend = {
     savingsIncentiveRate?: number;
   }) =>
     invoke<void>(command.setIncentiveRates, {
+      input,
+      companyId: selectedCompanyId.value,
+    }),
+  getBalanceSheetItems: (year: number, companyId = selectedCompanyId.value) =>
+    invoke<Record<string, number>>(command.getBalanceSheetItems, {
+      companyId,
+      year,
+    }),
+  setBalanceSheetItems: (input: {
+    year: number;
+    items: Record<string, number>;
+  }) =>
+    invoke<void>(command.setBalanceSheetItems, {
       input,
       companyId: selectedCompanyId.value,
     }),
@@ -1145,12 +1160,12 @@ export function currentPeriod(today = new Date()) {
 /** Shared reports are cached separately for each company and reporting year.
  * The months run through the current one, even before its transactions are
  * recorded, so its installments count toward arrears. */
-export function useMonthlyLedger() {
+export function useMonthlyLedger(yearOffset = 0) {
   const through = currentPeriod();
   const query = useQuery(
     computed(() => {
       const companyId = selectedCompanyId.value;
-      const year = selectedYear.value;
+      const year = selectedYear.value + yearOffset;
       return {
         queryKey: queryKeys.monthlyLedger(companyId, year, through),
         queryFn: () => backend.getMonthlyLedger(year, companyId, through),
@@ -1171,11 +1186,52 @@ export function useMonthlyLedger() {
   };
 }
 
-export function useCashBook(channel: Channel) {
+/** Neraca lines typed for the selected book year (or the one `yearOffset`
+ * from it), by key. */
+export function useBalanceSheetItems(yearOffset = 0) {
   const query = useQuery(
     computed(() => {
       const companyId = selectedCompanyId.value;
-      const year = selectedYear.value;
+      const year = selectedYear.value + yearOffset;
+      return {
+        queryKey: queryKeys.balanceSheetItems(companyId, year),
+        queryFn: () => backend.getBalanceSheetItems(year, companyId),
+      };
+    }),
+  );
+  watch(query.error, (error) => {
+    if (error)
+      notify("Pos neraca gagal dimuat", errorMessage(error), "warning");
+  });
+  return {
+    balanceSheetItems: computed(() => query.data.value ?? {}),
+  };
+}
+
+/** Saves the typed Neraca lines of a book year. */
+async function setBalanceSheetItems(
+  year: number,
+  items: Record<string, number>,
+) {
+  const companyId = selectedCompanyId.value;
+  try {
+    await backend.setBalanceSheetItems({ year, items });
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.balanceSheetItems(companyId, year),
+    });
+    notify("Pos neraca disimpan", `Tahun buku ${year}.`);
+    return true;
+  } catch (error) {
+    notify("Pos neraca gagal disimpan", errorMessage(error), "warning");
+    return false;
+  }
+}
+
+export function useCashBook(channel: Channel, yearOffset = 0) {
+  const query = useQuery(
+    computed(() => {
+      const companyId = selectedCompanyId.value;
+      const year = selectedYear.value + yearOffset;
       return {
         queryKey: queryKeys.cashBook(companyId, year, channel),
         queryFn: () => backend.getCashBook(year, channel, companyId),
@@ -1333,6 +1389,7 @@ export const useKoperasiStore = () => ({
   addMember,
   updateMember,
   setIncentiveRate,
+  setBalanceSheetItems,
   memberNumberOwner,
   previewLoan,
   createLoan,

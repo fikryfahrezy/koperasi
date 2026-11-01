@@ -1,5 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 import NewTab from "../views/NewTab.vue";
+import Dashboard from "../views/Dashboard.vue";
+import BalanceSheet from "../views/BalanceSheet.vue";
 import Members from "../views/Members.vue";
 import Savings from "../views/Savings.vue";
 import Loans from "../views/Loans.vue";
@@ -13,6 +15,11 @@ export const router = createRouter({
       path: "/new-tab",
       component: NewTab,
       meta: { titleKey: "workspaceTabs.newTab" },
+    },
+    {
+      path: "/dashboard",
+      component: Dashboard,
+      meta: { titleKey: "sidebar.nav.dashboard" },
     },
     {
       path: "/members",
@@ -39,6 +46,11 @@ export const router = createRouter({
       path: "/cash-ledger",
       component: CashLedger,
       meta: { titleKey: "sidebar.nav.cashLedger", fitViewport: true },
+    },
+    {
+      path: "/balance-sheet",
+      component: BalanceSheet,
+      meta: { titleKey: "sidebar.nav.balanceSheet" },
     },
     {
       path: "/data",
