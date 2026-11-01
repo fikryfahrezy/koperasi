@@ -278,6 +278,14 @@ pub(crate) struct ReverseTransactionInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct SetBalanceSheetItemsInput {
+    pub(crate) year: i32,
+    /// Typed Neraca lines by key (see `BALANCE_SHEET_ITEMS`), in rupiah.
+    pub(crate) items: std::collections::BTreeMap<String, i64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct SetIncentiveRatesInput {
     pub(crate) year: i32,
     /// Fractions: 0.101 = 10,1%. A rate left out is not changed.
