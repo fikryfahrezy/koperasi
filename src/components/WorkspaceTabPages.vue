@@ -21,6 +21,8 @@ import {
   workspaceTabs,
 } from "../workspace-tabs";
 import NewTab from "../views/NewTab.vue";
+import Dashboard from "../views/Dashboard.vue";
+import BalanceSheet from "../views/BalanceSheet.vue";
 import Members from "../views/Members.vue";
 import Savings from "../views/Savings.vue";
 import Loans from "../views/Loans.vue";
@@ -49,10 +51,12 @@ provide(routerViewLocationKey, tabRoute);
 
 const pages = [
   { path: "/new-tab", component: NewTab },
+  { path: "/dashboard", component: Dashboard },
   { path: "/members", component: Members },
   { path: "/savings", component: Savings },
   { path: "/loans", component: Loans },
   { path: "/cash-ledger", component: CashLedger },
+  { path: "/balance-sheet", component: BalanceSheet },
 ];
 const warming = ref(true);
 const isDetail = computed(

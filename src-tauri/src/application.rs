@@ -1,5 +1,6 @@
 //! Framework-independent application-service facade.
 
+mod balance_sheet;
 mod export;
 mod ledger;
 mod ledger_report;
@@ -12,6 +13,7 @@ mod savings;
 mod transaction_groups;
 mod transactions;
 
+pub(crate) use balance_sheet::{get_balance_sheet_items, set_balance_sheet_items};
 pub(crate) use export::{export_workbook, ExportKind};
 pub(crate) use ledger::get_monthly_ledger;
 pub(crate) use loans::{create_loan, preview_loan};
