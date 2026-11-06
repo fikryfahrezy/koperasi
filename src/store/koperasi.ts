@@ -365,6 +365,8 @@ interface PaymentInput {
   interest: number;
   /** Anggota: principal and interest per loan, instead of the two above. */
   loans?: { loanId: string; principal: number; interest: number }[];
+  /** Simpanan pokok; Anggota only. */
+  pokok?: number;
   wajib: number;
   voluntary: number;
   /** Uraian typed by the user; empty uses the generated text. */
@@ -1024,6 +1026,7 @@ async function postPayment(input: PaymentInput, options: PostingOptions = {}) {
               (sum, line) => sum + line.principal + line.interest,
               0,
             ) +
+            (input.pokok ?? 0) +
             input.wajib +
             input.voluntary,
         ),

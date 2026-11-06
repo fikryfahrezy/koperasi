@@ -195,8 +195,8 @@ pub(crate) async fn post_savings_transaction(
     get_app_snapshot(company_id, pool).await
 }
 
-/// Monthly member payment: principal installment + interest and mandatory/voluntary savings
-/// in a single transaction.
+/// Monthly member payment: principal installment + interest and principal/mandatory/voluntary
+/// savings in a single transaction.
 pub(crate) async fn post_payment(
     input: PaymentInput,
     company_id: &str,
@@ -205,6 +205,7 @@ pub(crate) async fn post_payment(
     if [
         input.principal,
         input.interest,
+        input.pokok,
         input.wajib,
         input.voluntary,
     ]
@@ -287,6 +288,7 @@ pub(crate) async fn post_payment(
         );
     }
     for (kind, label, value) in [
+        (SavingsAccountType::Principal, "Simpanan pokok", input.pokok),
         (SavingsAccountType::Mandatory, "Simpanan wajib", input.wajib),
         (
             SavingsAccountType::Voluntary,

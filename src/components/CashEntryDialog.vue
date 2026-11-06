@@ -4,7 +4,6 @@ import {
   BanknoteArrowDown,
   BanknoteArrowUp,
   Calculator,
-  Coins,
   HandCoins,
   ReceiptText,
   TriangleAlert,
@@ -55,10 +54,11 @@ const {
   previewLoan,
 } = useKoperasiStore();
 
+// Setoran simpanan is part of Setoran anggota: a member without a running loan
+// deposits savings there too.
 const Category = {
   Payment: "payment",
   Loan: "loan",
-  SavingsDeposit: "savings-deposit",
   SavingsWithdrawal: "savings-withdrawal",
   CashIn: "cash-in",
   CashOut: "cash-out",
@@ -70,6 +70,9 @@ type Category = (typeof Category)[keyof typeof Category];
 const modalOpen = pageState.field("modalOpen", () => false);
 const submitting = ref(false);
 const category = pageState.field<Category>("category", () => Category.Payment);
+// A tab saved before the merge may still hold the old Setoran simpanan.
+if (!Object.values(Category).includes(category.value))
+  category.value = Category.Payment;
 const posting = pageState.field("posting", () => ({
   businessDate: todayIso(),
 }));
@@ -80,10 +83,11 @@ const paymentForm = pageState.field("paymentForm", () => ({
   borrower: "",
   // Principal and interest per running loan of the member or borrower.
   lines: {} as Record<string, { principal: number; interest: number }>,
+  pokok: 0,
   wajib: 0,
   voluntary: 0,
 }));
-// Pokok, Wajib, and Manasuka in one transaction, as one Buku Kas row.
+// Pengambilan: Pokok, Wajib, and Manasuka in one transaction, as one Buku Kas row.
 const savingsForm = pageState.field("savingsForm", () => ({
   memberId: "",
   principal: 0,
@@ -211,9 +215,6 @@ const isNonMemberPayment = computed(
 // Anggota picks the member and Non Anggota the borrower; every running loan
 // of theirs gets its own pokok and bunga, so one deposit can pay several
 // loans in one Buku Kas row, as in the sheet ("Setoran <nama>").
-const memberNumbers = computed(
-  () => new Map(members.map((member) => [member.id, member.memberNumber])),
-);
 const runningLoans = computed(() =>
   loans.filter(
     (loan) =>
@@ -247,19 +248,8 @@ const paymentBorrowerOptions = computed(() =>
     })
     .sort((a, b) => a.label.localeCompare(b.label, "id-ID")),
 );
-const paymentMemberOptions = computed(() =>
-  [...new Set(runningLoans.value.map((loan) => loan.memberId))]
-    .map((memberId) => ({
-      value: memberId,
-      label:
-        members.find((member) => member.id === memberId)?.name ??
-        runningLoans.value.find((loan) => loan.memberId === memberId)
-          ?.memberName ??
-        "",
-      code: memberNumbers.value.get(memberId) ?? "",
-    }))
-    .sort((a, b) => a.label.localeCompare(b.label, "id-ID")),
-);
+// Every member: one without a running loan deposits only savings.
+const paymentMemberOptions = memberOptions;
 watch(
   () => paymentForm.value.loanGroup,
   () => {
@@ -376,6 +366,30 @@ watch(
     paymentForm.value.lines = Object.fromEntries(installments);
   },
 );
+const paymentSavingsAmounts = computed(() =>
+  (
+    [
+      [SavingsAccountType.Principal, paymentForm.value.pokok],
+      [SavingsAccountType.Mandatory, paymentForm.value.wajib],
+      [SavingsAccountType.Voluntary, paymentForm.value.voluntary],
+    ] as const
+  )
+    .map(([accountType, amount]) => ({ accountType, amount: amount || 0 }))
+    .filter((item) => item.amount > 0),
+);
+const paymentSavingsTotal = computed(() =>
+  paymentSavingsAmounts.value.reduce((sum, item) => sum + item.amount, 0),
+);
+/** An Anggota setoran with no pokok or bunga for any loan: only savings. */
+const isSavingsOnlyPayment = computed(
+  () =>
+    !isNonMemberPayment.value &&
+    paymentLoans.value.every(
+      (loan) =>
+        !(paymentLine(loan.id).principal || 0) &&
+        !(paymentLine(loan.id).interest || 0),
+    ),
+);
 const paymentTotal = computed(
   () =>
     paymentLoans.value.reduce(
@@ -384,10 +398,7 @@ const paymentTotal = computed(
         (paymentLine(loan.id).principal || 0) +
         (paymentLine(loan.id).interest || 0),
       0,
-    ) +
-    (isNonMemberPayment.value
-      ? 0
-      : (paymentForm.value.wajib || 0) + (paymentForm.value.voluntary || 0)),
+    ) + (isNonMemberPayment.value ? 0 : paymentSavingsTotal.value),
 );
 
 const topUpLoans = computed(() =>
@@ -530,6 +541,7 @@ function openModal() {
     loanGroup: LoanGroup.Member,
     memberId: "",
     borrower: "",
+    pokok: 0,
     wajib: 0,
     voluntary: 0,
   });
@@ -559,11 +571,7 @@ function openModal() {
   Object.assign(typedDescription.value, { text: "", edited: false });
   modalOpen.value = true;
 }
-const isSavings = computed(
-  () =>
-    category.value === Category.SavingsDeposit ||
-    category.value === Category.SavingsWithdrawal,
-);
+const isSavings = computed(() => category.value === Category.SavingsWithdrawal);
 // Every amount starts empty: wajib is typed as paid, not prefilled.
 function setSavingsDefaults() {
   Object.assign(savingsForm.value, {
@@ -613,24 +621,30 @@ const savingsAccountWords = {
   [SavingsAccountType.Mandatory]: "Wajib",
   [SavingsAccountType.Voluntary]: "Manasuka",
 } satisfies Record<SavingsAccountType, string>;
+/** "Simpanan Wajib" or "Simpanan Pokok, Wajib & Manasuka", as the backend writes it. */
+function savingsAccountsText(amounts: { accountType: SavingsAccountType }[]) {
+  const words = amounts.map((item) => savingsAccountWords[item.accountType]);
+  if (!words.length) return "";
+  return words.length === 1
+    ? `Simpanan ${words[0]}`
+    : `Simpanan ${words.slice(0, -1).join(", ")} & ${words[words.length - 1]}`;
+}
 /** The Uraian the backend writes when none is typed; "" until it is known. */
 const generatedDescription = computed(() => {
   if (category.value === Category.Payment) {
+    if (isSavingsOnlyPayment.value) {
+      const name = memberName(paymentForm.value.memberId);
+      const accounts = savingsAccountsText(paymentSavingsAmounts.value);
+      return name && accounts ? `Setoran ${accounts} ${name}` : "";
+    }
     const loan = paymentLoans.value[0];
     if (!loan) return "";
     return `Setoran ${isNonMemberPayment.value ? loan.memberName : memberName(loan.memberId)}`;
   }
   if (isSavings.value) {
     const name = memberName(savingsForm.value.memberId);
-    const words = savingsAmounts.value.map(
-      (item) => savingsAccountWords[item.accountType],
-    );
-    if (!name || !words.length) return "";
-    const accounts =
-      words.length === 1
-        ? `Simpanan ${words[0]}`
-        : `Simpanan ${words.slice(0, -1).join(", ")} & ${words.at(-1)}`;
-    return `${category.value === Category.SavingsWithdrawal ? "Pengambilan" : "Setoran"} ${accounts} ${name}`;
+    const accounts = savingsAccountsText(savingsAmounts.value);
+    return name && accounts ? `Pengambilan ${accounts} ${name}` : "";
   }
   if (category.value === Category.Loan) {
     const name =
@@ -667,7 +681,6 @@ const submitLabel = computed(
       ({
         [Category.Payment]: `Catat setoran ${formatCurrency(paymentTotal.value)}`,
         [Category.Loan]: "Catat realisasi",
-        [Category.SavingsDeposit]: `Catat setoran ${formatCurrency(savingsTotal.value)}`,
         [Category.SavingsWithdrawal]: `Catat pengambilan ${formatCurrency(savingsTotal.value)}`,
         [Category.CashIn]: "Catat",
         [Category.CashOut]: "Catat",
@@ -681,7 +694,20 @@ async function submit() {
   submitting.value = true;
   try {
     let saved = false;
-    if (category.value === Category.Payment) {
+    if (category.value === Category.Payment && isSavingsOnlyPayment.value) {
+      // Savings only: posted as before as a Setoran simpanan.
+      if (!paymentForm.value.memberId || paymentTotal.value <= 0) return;
+      saved = await postSavingsTransaction(
+        {
+          memberId: paymentForm.value.memberId,
+          amounts: paymentSavingsAmounts.value,
+          movement: SavingsMovement.Deposit,
+          description: descriptionOverride.value,
+          reference: "",
+        },
+        options,
+      );
+    } else if (category.value === Category.Payment) {
       const loan = paymentLoans.value[0];
       if (!loan || paymentTotal.value <= 0) return;
       const nonMember = isNonMemberPayment.value;
@@ -695,6 +721,7 @@ async function submit() {
             principal: paymentLine(item.id).principal || 0,
             interest: paymentLine(item.id).interest || 0,
           })),
+          pokok: nonMember ? 0 : paymentForm.value.pokok || 0,
           wajib: nonMember ? 0 : paymentForm.value.wajib || 0,
           voluntary: nonMember ? 0 : paymentForm.value.voluntary || 0,
           description: descriptionOverride.value,
@@ -787,65 +814,70 @@ defineExpose({ open: openModal });
     <form class="form-stack" @submit.prevent="submit">
       <fieldset class="movement-field">
         <legend>Jenis transaksi</legend>
-        <div class="movement-options">
-          <label
-            class="movement-option"
-            :class="{ 'is-selected': category === Category.Payment }"
-          >
-            <input v-model="category" type="radio" :value="Category.Payment" />
-            <ReceiptText :size="18" />
-            <span>Setoran anggota</span>
-          </label>
-          <label
-            class="movement-option"
-            :class="{ 'is-selected': category === Category.Loan }"
-          >
-            <input v-model="category" type="radio" :value="Category.Loan" />
-            <HandCoins :size="18" />
-            <span>Realisasi pinjaman</span>
-          </label>
-          <label
-            class="movement-option"
-            :class="{ 'is-selected': category === Category.SavingsDeposit }"
-          >
-            <input
-              v-model="category"
-              type="radio"
-              :value="Category.SavingsDeposit"
-              @change="setSavingsDefaults"
-            />
-            <Coins :size="18" />
-            <span>Setoran simpanan</span>
-          </label>
-          <label
-            class="movement-option"
-            :class="{ 'is-selected': category === Category.SavingsWithdrawal }"
-          >
-            <input
-              v-model="category"
-              type="radio"
-              :value="Category.SavingsWithdrawal"
-              @change="setSavingsDefaults"
-            />
-            <WalletMinimal :size="18" />
-            <span>Pengambilan simpanan</span>
-          </label>
-          <label
-            class="movement-option"
-            :class="{ 'is-selected': category === Category.CashIn }"
-          >
-            <input v-model="category" type="radio" :value="Category.CashIn" />
-            <BanknoteArrowDown :size="18" />
-            <span>Kas masuk</span>
-          </label>
-          <label
-            class="movement-option"
-            :class="{ 'is-selected': category === Category.CashOut }"
-          >
-            <input v-model="category" type="radio" :value="Category.CashOut" />
-            <BanknoteArrowUp :size="18" />
-            <span>Kas keluar</span>
-          </label>
+        <div class="movement-group" role="group" aria-label="Anggota">
+          <p class="movement-group__label" aria-hidden="true">Anggota</p>
+          <div class="movement-options movement-options--three">
+            <label
+              class="movement-option"
+              :class="{ 'is-selected': category === Category.Payment }"
+            >
+              <input
+                v-model="category"
+                type="radio"
+                :value="Category.Payment"
+              />
+              <ReceiptText :size="18" />
+              <span>Setoran anggota</span>
+            </label>
+            <label
+              class="movement-option"
+              :class="{
+                'is-selected': category === Category.SavingsWithdrawal,
+              }"
+            >
+              <input
+                v-model="category"
+                type="radio"
+                :value="Category.SavingsWithdrawal"
+                @change="setSavingsDefaults"
+              />
+              <WalletMinimal :size="18" />
+              <span>Pengambilan simpanan</span>
+            </label>
+            <label
+              class="movement-option"
+              :class="{ 'is-selected': category === Category.Loan }"
+            >
+              <input v-model="category" type="radio" :value="Category.Loan" />
+              <HandCoins :size="18" />
+              <span>Realisasi pinjaman</span>
+            </label>
+          </div>
+        </div>
+        <div class="movement-group" role="group" aria-label="Kas lainnya">
+          <p class="movement-group__label" aria-hidden="true">Kas lainnya</p>
+          <div class="movement-options">
+            <label
+              class="movement-option"
+              :class="{ 'is-selected': category === Category.CashIn }"
+            >
+              <input v-model="category" type="radio" :value="Category.CashIn" />
+              <BanknoteArrowDown :size="18" />
+              <span>Kas masuk</span>
+            </label>
+            <label
+              class="movement-option"
+              :class="{ 'is-selected': category === Category.CashOut }"
+            >
+              <input
+                v-model="category"
+                type="radio"
+                :value="Category.CashOut"
+              />
+              <BanknoteArrowUp :size="18" />
+              <span>Kas keluar</span>
+            </label>
+          </div>
         </div>
       </fieldset>
 
@@ -880,11 +912,18 @@ defineExpose({ open: openModal });
             :options="paymentMemberOptions"
             aria-label="Anggota"
             placeholder="Cari nama atau ID anggota"
-            empty-text="Tidak ada anggota dengan pinjaman berjalan yang cocok."
             required
           />
         </label>
-        <div v-if="!isNonMemberPayment" class="field-row">
+        <div v-if="!isNonMemberPayment" class="field-row field-row--three">
+          <label class="field">
+            <span>Simpanan pokok</span>
+            <RupiahInput
+              v-model="paymentForm.pokok"
+              :min="0"
+              aria-label="Simpanan pokok"
+            />
+          </label>
           <label class="field">
             <span>Simpanan wajib</span>
             <RupiahInput
@@ -1406,10 +1445,24 @@ defineExpose({ open: openModal });
   font-size: 10.5px;
   font-weight: 700;
 }
+.movement-group + .movement-group {
+  margin-top: 12px;
+}
+.movement-group__label {
+  margin: 0 0 7px;
+  color: var(--soft);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
 .movement-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 9px;
+}
+.movement-options--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .movement-option {
   display: flex;
@@ -1487,7 +1540,8 @@ defineExpose({ open: openModal });
   .limit-alert dl {
     grid-template-columns: 1fr;
   }
-  .field-row {
+  .field-row,
+  .movement-options--three {
     grid-template-columns: 1fr;
   }
 }
