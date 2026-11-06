@@ -135,15 +135,19 @@ export async function cashBalance() {
   return text.includes("(") ? -amount : amount;
 }
 
+// Deposits go through Setoran anggota, withdrawals through Pengambilan simpanan.
 export async function postSavings(name, account, amount, withdrawal = false) {
-  const modal = await openEntry(
-    withdrawal ? "savings-withdrawal" : "savings-deposit",
-  );
+  const modal = await openEntry(withdrawal ? "savings-withdrawal" : "payment");
   await chooseBorrower(modal, name);
-  for (const field of ["Pokok", "Wajib", "Manasuka"])
+  for (const field of ["Pokok", "Wajib", "Manasuka"]) {
+    const label =
+      !withdrawal && field === "Manasuka"
+        ? "Manasuka"
+        : `Simpanan ${field.toLowerCase()}`;
     await modal
-      .$(`input[aria-label="Simpanan ${field.toLowerCase()}"]`)
+      .$(`input[aria-label="${label}"]`)
       .setValue(field === account ? String(amount) : "0");
+  }
   await submitEntry(modal);
 }
 

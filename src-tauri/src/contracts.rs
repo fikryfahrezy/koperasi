@@ -206,6 +206,9 @@ pub(crate) struct PaymentInput {
     /// one deposit (one Buku Kas row). Used instead of `principal`/`interest`.
     #[serde(default)]
     pub(crate) loans: Vec<LoanPaymentLine>,
+    /// Simpanan pokok, deposited with the member's other savings.
+    #[serde(default)]
+    pub(crate) pokok: i64,
     pub(crate) wajib: i64,
     pub(crate) voluntary: i64,
     /// Uraian typed by the user; empty uses "Setoran {name}".

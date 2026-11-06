@@ -82,12 +82,11 @@ describe("Loans and repayments", () => {
       $(".loan-details__head .member-detail__list-value strong"),
     ).toHaveText(/^Rp\s*0$/);
     await expect($(".loan-details__head .status-pill")).toHaveText("Lunas");
+    // A paid-off member can still deposit savings, without installment fields.
     const payment = await openEntry("payment");
-    await payment.$('input[role="combobox"]').click();
-    await payment.$('input[role="combobox"]').setValue(name);
-    await expect($(".combobox__empty")).toHaveText(
-      /Tidak ada anggota dengan pinjaman berjalan/,
-    );
+    await chooseBorrower(payment, name);
+    await expect(payment.$('input[aria-label="Simpanan pokok"]')).toExist();
+    await expect(payment.$(".payment-loans")).not.toExist();
     await clickWhenReady(payment.$("button=Batal"));
   });
 

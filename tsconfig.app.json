@@ -3,6 +3,9 @@
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "types": ["vite/client"],
+    /* The Windows 7 webview is Chrome 88 (see vite.config.ts): keep newer
+       built-ins such as Array.prototype.at out of the type checker. */
+    "lib": ["ES2021", "DOM", "DOM.Iterable"],
 
     /* Linting */
     "strict": true,

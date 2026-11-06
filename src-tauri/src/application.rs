@@ -82,6 +82,7 @@ mod tests {
             principal,
             interest: 20_000,
             loans: Vec::new(),
+            pokok: 0,
             wajib: 10_000,
             voluntary: 5_000,
             description: String::new(),
@@ -258,6 +259,35 @@ mod tests {
                 .transactions
                 .iter()
                 .any(|transaction| transaction.member_name == "Second Member"));
+        });
+    }
+
+    #[test]
+    fn member_payment_deposits_principal_savings() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+            let snapshot = add_member(member_input("Pokok Member"), "default", &pool)
+                .await
+                .unwrap();
+            let mut input = payment(0, "POKOK-TEST", Channel::Cash.as_str());
+            input.member_id = snapshot.members[0].id.clone();
+            input.interest = 0;
+            input.pokok = 20_000;
+            input.voluntary = 0;
+
+            let paid = post_payment(input, "default", &pool).await.unwrap();
+            assert_eq!(paid.members[0].principal_savings, 70_000);
+            assert_eq!(paid.totals.cash, 80_000);
+            let mut negative = payment(0, "", Channel::Cash.as_str());
+            negative.member_id = snapshot.members[0].id.clone();
+            negative.pokok = -1;
+            assert_eq!(
+                post_payment(negative, "default", &pool)
+                    .await
+                    .err()
+                    .unwrap(),
+                "Komponen pembayaran tidak boleh negatif."
+            );
         });
     }
 
