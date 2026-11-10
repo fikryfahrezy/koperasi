@@ -1,15 +1,24 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { PencilLine } from "lucide-vue-next";
-import BalanceSheetItemsDialog from "../components/BalanceSheetItemsDialog.vue";
+import { PencilLine, Plus, X } from "lucide-vue-next";
+import BalanceSheetListPanel from "../components/BalanceSheetListPanel.vue";
+import SheetAmountInput from "../components/SheetAmountInput.vue";
 import PageHeader from "../components/PageHeader.vue";
 import UiSelect from "../components/UiSelect.vue";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
-import { balanceSheetAt, sheetRows } from "../balance-sheet";
 import {
+  BalanceSheetItem,
+  type LineEdit,
+  LineEditKind,
+  balanceSheetAt,
+  sheetRows,
+} from "../balance-sheet";
+import {
+  type BalanceSheetDetail,
   Channel,
   formatPeriod,
   formatSheetNumber,
+  useBalanceSheetDetails,
   useBalanceSheetItems,
   useCashBook,
   useKoperasiStore,
@@ -17,7 +26,8 @@ import {
 } from "../store/koperasi";
 
 const pageState = useWorkspacePageState("/balance-sheet");
-const { loans, selectedYear, refresh } = useKoperasiStore();
+const { loans, selectedYear, refresh, setBalanceSheetItems } =
+  useKoperasiStore();
 const { monthlyLedger, monthlyLedgerLoading } = useMonthlyLedger();
 const { cashBook } = useCashBook(Channel.Cash);
 const { balanceSheetItems } = useBalanceSheetItems();
@@ -25,7 +35,138 @@ const { balanceSheetItems } = useBalanceSheetItems();
 const { monthlyLedger: previousLedger } = useMonthlyLedger(-1);
 const { cashBook: previousCashBook } = useCashBook(Channel.Cash, -1);
 const { balanceSheetItems: previousItems } = useBalanceSheetItems(-1);
-const itemsOpen = ref(false);
+const { balanceSheetDetails } = useBalanceSheetDetails();
+const { balanceSheetDetails: previousDetails } = useBalanceSheetDetails(-1);
+// Catatan "Piutang Lainnya (Bon Sementara) terdiri": the rincian per person.
+const otherLoansByName = computed(() => [
+  ...(balanceSheetDetails.value[BalanceSheetItem.OtherLoans] ?? [])
+    .reduce(
+      (totals, detail) =>
+        totals.set(detail.name, (totals.get(detail.name) ?? 0) + detail.amount),
+      new Map<string, number>(),
+    )
+    .entries(),
+]);
+// The Catatan list being edited (Piutang Lainnya), if any.
+const editing = ref<BalanceSheetItem | null>(null);
+// Typed cells belong to the book year of their column: 31 Desember of the
+// year before, then the year shown.
+const columnYears = computed(() => [
+  selectedYear.value - 1,
+  selectedYear.value,
+]);
+const columnDetails = computed(() => [
+  withDraftLists(selectedYear.value - 1, previousDetails.value),
+  withDraftLists(selectedYear.value, balanceSheetDetails.value),
+]);
+async function commitCell(edit: LineEdit, column: number, value: number) {
+  const year = columnYears.value[column];
+  if (edit.kind === LineEditKind.Item) {
+    draftItems.value = {
+      ...draftItems.value,
+      [year]: {
+        ...draftItems.value[year],
+        [edit.key]: value - (edit.offset ?? 0),
+      },
+    };
+    return;
+  }
+  const list = columnDetails.value[column][edit.key] ?? [];
+  // Typed as shown: a negative amount (e.g. Akum. Penyusutan) with "-".
+  const saved = list.some((detail) => detail.name === edit.name)
+    ? list.map((detail) =>
+        detail.name === edit.name ? { ...detail, amount: value } : detail,
+      )
+    : [...list, { name: edit.name, amount: value, loanDate: null, note: "" }];
+  saveList(year, edit.key, saved);
+}
+
+function saveList(
+  year: number,
+  key: BalanceSheetItem,
+  list: BalanceSheetDetail[],
+) {
+  draftLists.value = {
+    ...draftLists.value,
+    [year]: { ...draftLists.value[year], [key]: list },
+  };
+}
+
+const savingChanges = ref(false);
+async function saveChanges() {
+  savingChanges.value = true;
+  try {
+    const years = new Set(
+      [...Object.keys(draftItems.value), ...Object.keys(draftLists.value)].map(
+        Number,
+      ),
+    );
+    for (const year of years) {
+      const saved = await setBalanceSheetItems(
+        year,
+        draftItems.value[year] ?? {},
+        draftLists.value[year] ?? {},
+      );
+      if (!saved) return;
+      const { [year]: _items, ...items } = draftItems.value;
+      const { [year]: _lists, ...lists } = draftLists.value;
+      draftItems.value = items;
+      draftLists.value = lists;
+    }
+  } finally {
+    savingChanges.value = false;
+  }
+}
+function discardChanges() {
+  draftItems.value = {};
+  draftLists.value = {};
+}
+
+// A pos of a group's list in the Neraca: renamed in both years shown so
+// the row stays one row; added and removed in the year shown.
+function renamePos(key: BalanceSheetItem, from: string, to: string) {
+  const name = to.trim();
+  if (!name || name === from) return;
+  for (const [column, year] of columnYears.value.entries()) {
+    const list = columnDetails.value[column][key] ?? [];
+    if (!list.some((detail) => detail.name === from)) continue;
+    saveList(
+      year,
+      key,
+      list.map((detail) =>
+        detail.name === from ? { ...detail, name } : detail,
+      ),
+    );
+  }
+}
+function addPos(key: BalanceSheetItem) {
+  const list = columnDetails.value[1][key] ?? [];
+  const names = new Set(
+    columnDetails.value.flatMap((details) =>
+      (details[key] ?? []).map((detail) => detail.name),
+    ),
+  );
+  let name = "Pos baru";
+  for (let count = 2; names.has(name); count++) name = `Pos baru ${count}`;
+  saveList(selectedYear.value, key, [
+    ...list,
+    { name, amount: 0, loanDate: null, note: "" },
+  ]);
+}
+// Nothing is stored until Simpan, so removing needs no extra confirmation.
+function removePos(key: BalanceSheetItem, name: string) {
+  const list = columnDetails.value[1][key] ?? [];
+  saveList(
+    selectedYear.value,
+    key,
+    list.filter((detail) => detail.name !== name),
+  );
+}
+const sumOf = (entries: { amount: number }[] | [string, number][]) =>
+  entries.reduce(
+    (total, entry) => total + (Array.isArray(entry) ? entry[1] : entry.amount),
+    0,
+  );
 
 const periods = computed(() => [...monthlyLedger.value.periods].sort());
 // Empty means the last month of the year shown.
@@ -43,13 +184,34 @@ const periodOptions = computed(() =>
 );
 const previousPeriod = computed(() => `${selectedYear.value - 1}-12`);
 
+// Changes typed in the Neraca stay here, per book year, until Simpan; the
+// Neraca shows them already so the totals can be checked first.
+const draftItems = ref<Record<number, Record<string, number>>>({});
+const draftLists = ref<Record<number, Record<string, BalanceSheetDetail[]>>>(
+  {},
+);
+const hasChanges = computed(
+  () =>
+    Object.keys(draftItems.value).length > 0 ||
+    Object.keys(draftLists.value).length > 0,
+);
+const withDraftItems = (year: number, saved: Record<string, number>) => ({
+  ...saved,
+  ...draftItems.value[year],
+});
+const withDraftLists = (
+  year: number,
+  saved: Record<string, BalanceSheetDetail[]>,
+) => ({ ...saved, ...draftLists.value[year] });
+
 const current = computed(() =>
   balanceSheetAt(
     selectedPeriod.value,
     monthlyLedger.value,
     cashBook.value,
     loans,
-    balanceSheetItems.value,
+    withDraftItems(selectedYear.value, balanceSheetItems.value),
+    withDraftLists(selectedYear.value, balanceSheetDetails.value),
   ),
 );
 const previous = computed(() =>
@@ -58,14 +220,15 @@ const previous = computed(() =>
     previousLedger.value,
     previousCashBook.value,
     loans,
-    {
+    withDraftItems(selectedYear.value - 1, {
       ...previousItems.value,
       // Without a typed balance, this year's opening Kas Buku Tabungan is the
       // bank at 31 Desember.
-      BANK_BALANCE:
-        previousItems.value.BANK_BALANCE ||
+      [BalanceSheetItem.BankBalance]:
+        previousItems.value[BalanceSheetItem.BankBalance] ||
         (cashBook.value?.savingsBookOpeningBalance ?? 0),
-    },
+    }),
+    withDraftLists(selectedYear.value - 1, previousDetails.value),
   ),
 );
 const rows = computed(() => sheetRows([previous.value, current.value]));
@@ -113,13 +276,6 @@ const hasEstimate = computed(() =>
           aria-label="Bulan"
           variant="toolbar"
         />
-        <button
-          class="button button--secondary"
-          type="button"
-          @click="itemsOpen = true"
-        >
-          <PencilLine :size="16" /> Pos neraca {{ selectedYear }}
-        </button>
       </template>
     </PageHeader>
 
@@ -186,19 +342,70 @@ const hasEstimate = computed(() =>
                   :key="side"
                 >
                   <template v-if="cell.kind === 'heading'">
-                    <td class="balance-table__heading">{{ cell.label }}</td>
+                    <td class="balance-table__heading">
+                      {{ cell.label }}
+                      <!-- Each group takes pos added by hand. -->
+                      <button
+                        class="balance-notes__edit"
+                        type="button"
+                        :aria-label="`Tambah pos ${cell.label}`"
+                        @click="addPos(cell.listKey)"
+                      >
+                        <Plus :size="13" /> Pos
+                      </button>
+                    </td>
                     <td></td>
                     <td></td>
                   </template>
                   <template v-else-if="cell.kind === 'line'">
-                    <td>{{ cell.label }}</td>
+                    <td v-if="cell.listKey" class="balance-table__pos">
+                      <span>{{ cell.number }}.</span>
+                      <input
+                        class="balance-table__pos-name"
+                        :value="cell.name"
+                        aria-label="Nama pos"
+                        title="Klik untuk mengganti nama"
+                        @keydown.enter.prevent="
+                          ($event.target as HTMLInputElement).blur()
+                        "
+                        @keydown.esc.prevent="
+                          ($event.target as HTMLInputElement).value = cell.name;
+                          ($event.target as HTMLInputElement).blur();
+                        "
+                        @change="
+                          renamePos(
+                            cell.listKey,
+                            cell.name,
+                            ($event.target as HTMLInputElement).value,
+                          )
+                        "
+                      />
+                      <button
+                        class="balance-table__pos-remove"
+                        type="button"
+                        :aria-label="`Hapus pos ${cell.name}`"
+                        @click="removePos(cell.listKey, cell.name)"
+                      >
+                        <X :size="12" />
+                      </button>
+                    </td>
+                    <td v-else>{{ cell.label }}</td>
                     <td
                       v-for="(amount, column) in cell.amounts"
                       :key="column"
                       class="num-cell"
                     >
-                      {{ formatSheetNumber(amount)
-                      }}<sup v-if="cell.estimated[column]">*</sup>
+                      <SheetAmountInput
+                        v-if="cell.edits[column]"
+                        :value="amount"
+                        :label="`${cell.label} ${columnYears[column]}`"
+                        @commit="
+                          (value) =>
+                            commitCell(cell.edits[column]!, column, value)
+                        "
+                      />
+                      <template v-else>{{ formatSheetNumber(amount) }}</template
+                      ><sup v-if="cell.estimated[column]">*</sup>
                     </td>
                   </template>
                   <template v-else-if="cell.kind === 'total'">
@@ -232,9 +439,105 @@ const hasEstimate = computed(() =>
             </tbody>
           </table>
         </div>
+        <div v-if="hasChanges" class="balance-changes" role="status">
+          <span>Ada perubahan yang belum disimpan.</span>
+          <button
+            class="button"
+            type="button"
+            :disabled="savingChanges"
+            @click="discardChanges"
+          >
+            Batal
+          </button>
+          <button
+            class="button button--primary"
+            type="button"
+            :disabled="savingChanges"
+            @click="saveChanges"
+          >
+            {{ savingChanges ? "Menyimpan..." : "Simpan" }}
+          </button>
+        </div>
+        <p class="field-hint">
+          Angka bergaris bawah putus-putus bisa diklik lalu diubah langsung (Esc
+          untuk batal). Perubahan baru tersimpan setelah klik Simpan. Kolom 31
+          Desember menyimpan ke tahun buku {{ selectedYear - 1 }}, kolom bulan
+          ke tahun buku {{ selectedYear }}. Kas yang diubah disimpan sebagai
+          Penyesuaian kas.
+        </p>
+        <div class="balance-notes">
+          <strong>Catatan :</strong>
+          <table
+            v-if="current.nonMemberByRecommender.length"
+            class="balance-notes__table"
+          >
+            <caption>
+              Piutang Non Anggota (Rekomendasi)
+            </caption>
+            <tbody>
+              <tr
+                v-for="(entry, index) in current.nonMemberByRecommender"
+                :key="entry.recommender"
+              >
+                <td>
+                  {{ index + 1 }}.
+                  {{ entry.recommender || "Belum ada rekomendasi" }}
+                </td>
+                <td class="num-cell">{{ formatSheetNumber(entry.amount) }}</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr>
+                <td></td>
+                <td class="num-cell">
+                  {{ formatSheetNumber(sumOf(current.nonMemberByRecommender)) }}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+          <BalanceSheetListPanel
+            v-if="editing === BalanceSheetItem.OtherLoans"
+            :item-key="BalanceSheetItem.OtherLoans"
+            title="Piutang Lainnya"
+            @done="editing = null"
+          />
+          <table v-else class="balance-notes__table">
+            <caption>
+              Piutang Lainnya (Bon Sementara) terdiri :
+              <button
+                class="balance-notes__edit"
+                type="button"
+                @click="editing = BalanceSheetItem.OtherLoans"
+              >
+                <PencilLine :size="13" /> Ubah
+              </button>
+            </caption>
+            <tbody>
+              <tr
+                v-for="([name, amount], index) in otherLoansByName"
+                :key="name"
+              >
+                <td>{{ index + 1 }}. {{ name }}</td>
+                <td class="num-cell">{{ formatSheetNumber(amount) }}</td>
+              </tr>
+              <tr v-if="!otherLoansByName.length">
+                <td colspan="2" class="balance-notes__empty">Belum diisi</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr>
+                <td></td>
+                <td class="num-cell">
+                  {{ formatSheetNumber(sumOf(otherLoansByName)) }}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
         <p v-if="hasEstimate" class="field-hint">
           * Bank dihitung dari Kas Buku Tabungan dan belum tentu sama dengan
-          saldo bank. Isi saldo bank 31 Desember di Pos neraca.
+          saldo bank. Ketik saldo bank 31 Desember di selnya pada bulan
+          Desember.
         </p>
       </section>
 
@@ -276,8 +579,6 @@ const hasEstimate = computed(() =>
         </p>
       </section>
     </template>
-
-    <BalanceSheetItemsDialog v-model:open="itemsOpen" />
   </div>
 </template>
 
@@ -364,6 +665,103 @@ const hasEstimate = computed(() =>
 }
 .balance-table sup {
   color: var(--amber);
+}
+.balance-notes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 48px;
+  margin-top: 16px;
+  font-size: 12px;
+}
+.balance-notes > strong {
+  flex-basis: 100%;
+}
+.balance-notes__table {
+  width: min(420px, 100%);
+  border-collapse: collapse;
+}
+.balance-notes__table caption {
+  padding-bottom: 4px;
+  font-style: italic;
+  font-weight: 700;
+  text-align: left;
+}
+.balance-table__pos {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.balance-table__pos-name {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px dashed var(--line-strong);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.balance-table__pos-name:focus {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+  background: #fff;
+}
+.balance-table__pos-remove {
+  display: inline-grid;
+  place-items: center;
+  padding: 2px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+}
+.balance-table__pos-remove:hover {
+  color: var(--red, #b42318);
+}
+.balance-changes {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px solid #f0c36d;
+  border-radius: 6px;
+  background: #fff8e6;
+}
+.balance-changes span {
+  flex: 1;
+  font-weight: 600;
+}
+.balance-notes__edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+}
+.balance-notes__edit:hover {
+  border-color: var(--line-strong);
+  color: var(--green);
+}
+.balance-notes__empty {
+  color: var(--muted);
+  font-style: italic;
+}
+.balance-notes__table td {
+  padding: 3px 4px;
+}
+.balance-notes__table tfoot td {
+  border-top: 1px solid var(--line-strong);
+  font-weight: 800;
 }
 .balance-income {
   padding: 15px 17px;
