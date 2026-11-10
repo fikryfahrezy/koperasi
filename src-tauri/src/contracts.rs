@@ -287,6 +287,29 @@ pub(crate) struct SetBalanceSheetItemsInput {
     pub(crate) items: std::collections::BTreeMap<String, i64>,
 }
 
+/// One row of the rincian of a typed Neraca line (Piutang Lainnya: a Bon
+/// Sementara and the date it was borrowed).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BalanceSheetDetailDto {
+    pub(crate) name: String,
+    /// Rupiah; negative for a deduction such as "Bayar dari SHU".
+    pub(crate) amount: i64,
+    /// "YYYY-MM-DD"; none when the sheet gives no date.
+    pub(crate) loan_date: Option<String>,
+    #[serde(default)]
+    pub(crate) note: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SetBalanceSheetDetailsInput {
+    pub(crate) year: i32,
+    pub(crate) item_key: String,
+    /// Replaces the whole rincian of the line, in this order.
+    pub(crate) details: Vec<BalanceSheetDetailDto>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SetIncentiveRatesInput {
