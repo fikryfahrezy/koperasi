@@ -12,6 +12,13 @@ export async function clickWhenReady(element) {
   await element.click();
 }
 
+export async function selectWhenReady(select, text) {
+  // WebKit rejects choosing an option while its select sits below the
+  // dialog's scroll fold, so bring it into view first.
+  await select.scrollIntoView({ block: "center", inline: "center" });
+  await select.selectByVisibleText(text);
+}
+
 export async function clickSubmit(modal) {
   await clickWhenReady(modal.$('button[type="submit"]'));
 }
@@ -154,16 +161,17 @@ export async function postSavings(name, account, amount, withdrawal = false) {
 export async function createLoan(name, nonMember = false) {
   const modal = await openEntry("loan");
   if (nonMember) {
-    await modal
-      .$('select[aria-label="Kelompok pinjaman"]')
-      .selectByVisibleText("Non Anggota PP BRI");
+    await selectWhenReady(
+      modal.$('select[aria-label="Kelompok pinjaman"]'),
+      "Non Anggota PP BRI",
+    );
     await modal.$(".field input:not([aria-label])").setValue(name);
-    await modal
-      .$('select[aria-label="Jenis bunga"]')
-      .selectByVisibleText("Plat");
-    await modal
-      .$('select[aria-label="Jenis pinjaman"]')
-      .selectByVisibleText("Sementara");
+    await selectWhenReady(modal.$('select[aria-label="Jenis bunga"]'), "Plat");
+    // Jenis pinjaman sits at the top, which the scroll above may have hidden.
+    await selectWhenReady(
+      modal.$('select[aria-label="Jenis pinjaman"]'),
+      "Sementara",
+    );
   } else {
     await chooseBorrower(modal, name);
   }
