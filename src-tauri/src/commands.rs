@@ -10,10 +10,11 @@ use tauri_plugin_dialog::DialogExt;
 use crate::{
     application,
     contracts::{
-        AddMemberInput, AppSnapshot, CashBookDto, CashEntryInput, CompanyDto, CreateLoanInput,
-        FinancialParametersDto, LoanPreview, MonthlyLedgerDto, PaymentInput, PreviewLoanInput,
-        ReverseTransactionInput, SavingsTransactionInput, SetBalanceSheetItemsInput,
-        SetIncentiveRatesInput, TransactionGroupDto, UpdateMemberInput,
+        AddMemberInput, AppSnapshot, BalanceSheetDetailDto, CashBookDto, CashEntryInput,
+        CompanyDto, CreateLoanInput, FinancialParametersDto, LoanPreview, MonthlyLedgerDto,
+        PaymentInput, PreviewLoanInput, ReverseTransactionInput, SavingsTransactionInput,
+        SetBalanceSheetDetailsInput, SetBalanceSheetItemsInput, SetIncentiveRatesInput,
+        TransactionGroupDto, UpdateMemberInput,
     },
     database,
     state::AppState,
@@ -157,6 +158,24 @@ pub(crate) async fn set_balance_sheet_items(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     application::set_balance_sheet_items(input, &company_id, &state.db).await
+}
+
+#[tauri::command]
+pub(crate) async fn get_balance_sheet_details(
+    company_id: String,
+    year: i32,
+    state: State<'_, AppState>,
+) -> Result<std::collections::BTreeMap<String, Vec<BalanceSheetDetailDto>>, String> {
+    application::get_balance_sheet_details(&company_id, year, &state.db).await
+}
+
+#[tauri::command]
+pub(crate) async fn set_balance_sheet_details(
+    input: SetBalanceSheetDetailsInput,
+    company_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    application::set_balance_sheet_details(input, &company_id, &state.db).await
 }
 
 #[tauri::command]

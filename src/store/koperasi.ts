@@ -444,6 +444,8 @@ const command = {
   setIncentiveRates: "set_incentive_rates",
   getBalanceSheetItems: "get_balance_sheet_items",
   setBalanceSheetItems: "set_balance_sheet_items",
+  getBalanceSheetDetails: "get_balance_sheet_details",
+  setBalanceSheetDetails: "set_balance_sheet_details",
   exportXlsx: "export_xlsx",
   databaseLocation: "database_location",
   exportDatabase: "export_database",
@@ -571,6 +573,20 @@ const backend = {
     items: Record<string, number>;
   }) =>
     invoke<void>(command.setBalanceSheetItems, {
+      input,
+      companyId: selectedCompanyId.value,
+    }),
+  getBalanceSheetDetails: (year: number, companyId = selectedCompanyId.value) =>
+    invoke<Record<string, BalanceSheetDetail[]>>(
+      command.getBalanceSheetDetails,
+      { companyId, year },
+    ),
+  setBalanceSheetDetails: (input: {
+    year: number;
+    itemKey: string;
+    details: BalanceSheetDetail[];
+  }) =>
+    invoke<void>(command.setBalanceSheetDetails, {
       input,
       companyId: selectedCompanyId.value,
     }),
@@ -1211,17 +1227,58 @@ export function useBalanceSheetItems(yearOffset = 0) {
   };
 }
 
-/** Saves the typed Neraca lines of a book year. */
+/** One row of the rincian of a typed Neraca line (Piutang Lainnya: a Bon
+ * Sementara and the date it was borrowed). */
+export interface BalanceSheetDetail {
+  name: string;
+  /** Negative for a deduction, e.g. "Bayar dari SHU". */
+  amount: number;
+  /** "YYYY-MM-DD", or null when unknown. */
+  loanDate: string | null;
+  note: string;
+}
+
+/** Rincian of the typed Neraca lines of the selected book year, by key. */
+export function useBalanceSheetDetails(yearOffset = 0) {
+  const query = useQuery(
+    computed(() => {
+      const companyId = selectedCompanyId.value;
+      const year = selectedYear.value + yearOffset;
+      return {
+        queryKey: queryKeys.balanceSheetDetails(companyId, year),
+        queryFn: () => backend.getBalanceSheetDetails(year, companyId),
+      };
+    }),
+  );
+  watch(query.error, (error) => {
+    if (error)
+      notify("Rincian neraca gagal dimuat", errorMessage(error), "warning");
+  });
+  return {
+    balanceSheetDetails: computed(() => query.data.value ?? {}),
+  };
+}
+
+/** Saves the typed Neraca lines of a book year and the lists behind lines
+ * such as Piutang Lainnya and Aktiva Tetap (each line becomes its total). */
 async function setBalanceSheetItems(
   year: number,
   items: Record<string, number>,
+  details: Record<string, BalanceSheetDetail[]> = {},
 ) {
   const companyId = selectedCompanyId.value;
   try {
     await backend.setBalanceSheetItems({ year, items });
-    await queryClient.invalidateQueries({
-      queryKey: queryKeys.balanceSheetItems(companyId, year),
-    });
+    for (const [itemKey, rows] of Object.entries(details))
+      await backend.setBalanceSheetDetails({ year, itemKey, details: rows });
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.balanceSheetItems(companyId, year),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.balanceSheetDetails(companyId, year),
+      }),
+    ]);
     notify("Pos neraca disimpan", `Tahun buku ${year}.`);
     return true;
   } catch (error) {
