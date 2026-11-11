@@ -60,15 +60,22 @@ const loanSummary = computed(() => {
       rows.filter((row) => groupOf(row) === group),
       (row) => row.closingBalance,
     );
-  const arrearsPrincipal = sum(rows, (row) => row.arrearsPrincipal);
-  const arrearsInterest = sum(rows, (row) => row.arrearsInterest);
+  // Tunggakan is what is still owed: a loan paid ahead (lebih bayar, e.g. paid
+  // off early through a suplesi) shows a negative arrears in the sheet, which
+  // must not lower the total of the others.
+  const arrearsPrincipal = sum(rows, (row) =>
+    Math.max(row.arrearsPrincipal, 0),
+  );
+  const arrearsInterest = sum(rows, (row) => Math.max(row.arrearsInterest, 0));
   return {
     total: sum(rows, (row) => row.closingBalance),
     member: balance(LoanGroup.Member),
     nonMember: balance(LoanGroup.NonMember),
     active: rows.filter((row) => row.closingBalance > 0).length,
     inArrears: rows.filter(
-      (row) => row.arrearsPrincipal + row.arrearsInterest > 0,
+      (row) =>
+        Math.max(row.arrearsPrincipal, 0) + Math.max(row.arrearsInterest, 0) >
+        0,
     ).length,
     arrearsPrincipal,
     arrearsInterest,
