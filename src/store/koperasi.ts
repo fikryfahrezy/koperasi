@@ -58,6 +58,14 @@ export const Channel = {
 export type Channel = (typeof Channel)[keyof typeof Channel];
 
 // Spelled as in PINJAMAN BULANAN.
+// PG/TN column of PINJAMAN BULANAN; empty for most Non Anggota loans.
+export const Guarantee = {
+  Pg: "PG",
+  Tn: "TN",
+  None: "",
+} as const;
+export type Guarantee = (typeof Guarantee)[keyof typeof Guarantee];
+
 export const InterestType = {
   Declining: "Menurun",
   Flat: "Plat",
@@ -199,6 +207,9 @@ export interface LoanMonth {
   provision: number;
   scheduledPrincipal: number;
   scheduledInterest: number;
+  /** Tunggakan s/d bulan lalu, so Kewajiban s/d = this + the installment. */
+  priorArrearsPrincipal: number;
+  priorArrearsInterest: number;
   arrearsPrincipal: number;
   arrearsInterest: number;
   closingBalance: number;
@@ -335,6 +346,7 @@ interface CreateLoanInput {
   tenor: number;
   interestType: InterestType;
   loanType: LoanType;
+  guarantee: Guarantee;
   /** Typed Bunga per tahun in percent; null uses the Bunga parameter. */
   annualRate?: number | null;
   /** Typed provision fee; omitted uses the Provisi parameter rate. */

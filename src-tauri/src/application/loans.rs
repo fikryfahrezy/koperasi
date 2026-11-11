@@ -9,8 +9,8 @@ use crate::{
     contracts::{AppSnapshot, CreateLoanInput, LoanPreview, PreviewLoanInput},
     domain::{
         add_months, calculate_loan, calculate_rate_amount, timestamp_id, validate_business_date,
-        AuditAction, AuditEntityType, Channel, ComponentType, InterestType, LoanGroup, LoanType,
-        ParameterKey, TransactionDirection,
+        AuditAction, AuditEntityType, Channel, ComponentType, Guarantee, InterestType, LoanGroup,
+        LoanType, ParameterKey, TransactionDirection,
     },
 };
 
@@ -119,6 +119,10 @@ pub(crate) async fn create_loan(
     }
     let loan_group = LoanGroup::try_from(input.loan_group.as_str())?;
     let loan_type = LoanType::try_from(input.loan_type.as_str())?;
+    let guarantee = match input.guarantee.trim() {
+        "" => "",
+        value => Guarantee::try_from(value)?.as_str(),
+    };
     let interest_type = InterestType::try_from(input.interest_type.as_str())?;
     let disbursement = input.disbursement;
     let channel = Channel::try_from(disbursement.channel.as_str())?;
@@ -218,8 +222,8 @@ pub(crate) async fn create_loan(
     let due_date = add_months(&disbursement.business_date, input.tenor)?;
 
     let id = timestamp_id("LOAN");
-    sqlx::query("INSERT INTO loans (id, company_id, loan_group, member_id, member_name, plafond, rate_annual, tenor, interest_type, loan_type, realization_date, due_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .bind(&id).bind(company_id).bind(loan_group.as_str()).bind(member_id).bind(&borrower_name).bind(input.plafond).bind(rate_percent).bind(input.tenor).bind(interest_type.as_str()).bind(loan_type.as_str()).bind(&disbursement.business_date).bind(&due_date).execute(&mut *db).await.map_err(|error| error.to_string())?;
+    sqlx::query("INSERT INTO loans (id, company_id, loan_group, member_id, member_name, plafond, rate_annual, tenor, interest_type, loan_type, guarantee, realization_date, due_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(&id).bind(company_id).bind(loan_group.as_str()).bind(member_id).bind(&borrower_name).bind(input.plafond).bind(rate_percent).bind(input.tenor).bind(interest_type.as_str()).bind(loan_type.as_str()).bind(guarantee).bind(&disbursement.business_date).bind(&due_date).execute(&mut *db).await.map_err(|error| error.to_string())?;
 
     let disbursement_id = timestamp_id("DISB");
     append(

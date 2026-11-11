@@ -85,10 +85,7 @@ const monthRowsForPeriod = (selectedPeriod: string) =>
     .filter((row): row is typeof row & { loan: Loan } => Boolean(row.loan))
     .sort((a, b) => a.loanId.localeCompare(b.loanId))
     .map((row) => {
-      const priorArrearsPrincipal =
-        row.arrearsPrincipal - row.scheduledPrincipal + row.principalPaid;
-      const priorArrearsInterest =
-        row.arrearsInterest - row.scheduledInterest + row.interestPaid;
+      const { priorArrearsPrincipal, priorArrearsInterest } = row;
       const installment = fixedInstallment(row.loan);
       return {
         ...row,
