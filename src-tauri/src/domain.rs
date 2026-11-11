@@ -65,6 +65,12 @@ string_enum!(LoanType {
     Temporary => "Sementara",
 });
 
+// PG/TN column of PINJAMAN BULANAN (left empty for most Non Anggota loans).
+string_enum!(Guarantee {
+    Pg => "PG",
+    Tn => "TN",
+});
+
 // Spelled as in PINJAMAN BULANAN.
 string_enum!(InterestType {
     Declining => "Menurun",

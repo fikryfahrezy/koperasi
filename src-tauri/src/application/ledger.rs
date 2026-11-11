@@ -382,14 +382,21 @@ pub(crate) async fn get_monthly_ledger(
                 period,
                 opening,
             );
-            arrears_principal +=
-                month.opening_arrears_principal + scheduled_principal - month.principal_paid;
+            let prior_arrears_principal = arrears_principal + month.opening_arrears_principal;
+            arrears_principal = prior_arrears_principal + scheduled_principal - month.principal_paid;
             let prior_arrears_interest = arrears_interest + month.opening_arrears_interest as f64;
             let due_interest = prior_arrears_interest + scheduled_interest;
             arrears_interest = due_interest - month.interest_paid as f64;
             balance = opening + month.disbursed - month.principal_paid;
             // Arrears never exceed what is still owed, as in the sheet.
             arrears_principal = arrears_principal.min(balance.max(0));
+            if balance <= 0 {
+                // A paid-off loan (e.g. settled early by suplesi) owes nothing more:
+                // the installments it paid ahead are not a negative Tunggakan, and
+                // the sheet leaves its Tunggakan at 0. Unpaid interest still shows.
+                arrears_principal = 0;
+                arrears_interest = arrears_interest.max(0.0);
+            }
             if period.starts_with(&year_prefix) {
                 // Next month's installment, for "Kewajiban s/d bulan depan".
                 let (next_scheduled_principal, next_scheduled_interest) = next_period(period)
@@ -420,6 +427,8 @@ pub(crate) async fn get_monthly_ledger(
                     // each rounded up, as the page and the export add them.
                     scheduled_interest: round_up_amount(due_interest)
                         - round_up_amount(prior_arrears_interest),
+                    prior_arrears_principal,
+                    prior_arrears_interest: round_up_amount(prior_arrears_interest),
                     arrears_principal,
                     arrears_interest: round_up_amount(arrears_interest),
                     closing_balance: balance,
@@ -628,6 +637,55 @@ mod tests {
                 .unwrap();
             assert!(error.contains("ComponentType"));
             assert!(error.contains("UNKNOWN_COMPONENT"));
+        });
+    }
+
+    #[test]
+    fn paid_off_loan_has_no_negative_arrears() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+            sqlx::query("INSERT INTO loans (id, company_id, loan_group, member_name, plafond, rate_annual, tenor, interest_type, loan_type, realization_date, due_date) VALUES ('early', 'default', 'Anggota PP BRI', 'Peminjam A', 1000000, 24, 10, 'Menurun', 'Bulanan', '2026-01-01', '2026-11-01')")
+                .execute(&pool).await.unwrap();
+            for (id, date, components) in [
+                ("open", "2026-01-01", vec![(ComponentType::LoanDisbursement.as_str(), 1_000_000)]),
+                (
+                    "pay",
+                    "2026-02-01",
+                    vec![
+                        (ComponentType::LoanPrincipal.as_str(), 100_000),
+                        (ComponentType::LoanInterest.as_str(), 20_000),
+                    ],
+                ),
+                // The rest paid off early, ahead of the schedule.
+                ("payoff", "2026-02-19", vec![(ComponentType::LoanPrincipal.as_str(), 900_000)]),
+            ] {
+                let amount: i64 = components.iter().map(|(_, amount)| amount).sum();
+                sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, channel, description, reference, direction, amount, actor) VALUES (?, 'default', ?, ?, '00:00', 'Peminjam A', ?, 'Test', ?, ?, ?, 'Test')")
+                    .bind(id).bind(date).bind(date).bind(Channel::NonCash.as_str()).bind(id)
+                    .bind(TransactionDirection::In.as_str()).bind(amount)
+                    .execute(&pool).await.unwrap();
+                for (component_type, amount) in components {
+                    sqlx::query("INSERT INTO transaction_components (company_id, transaction_id, component_type, label, amount, loan_id) VALUES ('default', ?, ?, 'Test', ?, 'early')")
+                        .bind(id).bind(component_type).bind(amount)
+                        .execute(&pool).await.unwrap();
+                }
+            }
+
+            let ledger = get_monthly_ledger("default", 2026, Some("2026-02"), &pool)
+                .await
+                .unwrap();
+            let february = ledger
+                .loans
+                .iter()
+                .find(|row| row.period == "2026-02")
+                .unwrap();
+            assert_eq!(february.closing_balance, 0);
+            assert_eq!(february.arrears_principal, 0);
+            assert!(february.arrears_interest >= 0);
+            // Kewajiban s/d Februari is still one month's arrears plus this month's
+            // installment, not inflated by the early payoff.
+            assert_eq!(february.prior_arrears_principal, 0);
+            assert_eq!(february.scheduled_principal, 100_000);
         });
     }
 

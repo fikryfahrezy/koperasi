@@ -167,6 +167,9 @@ pub(crate) struct CreateLoanInput {
     pub(crate) tenor: i64,
     pub(crate) interest_type: String,
     pub(crate) loan_type: String,
+    /// PG/TN; empty leaves the column blank, as for most Non Anggota loans.
+    #[serde(default)]
+    pub(crate) guarantee: String,
     /// Bunga per tahun in percent typed by the user; empty uses the parameter.
     #[serde(default)]
     pub(crate) annual_rate: Option<f64>,
@@ -380,6 +383,10 @@ pub(crate) struct LoanMonthDto {
     pub(crate) provision: i64,
     pub(crate) scheduled_principal: i64,
     pub(crate) scheduled_interest: i64,
+    /// Tunggakan s/d bulan lalu (with any opening arrears), so that
+    /// Kewajiban s/d bulan ini = this + the scheduled installment.
+    pub(crate) prior_arrears_principal: i64,
+    pub(crate) prior_arrears_interest: i64,
     pub(crate) arrears_principal: i64,
     pub(crate) arrears_interest: i64,
     pub(crate) closing_balance: i64,
