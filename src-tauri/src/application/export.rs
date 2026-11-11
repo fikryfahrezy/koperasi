@@ -1079,12 +1079,9 @@ fn loan_row(
     }
 }
 
-/// Tunggakan s/d bulan lalu, as the page derives it.
+/// Tunggakan s/d bulan lalu, as the page shows it.
 fn prior_arrears(month: &LoanMonthDto) -> (i64, i64) {
-    (
-        month.arrears_principal - month.scheduled_principal + month.principal_paid,
-        month.arrears_interest - month.scheduled_interest + month.interest_paid,
-    )
+    (month.prior_arrears_principal, month.prior_arrears_interest)
 }
 
 fn loan_month(

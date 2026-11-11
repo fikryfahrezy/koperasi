@@ -22,6 +22,7 @@ import {
   formatCurrency,
   formatLoanLabel,
   formatPeriod,
+  Guarantee,
   InterestType,
   LoanGroup,
   LoanType,
@@ -102,6 +103,7 @@ const loanForm = pageState.field("loanForm", () => ({
   tenor: null as number | null,
   interestType: InterestType.Declining as InterestType,
   loanType: LoanType.Monthly as LoanType,
+  guarantee: Guarantee.Pg as Guarantee,
   // Bunga per tahun (%); null follows the Bunga parameter until typed.
   annualRate: null as number | null,
 }));
@@ -146,6 +148,11 @@ const interestTypeOptions = [
 const loanGroupOptions = [
   { value: LoanGroup.Member, label: "Anggota PP BRI" },
   { value: LoanGroup.NonMember, label: "Non Anggota PP BRI" },
+];
+const guaranteeOptions = [
+  { value: Guarantee.Pg, label: "PG" },
+  { value: Guarantee.Tn, label: "TN" },
+  { value: Guarantee.None, label: "Kosong" },
 ];
 const loanTypeOptions = [
   { value: LoanType.Monthly, label: "Bulanan" },
@@ -559,6 +566,7 @@ function openModal() {
     tenor: null,
     interestType: InterestType.Declining,
     loanType: LoanType.Monthly,
+    guarantee: Guarantee.Pg,
     annualRate: null,
   });
   Object.assign(loanProvision.value, { amount: 0, edited: false });
@@ -1050,7 +1058,7 @@ defineExpose({ open: openModal });
       </template>
 
       <template v-else-if="category === Category.Loan">
-        <div class="field-row">
+        <div class="field-row field-row--three">
           <label class="field">
             <span>Kelompok</span>
             <UiSelect
@@ -1065,6 +1073,14 @@ defineExpose({ open: openModal });
               v-model="loanForm.loanType"
               :options="loanTypeOptions"
               aria-label="Jenis pinjaman"
+            />
+          </label>
+          <label class="field">
+            <span>PG/TN</span>
+            <UiSelect
+              v-model="loanForm.guarantee"
+              :options="guaranteeOptions"
+              aria-label="PG/TN"
             />
           </label>
         </div>
