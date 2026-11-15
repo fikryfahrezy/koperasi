@@ -64,24 +64,31 @@ impl Expr {
     pub(crate) fn cell(row: u32, col: u32) -> Self {
         Self::Cell(row, col)
     }
+
     pub(crate) fn num(value: f64) -> Self {
         Self::Num(value)
     }
+
     pub(crate) fn add(self, other: Expr) -> Self {
         Self::Add(Box::new(self), Box::new(other))
     }
+
     pub(crate) fn sub(self, other: Expr) -> Self {
         Self::Sub(Box::new(self), Box::new(other))
     }
+
     pub(crate) fn mul(self, other: Expr) -> Self {
         Self::Mul(Box::new(self), Box::new(other))
     }
+
     pub(crate) fn div(self, other: Expr) -> Self {
         Self::Div(Box::new(self), Box::new(other))
     }
+
     pub(crate) fn round_up(self, digits: i32) -> Self {
         Self::RoundUp(Box::new(self), digits)
     }
+
     /// `a+b+c...` of the given terms; 0 for none.
     pub(crate) fn sum_of(terms: impl IntoIterator<Item = Expr>) -> Self {
         terms
@@ -138,10 +145,12 @@ fn format_number(value: f64) -> String {
 pub(crate) fn column_name(col: u32) -> String {
     let mut name = Vec::new();
     let mut n = col;
+
     while n > 0 {
         name.push(b'A' + ((n - 1) % 26) as u8);
         n = (n - 1) / 26;
     }
+
     name.reverse();
     String::from_utf8(name).unwrap_or_default()
 }
@@ -161,15 +170,19 @@ fn round_up_digits(value: f64, digits: i32) -> f64 {
 /// Excel's serial day number of a `YYYY-MM-DD` date (1 = 1900-01-01).
 pub(crate) fn date_serial(iso: &str) -> Option<f64> {
     let bytes = iso.as_bytes();
+
     if iso.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
         return None;
     }
+
     let year: i64 = iso[0..4].parse().ok()?;
     let month: i64 = iso[5..7].parse().ok()?;
     let day: i64 = iso[8..10].parse().ok()?;
+
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
+
     // Days from 1970-01-01 (Howard Hinnant's days_from_civil).
     let y = if month <= 2 { year - 1 } else { year };
     let era = y.div_euclid(400);
@@ -260,6 +273,7 @@ impl Sheet {
         let value = self.eval(expr);
         // Excel shows 160146.49999999994 as 160.147 (15 significant digits).
         let shown = (value + value.signum() * 1e-6).round();
+
         if (shown - expected as f64).abs() < 0.5 {
             self.formula(row, col, expr, style);
             true
@@ -282,6 +296,7 @@ impl Sheet {
                 self.style(row, col, Style::Header);
             }
         }
+
         self.text(first.0, first.1, label, Style::Header);
         self.merge(first, last);
     }
@@ -311,6 +326,7 @@ impl Sheet {
             Expr::Mul(a, b) => self.eval(a) * self.eval(b),
             Expr::Div(a, b) => {
                 let divisor = self.eval(b);
+
                 if divisor == 0.0 {
                     f64::NAN
                 } else {
@@ -319,11 +335,13 @@ impl Sheet {
             }
             Expr::Sum(first, last) => {
                 let mut total = 0.0;
+
                 for row in first.0..=last.0 {
                     for col in first.1..=last.1 {
                         total += self.value(row, col);
                     }
                 }
+
                 total
             }
             Expr::RoundUp(a, digits) => round_up_digits(self.eval(a), *digits),
@@ -340,49 +358,65 @@ impl Sheet {
             r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" "#,
             r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#
         ));
+
         xml.push_str(r#"<sheetViews><sheetView workbookViewId="0">"#);
+
         if let Some((row, col)) = self.freeze {
             let (x, y) = (col - 1, row - 1);
+
             let pane = match (x > 0, y > 0) {
                 (true, true) => "bottomRight",
                 (true, false) => "topRight",
                 _ => "bottomLeft",
             };
+
             xml.push_str("<pane");
+
             if x > 0 {
                 xml.push_str(&format!(r#" xSplit="{x}""#));
             }
+
             if y > 0 {
                 xml.push_str(&format!(r#" ySplit="{y}""#));
             }
+
             xml.push_str(&format!(
                 r#" topLeftCell="{}" activePane="{pane}" state="frozen"/><selection pane="{pane}"/>"#,
                 cell_ref(row, col)
             ));
         }
+
         xml.push_str("</sheetView></sheetViews>");
         xml.push_str(r#"<sheetFormatPr defaultRowHeight="15"/>"#);
+
         if !self.widths.is_empty() {
             xml.push_str("<cols>");
+
             for (col, width) in &self.widths {
                 xml.push_str(&format!(
                     r#"<col min="{col}" max="{col}" width="{width}" customWidth="1"/>"#
                 ));
             }
+
             xml.push_str("</cols>");
         }
+
         xml.push_str("<sheetData>");
         let mut current_row = 0;
+
         for (&(row, col), cell) in &self.cells {
             if row != current_row {
                 if current_row != 0 {
                     xml.push_str("</row>");
                 }
+
                 xml.push_str(&format!(r#"<row r="{row}">"#));
                 current_row = row;
             }
+
             let reference = cell_ref(row, col);
             let style = cell.style as u8;
+
             match &cell.value {
                 Value::Number(value) => xml.push_str(&format!(
                     r#"<c r="{reference}" s="{style}"><v>{}</v></c>"#,
@@ -401,6 +435,7 @@ impl Sheet {
                     } else {
                         String::new()
                     };
+
                     xml.push_str(&format!(
                         r#"<c r="{reference}" s="{style}"><f>{}</f>{cached}</c>"#,
                         escape(formula)
@@ -408,12 +443,16 @@ impl Sheet {
                 }
             }
         }
+
         if current_row != 0 {
             xml.push_str("</row>");
         }
+
         xml.push_str("</sheetData>");
+
         if !self.merges.is_empty() {
             xml.push_str(&format!(r#"<mergeCells count="{}">"#, self.merges.len()));
+
             for (first, last) in &self.merges {
                 xml.push_str(&format!(
                     r#"<mergeCell ref="{}:{}"/>"#,
@@ -421,11 +460,14 @@ impl Sheet {
                     cell_ref(last.0, last.1)
                 ));
             }
+
             xml.push_str("</mergeCells>");
         }
+
         xml.push_str(
             r#"<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>"#,
         );
+
         xml.push_str("</worksheet>");
         xml
     }
@@ -442,6 +484,7 @@ impl Sheet {
             ),
             escape(&self.name)
         );
+
         let files: [(&str, &str); 6] = [
             ("[Content_Types].xml", CONTENT_TYPES_XML),
             ("_rels/.rels", ROOT_RELS_XML),
@@ -450,14 +493,18 @@ impl Sheet {
             ("xl/styles.xml", STYLES_XML),
             ("xl/worksheets/sheet1.xml", &self.xml()),
         ];
+
         let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
         let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+
         for (name, content) in files {
             zip.start_file(name, options)
                 .map_err(|error| error.to_string())?;
+
             zip.write_all(content.as_bytes())
                 .map_err(|error| error.to_string())?;
         }
+
         zip.finish()
             .map(Cursor::into_inner)
             .map_err(|error| error.to_string())
@@ -466,6 +513,7 @@ impl Sheet {
 
 fn escape(text: &str) -> String {
     let mut escaped = String::with_capacity(text.len());
+
     for ch in text.chars() {
         match ch {
             '&' => escaped.push_str("&amp;"),
@@ -477,6 +525,7 @@ fn escape(text: &str) -> String {
             ch => escaped.push(ch),
         }
     }
+
     escaped
 }
 

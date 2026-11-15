@@ -6,7 +6,9 @@ use super::posting::{
     append, audit, ensure_reference_unused, loan_balance, savings_balance, Component, Entry,
     APP_ACTOR,
 };
+
 use super::read_model::get_app_snapshot;
+
 use crate::{
     contracts::{AppSnapshot, PaymentInput, SavingsAmountInput, SavingsTransactionInput},
     domain::{
@@ -20,13 +22,17 @@ pub(crate) async fn member_name(
     company_id: &str,
     member_id: &str,
 ) -> Result<String, String> {
-    sqlx::query_scalar("SELECT name FROM members WHERE company_id = ? AND id = ?")
-        .bind(company_id)
-        .bind(member_id)
-        .fetch_optional(&mut *db)
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "Anggota tidak ditemukan.".to_string())
+    sqlx::query_scalar(
+        "SELECT name
+         FROM members
+         WHERE company_id = ? AND id = ?",
+    )
+    .bind(company_id)
+    .bind(member_id)
+    .fetch_optional(&mut *db)
+    .await
+    .map_err(|error| error.to_string())?
+    .ok_or_else(|| "Anggota tidak ditemukan.".to_string())
 }
 
 pub(crate) async fn savings_account_id(
@@ -36,7 +42,9 @@ pub(crate) async fn savings_account_id(
     account_type: SavingsAccountType,
 ) -> Result<String, String> {
     sqlx::query_scalar(
-        "SELECT id FROM savings_accounts WHERE company_id = ? AND member_id = ? AND account_type = ?",
+        "SELECT id
+         FROM savings_accounts
+         WHERE company_id = ? AND member_id = ? AND account_type = ?",
     )
     .bind(company_id)
     .bind(member_id)
@@ -70,28 +78,36 @@ pub(crate) async fn post_savings_transaction(
             .map(|item| (item.account_type.as_str(), item.amount))
             .collect()
     };
+
     let mut amounts: Vec<(SavingsAccountType, i64)> = Vec::new();
+
     for (account_type, amount) in requested {
         let account_type = SavingsAccountType::try_from(account_type)?;
+
         if amount < 0 {
             return Err("Nominal transaksi tidak boleh negatif.".into());
         }
+
         if amounts.iter().any(|(other, _)| *other == account_type) {
             return Err("Jenis simpanan yang sama tercantum dua kali.".into());
         }
+
         if amount > 0 {
             amounts.push((account_type, amount));
         }
     }
+
     if amounts.is_empty() {
         return Err("Nominal transaksi harus lebih dari nol.".into());
     }
+
     // Pokok, Wajib, Manasuka: the order of the SIMPANAN columns.
     let order = |account_type: &SavingsAccountType| match account_type {
         SavingsAccountType::Principal => 0,
         SavingsAccountType::Mandatory => 1,
         SavingsAccountType::Voluntary => 2,
     };
+
     amounts.sort_by_key(|(account_type, _)| order(account_type));
     let movement = SavingsMovement::try_from(input.movement.as_str())?;
     let channel = Channel::try_from(input.channel.as_str())?;
@@ -99,11 +115,13 @@ pub(crate) async fn post_savings_transaction(
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
     let member_name = member_name(&mut db, company_id, &input.member_id).await?;
     let is_deposit = movement == SavingsMovement::Deposit;
+
     let (component_type, direction) = if is_deposit {
         (ComponentType::SavingsDeposit, TransactionDirection::In)
     } else {
         (ComponentType::SavingsWithdrawal, TransactionDirection::Out)
     };
+
     // Descriptions follow the daily cash ledger, e.g. "Pengambilan Manasuka <nama>"
     // or "Setoran Wajib & Manasuka <nama>".
     let account_label = |account_type: &SavingsAccountType| match account_type {
@@ -111,10 +129,13 @@ pub(crate) async fn post_savings_transaction(
         SavingsAccountType::Mandatory => "Simpanan Wajib",
         SavingsAccountType::Voluntary => "Manasuka",
     };
+
     let mut components = Vec::new();
+
     for (account_type, amount) in &amounts {
         let account_id =
             savings_account_id(&mut db, company_id, &input.member_id, *account_type).await?;
+
         if !is_deposit && savings_balance(&mut db, company_id, &account_id).await? < *amount {
             return Err(if amounts.len() == 1 {
                 "Saldo simpanan tidak mencukupi.".into()
@@ -125,11 +146,13 @@ pub(crate) async fn post_savings_transaction(
                 )
             });
         }
+
         components.push(
             Component::new(component_type, account_label(account_type), *amount)
                 .for_savings(&account_id),
         );
     }
+
     let accounts = if let [(account_type, _)] = amounts.as_slice() {
         account_label(account_type).to_string()
     } else {
@@ -141,9 +164,11 @@ pub(crate) async fn post_savings_transaction(
                 SavingsAccountType::Voluntary => "Manasuka",
             })
             .collect();
+
         let (last, rest) = names.split_last().expect("at least two savings types");
         format!("Simpanan {} & {last}", rest.join(", "))
     };
+
     let description = trimmed_or(
         &input.description,
         if is_deposit {
@@ -156,6 +181,7 @@ pub(crate) async fn post_savings_transaction(
     let id = timestamp_id(if is_deposit { "SAV-IN" } else { "SAV-OUT" });
     let reference = trimmed_or(&input.reference, format!("KBS/SAV/{id}"));
     ensure_reference_unused(&mut db, company_id, &reference).await?;
+
     let amount = append(
         &mut db,
         company_id,
@@ -176,6 +202,7 @@ pub(crate) async fn post_savings_transaction(
         },
     )
     .await?;
+
     audit(
         &mut db,
         company_id,
@@ -191,6 +218,7 @@ pub(crate) async fn post_savings_transaction(
         }),
     )
     .await?;
+
     db.commit().await.map_err(|error| error.to_string())?;
     get_app_snapshot(company_id, pool).await
 }
@@ -206,6 +234,7 @@ pub(crate) async fn post_savings_withdrawal(
         movement: SavingsMovement::Withdrawal.as_str().into(),
         ..input
     };
+
     post_savings_transaction(input, company_id, pool).await
 }
 
@@ -230,14 +259,17 @@ pub(crate) async fn post_payment(
     {
         return Err("Komponen pembayaran tidak boleh negatif.".into());
     }
+
     let channel = Channel::try_from(input.channel.as_str())?;
     validate_business_date(&input.business_date)?;
     // A loan without a member is a Non Anggota installment; with a member, the
     // principal and interest go to that loan and the savings to the member.
     let loan_id = input.loan_id.trim();
+
     if (!loan_id.is_empty() || !input.loans.is_empty()) && input.member_id.trim().is_empty() {
         return post_loan_payment(input, channel, company_id, pool).await;
     }
+
     let pays_loan = !loan_id.is_empty()
         || input
             .loans
@@ -245,6 +277,7 @@ pub(crate) async fn post_payment(
             .any(|line| line.principal != 0 || line.interest != 0)
         || input.principal != 0
         || input.interest != 0;
+
     if !pays_loan {
         let amounts = [
             (SavingsAccountType::Principal, input.pokok),
@@ -258,6 +291,7 @@ pub(crate) async fn post_payment(
             amount,
         })
         .collect();
+
         let deposit = SavingsTransactionInput {
             member_id: input.member_id,
             account_type: String::new(),
@@ -271,8 +305,10 @@ pub(crate) async fn post_payment(
             display_date: input.display_date,
             display_time: input.display_time,
         };
+
         return post_savings_transaction(deposit, company_id, pool).await;
     }
+
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
     let member_name = member_name(&mut db, company_id, &input.member_id).await?;
     let id = timestamp_id("TRX");
@@ -280,6 +316,7 @@ pub(crate) async fn post_payment(
     ensure_reference_unused(&mut db, company_id, &reference).await?;
 
     let mut components = Vec::new();
+
     if !input.loans.is_empty() {
         components = loan_lines(
             &input,
@@ -289,46 +326,60 @@ pub(crate) async fn post_payment(
         )
         .await?;
     }
+
     // Principal is allocated to the chosen loan, or else to the oldest
     // outstanding loan first.
     let mut remaining_principal = input.principal;
     let mut first_loan: Option<String> = None;
+
     let loan_ids: Vec<String> = if input.principal == 0 && input.interest == 0 {
         Vec::new()
     } else {
         sqlx::query(
-        "SELECT l.id FROM loans l JOIN loan_balances b ON b.company_id = l.company_id AND b.loan_id = l.id WHERE l.company_id = ? AND l.member_id = ? AND b.balance > 0 AND (? = '' OR l.id = ?) ORDER BY l.realization_date, l.id",
-    )
-    .bind(company_id)
-    .bind(&input.member_id)
-    .bind(loan_id)
-    .bind(loan_id)
-    .fetch_all(&mut *db)
-    .await
-    .map_err(|error| error.to_string())?
-    .into_iter()
-    .map(|row| row.try_get("id").map_err(|error| error.to_string()))
-    .collect::<Result<_, String>>()?
+            "SELECT l.id
+             FROM loans l
+             JOIN loan_balances b ON b.company_id = l.company_id AND b.loan_id = l.id
+             WHERE l.company_id = ? AND l.member_id = ? AND b.balance > 0 AND (? = '' OR l.id = ?)
+             ORDER BY l.realization_date, l.id",
+        )
+        .bind(company_id)
+        .bind(&input.member_id)
+        .bind(loan_id)
+        .bind(loan_id)
+        .fetch_all(&mut *db)
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|row| row.try_get("id").map_err(|error| error.to_string()))
+        .collect::<Result<_, String>>()?
     };
+
     for loan_id in loan_ids {
         if first_loan.is_none() {
             first_loan = Some(loan_id.clone());
         }
+
         if remaining_principal == 0 {
             break;
         }
+
         let allocated = remaining_principal.min(loan_balance(&mut db, company_id, &loan_id).await?);
+
         components.push(
             Component::new(ComponentType::LoanPrincipal, "Pokok pinjaman", allocated)
                 .for_loan(&loan_id),
         );
+
         remaining_principal -= allocated;
     }
+
     if remaining_principal > 0 {
         return Err("Pembayaran pokok melebihi saldo pinjaman berjalan.".into());
     }
+
     if input.interest > 0 {
         let loan_id = first_loan.ok_or("Anggota tidak memiliki pinjaman berjalan untuk bunga.")?;
+
         components.push(
             Component::new(
                 ComponentType::LoanInterest,
@@ -338,6 +389,7 @@ pub(crate) async fn post_payment(
             .for_loan(loan_id),
         );
     }
+
     for (kind, label, value) in [
         (SavingsAccountType::Principal, "Simpanan pokok", input.pokok),
         (SavingsAccountType::Mandatory, "Simpanan wajib", input.wajib),
@@ -350,6 +402,7 @@ pub(crate) async fn post_payment(
         if value > 0 {
             let account_id =
                 savings_account_id(&mut db, company_id, &input.member_id, kind).await?;
+
             components.push(
                 Component::new(ComponentType::SavingsDeposit, label, value).for_savings(account_id),
             );
@@ -376,6 +429,7 @@ pub(crate) async fn post_payment(
         },
     )
     .await?;
+
     audit(
         &mut db,
         company_id,
@@ -385,6 +439,7 @@ pub(crate) async fn post_payment(
         serde_json::json!({"amount": amount, "channel": channel.as_str(), "reference": reference}),
     )
     .await?;
+
     db.commit().await.map_err(|error| error.to_string())?;
     get_app_snapshot(company_id, pool).await
 }
@@ -408,29 +463,44 @@ async fn loan_lines(
     if input.principal != 0 || input.interest != 0 || !input.loan_id.trim().is_empty() {
         return Err("Isi pokok dan bunga per pinjaman saja.".into());
     }
+
     let mut components = Vec::new();
     let mut seen = Vec::new();
+
     for line in &input.loans {
         let loan_id = line.loan_id.trim();
+
         if line.principal < 0 || line.interest < 0 {
             return Err("Komponen pembayaran tidak boleh negatif.".into());
         }
+
         if seen.contains(&loan_id) {
             return Err("Pinjaman yang sama tercantum dua kali.".into());
         }
+
         seen.push(loan_id);
+
         if line.principal == 0 && line.interest == 0 {
             continue;
         }
+
         let belongs: Option<String> = match owner {
             LoanOwner::Member(member_id) => sqlx::query_scalar(
-                "SELECT id FROM loans WHERE company_id = ? AND id = ? AND member_id = ?",
+                "SELECT id
+                 FROM loans
+                 WHERE company_id = ? AND id = ? AND member_id = ?",
             )
             .bind(company_id)
             .bind(loan_id)
             .bind(member_id),
             LoanOwner::NonMember(name) => sqlx::query_scalar(
-                "SELECT id FROM loans WHERE company_id = ? AND id = ? AND loan_group = ? AND COALESCE(member_id, '') = '' AND lower(trim(member_name)) = lower(trim(?))",
+                "SELECT id
+                 FROM loans
+                 WHERE company_id = ?
+                   AND id = ?
+                   AND loan_group = ?
+                   AND COALESCE(member_id, '') = ''
+                   AND lower(trim(member_name)) = lower(trim(?))",
             )
             .bind(company_id)
             .bind(loan_id)
@@ -440,15 +510,18 @@ async fn loan_lines(
         .fetch_optional(&mut *db)
         .await
         .map_err(|error| error.to_string())?;
+
         if belongs.is_none() {
             return Err(match owner {
                 LoanOwner::Member(_) => "Pinjaman tidak ditemukan untuk anggota ini.".into(),
                 LoanOwner::NonMember(_) => "Pinjaman tidak ditemukan untuk peminjam ini.".into(),
             });
         }
+
         if line.principal > loan_balance(db, company_id, loan_id).await? {
             return Err("Pembayaran pokok melebihi saldo pinjaman berjalan.".into());
         }
+
         if line.principal > 0 {
             components.push(
                 Component::new(
@@ -459,6 +532,7 @@ async fn loan_lines(
                 .for_loan(loan_id),
             );
         }
+
         if line.interest > 0 {
             components.push(
                 Component::new(ComponentType::LoanInterest, "Bunga pinjaman", line.interest)
@@ -466,6 +540,7 @@ async fn loan_lines(
             );
         }
     }
+
     Ok(components)
 }
 
@@ -481,30 +556,40 @@ async fn post_loan_payment(
     if input.wajib != 0 || input.voluntary != 0 {
         return Err("Pembayaran per pinjaman tidak memuat simpanan.".into());
     }
+
     // Paying several loans: the borrower is the one of the first listed loan.
     let loan_id = match input.loans.first() {
         Some(line) => line.loan_id.trim(),
         None => input.loan_id.trim(),
     };
+
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
-    let loan =
-        sqlx::query("SELECT member_id, member_name FROM loans WHERE company_id = ? AND id = ?")
-            .bind(company_id)
-            .bind(loan_id)
-            .fetch_optional(&mut *db)
-            .await
-            .map_err(|error| error.to_string())?
-            .ok_or("Pinjaman tidak ditemukan.")?;
+
+    let loan = sqlx::query(
+        "SELECT member_id, member_name
+         FROM loans
+         WHERE company_id = ? AND id = ?",
+    )
+    .bind(company_id)
+    .bind(loan_id)
+    .fetch_optional(&mut *db)
+    .await
+    .map_err(|error| error.to_string())?
+    .ok_or("Pinjaman tidak ditemukan.")?;
+
     let member_id: Option<String> = loan
         .try_get("member_id")
         .map_err(|error| error.to_string())?;
+
     let borrower_name: String = loan
         .try_get("member_name")
         .map_err(|error| error.to_string())?;
+
     let components = if input.loans.is_empty() {
         if input.principal > loan_balance(&mut db, company_id, loan_id).await? {
             return Err("Pembayaran pokok melebihi saldo pinjaman berjalan.".into());
         }
+
         vec![
             Component::new(
                 ComponentType::LoanPrincipal,
@@ -528,9 +613,11 @@ async fn post_loan_payment(
         )
         .await?
     };
+
     let id = timestamp_id("TRX");
     let reference = trimmed_or(&input.reference, format!("KBS/RCPT/{id}"));
     ensure_reference_unused(&mut db, company_id, &reference).await?;
+
     let amount = append(
         &mut db,
         company_id,
@@ -551,6 +638,7 @@ async fn post_loan_payment(
         },
     )
     .await?;
+
     audit(
         &mut db,
         company_id,
@@ -565,6 +653,7 @@ async fn post_loan_payment(
         },
     )
     .await?;
+
     db.commit().await.map_err(|error| error.to_string())?;
     get_app_snapshot(company_id, pool).await
 }

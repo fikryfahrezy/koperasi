@@ -4,6 +4,7 @@ use crate::{
     contracts::{FinancialParametersDto, SetIncentiveRatesInput},
     domain::ParameterKey,
 };
+
 use sqlx::{Row, SqlitePool};
 use std::collections::HashMap;
 
@@ -13,20 +14,34 @@ pub(crate) async fn get_financial_parameters(
 ) -> Result<FinancialParametersDto, String> {
     // The yearly incentive rates have their own dates; see `incentive_rates`.
     // The loan limit was added later with its own date, so it is read alone.
-    let parameter_rows = sqlx::query("SELECT parameter_key, value, effective_date FROM parameters WHERE company_id = ? AND parameter_key NOT IN (?, ?, ?) AND effective_date = (SELECT MAX(effective_date) FROM parameters WHERE company_id = ? AND parameter_key NOT IN (?, ?, ?) AND effective_date <= '2026-09-13')")
-        .bind(company_id)
-        .bind(ParameterKey::LoanIncentiveRate.as_str())
-        .bind(ParameterKey::SavingsIncentiveRate.as_str())
-        .bind(ParameterKey::LoanMaxOutstanding.as_str())
-        .bind(company_id)
-        .bind(ParameterKey::LoanIncentiveRate.as_str())
-        .bind(ParameterKey::SavingsIncentiveRate.as_str())
-        .bind(ParameterKey::LoanMaxOutstanding.as_str())
-        .fetch_all(pool)
-        .await
-        .map_err(|error| error.to_string())?;
+    let parameter_rows = sqlx::query(
+        "SELECT parameter_key, value, effective_date
+         FROM parameters
+         WHERE company_id = ?
+           AND parameter_key NOT IN (?, ?, ?)
+           AND effective_date = (
+               SELECT MAX(effective_date)
+               FROM parameters
+               WHERE company_id = ?
+                 AND parameter_key NOT IN (?, ?, ?)
+                 AND effective_date <= '2026-09-13'
+           )",
+    )
+    .bind(company_id)
+    .bind(ParameterKey::LoanIncentiveRate.as_str())
+    .bind(ParameterKey::SavingsIncentiveRate.as_str())
+    .bind(ParameterKey::LoanMaxOutstanding.as_str())
+    .bind(company_id)
+    .bind(ParameterKey::LoanIncentiveRate.as_str())
+    .bind(ParameterKey::SavingsIncentiveRate.as_str())
+    .bind(ParameterKey::LoanMaxOutstanding.as_str())
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+
     let mut values = HashMap::new();
     let mut effective_date = String::new();
+
     for row in parameter_rows {
         values.insert(
             ParameterKey::try_from(
@@ -37,18 +52,25 @@ pub(crate) async fn get_financial_parameters(
             row.try_get::<f64, _>("value")
                 .map_err(|error| error.to_string())?,
         );
+
         effective_date = row
             .try_get("effective_date")
             .map_err(|error| error.to_string())?;
     }
+
     let max_loan_outstanding: Option<f64> = sqlx::query_scalar(
-        "SELECT value FROM parameters WHERE company_id = ? AND parameter_key = ? ORDER BY effective_date DESC LIMIT 1",
+        "SELECT value
+         FROM parameters
+         WHERE company_id = ? AND parameter_key = ?
+         ORDER BY effective_date DESC
+         LIMIT 1",
     )
     .bind(company_id)
     .bind(ParameterKey::LoanMaxOutstanding.as_str())
     .fetch_optional(pool)
     .await
     .map_err(|error| error.to_string())?;
+
     Ok(FinancialParametersDto {
         principal_savings: values
             .get(&ParameterKey::PrincipalSavings)
@@ -82,6 +104,7 @@ pub(crate) async fn incentive_rates(
 ) -> Result<(f64, f64), String> {
     let year_end = format!("{year:04}-12-31");
     let mut rates = [0.0; 2];
+
     for (slot, key) in [
         ParameterKey::LoanIncentiveRate,
         ParameterKey::SavingsIncentiveRate,
@@ -90,7 +113,11 @@ pub(crate) async fn incentive_rates(
     .enumerate()
     {
         let value: Option<f64> = sqlx::query_scalar(
-            "SELECT value FROM parameters WHERE company_id = ? AND parameter_key = ? AND effective_date <= ? ORDER BY effective_date DESC LIMIT 1",
+            "SELECT value
+             FROM parameters
+             WHERE company_id = ? AND parameter_key = ? AND effective_date <= ?
+             ORDER BY effective_date DESC
+             LIMIT 1",
         )
         .bind(company_id)
         .bind(key.as_str())
@@ -98,8 +125,10 @@ pub(crate) async fn incentive_rates(
         .fetch_optional(pool)
         .await
         .map_err(|error| error.to_string())?;
+
         rates[slot] = value.unwrap_or(0.0);
     }
+
     Ok((rates[0], rates[1]))
 }
 
@@ -116,18 +145,25 @@ pub(crate) async fn set_incentive_rates(
             input.savings_incentive_rate,
         ),
     ];
+
     if rates
         .iter()
         .any(|(_, rate)| rate.is_some_and(|rate| !(0.0..=1.0).contains(&rate)))
     {
         return Err("Persentase insentif harus antara 0% dan 100%.".into());
     }
+
     let effective_date = format!("{:04}-01-01", input.year);
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
+
     for (key, value) in rates {
         let Some(value) = value else { continue };
+
         sqlx::query(
-            "INSERT INTO parameters (company_id, parameter_key, value, effective_date, created_by) VALUES (?, ?, ?, ?, 'Aplikasi') ON CONFLICT(company_id, parameter_key, effective_date) DO UPDATE SET value = excluded.value",
+            "INSERT INTO parameters (company_id, parameter_key, value, effective_date, created_by)
+             VALUES (?, ?, ?, ?, 'Aplikasi')
+             ON CONFLICT (company_id, parameter_key, effective_date)
+             DO UPDATE SET value = excluded.value",
         )
         .bind(company_id)
         .bind(key.as_str())
@@ -137,6 +173,7 @@ pub(crate) async fn set_incentive_rates(
         .await
         .map_err(|error| error.to_string())?;
     }
+
     db.commit().await.map_err(|error| error.to_string())
 }
 
@@ -149,6 +186,7 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let pool = crate::database::memory_pool().await;
             let before = get_financial_parameters("default", &pool).await.unwrap();
+
             set_incentive_rates(
                 SetIncentiveRatesInput {
                     year: 2025,
@@ -160,11 +198,13 @@ mod tests {
             )
             .await
             .unwrap();
+
             // RAT 2025 rates apply until a later year sets its own.
             assert_eq!(
                 incentive_rates("default", 2026, &pool).await.unwrap(),
                 (0.101, 0.0365)
             );
+
             set_incentive_rates(
                 SetIncentiveRatesInput {
                     year: 2027,
@@ -176,14 +216,17 @@ mod tests {
             )
             .await
             .unwrap();
+
             assert_eq!(
                 incentive_rates("default", 2026, &pool).await.unwrap(),
                 (0.101, 0.0365)
             );
+
             assert_eq!(
                 incentive_rates("default", 2027, &pool).await.unwrap(),
                 (0.12, 0.0365)
             );
+
             // The operational parameters are unaffected. (Batas pinjaman came from
             // a data script, not from the migrations, so it is compared with its
             // value before the rates were set instead of a fixed amount.)

@@ -6,6 +6,7 @@ use crate::{database, state::AppState};
 
 pub(crate) fn run() {
     let builder = tauri::Builder::default();
+
     #[cfg(not(feature = "e2e"))]
     let builder = builder
         .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
@@ -16,17 +17,21 @@ pub(crate) fn run() {
         .setup(|app| {
             #[cfg(not(feature = "e2e"))]
             let app_data_dir = app.path().app_data_dir().map_err(std::io::Error::other)?;
+
             #[cfg(feature = "e2e")]
             let app_data_dir =
                 std::path::PathBuf::from(std::env::var_os("KOPERASI_E2E_DATA_DIR").ok_or_else(
                     || std::io::Error::other("E2E builds require KOPERASI_E2E_DATA_DIR"),
                 )?);
+
             let pool = tauri::async_runtime::block_on(database::initialize(&app_data_dir))
                 .map_err(std::io::Error::other)?;
+
             app.manage(AppState {
                 db: pool,
                 data_dir: app_data_dir,
             });
+
             Ok(())
         })
         .plugin(tauri_plugin_log::Builder::new().build())

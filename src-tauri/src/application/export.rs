@@ -13,9 +13,11 @@ use sqlx::{Row, SqlitePool};
 use super::ledger_report::{apply_loan_report_per_loan, is_running};
 use super::{get_app_snapshot, get_cash_book, get_monthly_ledger, list_companies};
 use crate::contracts::{CashBookDto, LoanDto, LoanMonthDto, MonthlyLedgerDto, SavingsMonthDto};
+
 use crate::domain::{
     Channel, InterestType, LoanGroup, TransactionDirection, TransactionStatus, CASH_CATEGORIES,
 };
+
 use crate::xlsx::{date_serial, Expr, Sheet, Style};
 
 const MONTHS: [&str; 12] = [
@@ -37,6 +39,7 @@ const MONTHS: [&str; 12] = [
 fn month_label(period: &str) -> String {
     let year = period.get(0..4).unwrap_or_default();
     let month: usize = period.get(5..7).and_then(|m| m.parse().ok()).unwrap_or(0);
+
     match MONTHS.get(month.wrapping_sub(1)) {
         Some(name) => format!("{name} {year}"),
         None => period.to_string(),
@@ -48,6 +51,7 @@ fn shift_period(period: &str, delta: i32) -> String {
     let year: i32 = period.get(0..4).and_then(|y| y.parse().ok()).unwrap_or(0);
     let month: i32 = period.get(5..7).and_then(|m| m.parse().ok()).unwrap_or(1);
     let index = year * 12 + (month - 1) + delta;
+
     format!(
         "{:04}-{:02}",
         index.div_euclid(12),
@@ -65,7 +69,9 @@ fn iso_date(value: &str) -> String {
     const SHORT: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
+
     let mut parts = value.split('-');
+
     if let (Some(day), Some(month), Some(year), None) =
         (parts.next(), parts.next(), parts.next(), parts.next())
     {
@@ -78,6 +84,7 @@ fn iso_date(value: &str) -> String {
             }
         }
     }
+
     value.to_string()
 }
 
@@ -92,12 +99,14 @@ async fn company_name(company_id: &str, pool: &SqlitePool) -> Result<String, Str
 
 fn year_periods(ledger: &MonthlyLedgerDto, year: i32) -> Vec<String> {
     let prefix = format!("{year:04}-");
+
     let mut periods: Vec<String> = ledger
         .periods
         .iter()
         .filter(|period| period.starts_with(&prefix))
         .cloned()
         .collect();
+
     periods.sort();
     periods
 }
@@ -123,9 +132,11 @@ impl ExportFilter {
 
     fn periods(&self, ledger: &MonthlyLedgerDto, year: i32) -> Vec<String> {
         let mut periods = year_periods(ledger, year);
+
         if let Some(period) = &self.period {
             periods.retain(|item| item == period);
         }
+
         periods
     }
 }
@@ -175,11 +186,13 @@ pub(crate) async fn export_workbook(
         ExportKind::Savings => {
             let ledger = get_monthly_ledger(company_id, year, through, pool).await?;
             let snapshot = get_app_snapshot(company_id, pool).await?;
+
             let names: HashMap<String, String> = snapshot
                 .members
                 .into_iter()
                 .map(|member| (member.id, member.name))
                 .collect();
+
             let company = company_name(company_id, pool).await?;
             savings_sheet(&ledger, year, &names, &company, filter)
         }
@@ -192,6 +205,7 @@ pub(crate) async fn export_workbook(
             loans_sheet(&ledger, year, &snapshot.loans, &company, filter)
         }
     };
+
     sheet.to_xlsx()
 }
 
@@ -213,7 +227,11 @@ async fn cash_book_expenses(
     pool: &SqlitePool,
 ) -> Result<HashMap<(String, String), i64>, String> {
     let rows = sqlx::query(
-        "SELECT c.transaction_id, c.component_type, SUM(c.amount) amount FROM transaction_components c JOIN transactions t ON t.company_id = c.company_id AND t.id = c.transaction_id WHERE c.company_id = ? AND t.business_date >= ? AND t.business_date < ? GROUP BY c.transaction_id, c.component_type",
+        "SELECT c.transaction_id, c.component_type, SUM(c.amount) amount
+         FROM transaction_components c
+         JOIN transactions t ON t.company_id = c.company_id AND t.id = c.transaction_id
+         WHERE c.company_id = ? AND t.business_date >= ? AND t.business_date < ?
+         GROUP BY c.transaction_id, c.component_type",
     )
     .bind(company_id)
     .bind(format!("{year:04}-01-01"))
@@ -221,16 +239,20 @@ async fn cash_book_expenses(
     .fetch_all(pool)
     .await
     .map_err(|error| error.to_string())?;
+
     let kinds: Vec<&str> = expense_columns().map(|(_, kind, _)| kind).collect();
     let mut expenses = HashMap::new();
+
     for row in rows {
         let kind: String = row.try_get("component_type").map_err(|e| e.to_string())?;
+
         if kinds.contains(&kind.as_str()) {
             let id: String = row.try_get("transaction_id").map_err(|e| e.to_string())?;
             let amount: i64 = row.try_get("amount").map_err(|e| e.to_string())?;
             expenses.insert((id, kind), amount);
         }
     }
+
     Ok(expenses)
 }
 
@@ -264,10 +286,12 @@ fn cash_book_sheet(
     sheet.header((2, KELUAR), (2, KELUAR), "Keluar");
     sheet.header((2, MASUK), (2, MASUK), "Masuk");
     sheet.header((1, KAS_TABUNGAN), (2, KAS_TABUNGAN), "Kas + Tabungan");
+
     for (col, _, label) in expense_columns() {
         sheet.header((1, col), (2, col), label);
         sheet.width(col, 14.0);
     }
+
     for (col, width) in [
         (1, 13.0),
         (2, 45.0),
@@ -283,11 +307,13 @@ fn cash_book_sheet(
     ] {
         sheet.width(col, width);
     }
+
     sheet.freeze(3, 1);
 
     let border_row = |sheet: &mut Sheet, row: u32, style: Style| {
         for col in 1..=last_col {
             let text = col <= 4 || col == 8;
+
             sheet.style(
                 row,
                 col,
@@ -301,6 +327,7 @@ fn cash_book_sheet(
     };
 
     border_row(&mut sheet, 3, Style::Number);
+
     sheet.text(
         3,
         2,
@@ -310,7 +337,9 @@ fn cash_book_sheet(
         ),
         Style::TotalText,
     );
+
     sheet.number(3, SALDO, book.opening_balance as f64, Style::TotalNumber);
+
     if let Some(opening) = book.savings_book_opening_balance {
         sheet.number(3, MASUK, opening as f64, Style::TotalNumber);
         let total = Expr::cell(3, SALDO).add(Expr::cell(3, MASUK));
@@ -319,6 +348,7 @@ fn cash_book_sheet(
 
     let mut row = 3;
     let mut last_date = "";
+
     for item in book.rows.iter().filter(|item| {
         item.transaction.status != TransactionStatus::Reversed
             && !item.transaction.is_reversal
@@ -326,26 +356,33 @@ fn cash_book_sheet(
     }) {
         row += 1;
         border_row(&mut sheet, row, Style::Number);
+
         if item.transaction.business_date != last_date {
             sheet.date(row, 1, &item.transaction.business_date);
             last_date = &item.transaction.business_date;
         }
+
         let transaction = &item.transaction;
         sheet.text(row, 2, &transaction.description, Style::Text);
+
         if transaction.channel == Channel::Cash {
             let col = if transaction.direction == TransactionDirection::Out {
                 DEBET
             } else {
                 KREDIT
             };
+
             sheet.number(row, col, transaction.amount as f64, Style::Number);
         }
+
         let balance = Expr::cell(row - 1, SALDO)
             .sub(Expr::cell(row, DEBET))
             .add(Expr::cell(row, KREDIT));
+
         sheet.checked(row, SALDO, &balance, item.balance, Style::Number);
         sheet.amount(row, KELUAR, item.savings_book_out, Style::Number);
         sheet.amount(row, MASUK, item.savings_book_in, Style::Number);
+
         for (col, kind, _) in expense_columns() {
             if let Some(amount) = expenses.get(&(transaction.id.clone(), kind.to_string())) {
                 sheet.amount(row, col, *amount, Style::Number);
@@ -356,17 +393,21 @@ fn cash_book_sheet(
     let total_row = row + 1;
     border_row(&mut sheet, total_row, Style::TotalNumber);
     sheet.text(total_row, 2, "JUMLAH", Style::TotalText);
+
     if row >= 4 {
         let mut sum_cols = vec![DEBET, KREDIT, KELUAR, MASUK];
         sum_cols.extend(expense_columns().map(|(col, _, _)| col));
+
         for col in sum_cols {
             let sum = Expr::Sum((4, col), (row, col));
             sheet.formula(total_row, col, &sum, Style::TotalNumber);
         }
     }
+
     let closing = Expr::cell(3, SALDO)
         .sub(Expr::cell(total_row, DEBET))
         .add(Expr::cell(total_row, KREDIT));
+
     sheet.checked(
         total_row,
         SALDO,
@@ -374,6 +415,7 @@ fn cash_book_sheet(
         book.closing_balance,
         Style::TotalNumber,
     );
+
     sheet
 }
 
@@ -393,6 +435,7 @@ impl SavingsBlock {
     fn movement(&self, slot: u32, credit: bool) -> u32 {
         self.start + 1 + slot * 2 + u32::from(credit)
     }
+
     fn total(&self) -> u32 {
         self.balance + 3
     }
@@ -411,11 +454,13 @@ fn savings_sheet(
     const HEAD: u32 = 5;
     const FIRST: u32 = 10;
     let periods = filter.periods(ledger, year);
+
     let rows: HashMap<(&str, &str), &SavingsMonthDto> = ledger
         .savings
         .iter()
         .map(|row| ((row.member_id.as_str(), row.period.as_str()), row))
         .collect();
+
     let members: BTreeSet<&str> = ledger
         .savings
         .iter()
@@ -424,28 +469,34 @@ fn savings_sheet(
         .collect();
 
     let mut sheet = Sheet::new("SIMPANAN");
+
     let title = if company.is_empty() {
         "DATA SIMPANAN".to_string()
     } else {
         format!("DATA SIMPANAN {}", company.to_uppercase())
     };
+
     sheet.text(2, 2, &title, Style::Title);
     sheet.text(3, 2, &format!("TAHUN {year}"), Style::Title);
 
     // Layout.
     let mut blocks = Vec::new();
     let mut col = 7;
+
     for period in &periods {
         let shu = period.ends_with("-01").then_some(col + 7);
         let balance = col + 7 + u32::from(shu.is_some());
+
         blocks.push(SavingsBlock {
             period: period.clone(),
             start: col,
             shu,
             balance,
         });
+
         col = balance + 4;
     }
+
     // As in the sheet (SIMPANAN): one empty column after the last TOTAL, then
     // Ratas Simpanan, one more empty column, then Insentif Simpanan and Pembulatan.
     // The empty columns carry no border.
@@ -457,46 +508,57 @@ fn savings_sheet(
     sheet.header((HEAD, 1), (HEAD + 4, 1), "No");
     sheet.header((HEAD, 2), (HEAD + 4, 2), "Nama Pensiunan");
     sheet.header((HEAD, 3), (HEAD, (col - 1).max(6)), "B U L A N");
+
     let previous = periods
         .first()
         .map(|period| shift_period(period, -1))
         .unwrap_or_else(|| format!("{:04}-12", year - 1));
+
     sheet.header(
         (HEAD + 1, 3),
         (HEAD + 1, 5),
         &format!("SALDO BULAN {}", month_label(&previous)),
     );
+
     sheet.header(
         (HEAD + 1, 6),
         (HEAD + 4, 6),
         &format!("TOTAL SIMPANAN {}", month_label(&previous)),
     );
+
     for (col, label) in [(3, "Pokok"), (4, "Wajib"), (5, "Manasuka")] {
         sheet.header((HEAD + 2, col), (HEAD + 4, col), label);
     }
+
     for block in &blocks {
         let label = month_label(&block.period);
+
         sheet.header(
             (HEAD + 1, block.start),
             (HEAD + 1, block.balance + 2),
             &format!("BULAN {label}"),
         );
+
         sheet.header(
             (HEAD + 1, block.total()),
             (HEAD + 4, block.total()),
             &format!("TOTAL SIMPANAN BULAN {label}"),
         );
+
         sheet.header(
             (HEAD + 2, block.start),
             (HEAD + 2, block.balance - 1),
             &format!("MUTASI BULAN {label}"),
         );
+
         sheet.header(
             (HEAD + 2, block.balance),
             (HEAD + 2, block.balance + 2),
             &format!("Saldo Simpanan Bulan {label}"),
         );
+
         sheet.header((HEAD + 3, block.start), (HEAD + 4, block.start), "Tanggal");
+
         for (slot, label) in ["Simpanan Pokok", "Simpanan Wajib", "Simpanan Manasuka"]
             .iter()
             .enumerate()
@@ -506,6 +568,7 @@ fn savings_sheet(
             sheet.header((HEAD + 4, debet), (HEAD + 4, debet), "Debet");
             sheet.header((HEAD + 4, debet + 1), (HEAD + 4, debet + 1), "Kredit");
         }
+
         if let Some(shu) = block.shu {
             sheet.header(
                 (HEAD + 3, shu),
@@ -513,40 +576,51 @@ fn savings_sheet(
                 &format!("SHU Tahun Buku {}", year - 1),
             );
         }
+
         for (offset, label) in ["Pokok", "Wajib", "Manasuka"].iter().enumerate() {
             let col = block.balance + offset as u32;
             sheet.header((HEAD + 3, col), (HEAD + 4, col), label);
         }
+
         sheet.width(block.start, 12.0);
     }
+
     let last_period = periods.last().cloned().unwrap_or_default();
+
     if !periods.is_empty() {
         sheet.header(
             (HEAD, ratas),
             (HEAD + 4, ratas),
             &format!("Ratas Simpanan s/d {}", month_label(&last_period)),
         );
+
         sheet.header(
             (HEAD, insentif),
             (HEAD + 2, pembulatan),
             "Insentif Simpanan",
         );
+
         sheet.header(rate_cell, (HEAD + 4, insentif), "");
+
         sheet.number(
             rate_cell.0,
             rate_cell.1,
             ledger.savings_incentive_rate,
             Style::HeaderPercent,
         );
+
         sheet.header((HEAD + 3, pembulatan), (HEAD + 4, pembulatan), "Pembulatan");
     }
+
     sheet.width(1, 5.0);
     sheet.width(2, 32.0);
+
     for col in 3..=pembulatan {
         if !blocks.iter().any(|block| block.start == col) {
             sheet.width(col, 13.0);
         }
     }
+
     sheet.freeze(FIRST, 3);
 
     // Members.
@@ -562,21 +636,29 @@ fn savings_sheet(
             vec![ratas, insentif, pembulatan]
         })
         .collect();
+
     let mut row = FIRST - 1;
+
     for (index, member_id) in members.iter().enumerate() {
         if !filter.keeps(member_id) {
             continue;
         }
+
         row += 1;
+
         for col in (1..=pembulatan).filter(|c| !gaps.contains(c)) {
             sheet.style(row, col, Style::Number);
         }
+
         sheet.number(row, 1, (index + 1) as f64, Style::Integer);
+
         let name = names
             .get(*member_id)
             .map(String::as_str)
             .unwrap_or(member_id);
+
         sheet.text(row, 2, name, Style::Text);
+
         if let Some(first) = periods
             .first()
             .and_then(|period| rows.get(&(*member_id, period.as_str())))
@@ -585,15 +667,18 @@ fn savings_sheet(
             sheet.number(row, 4, first.mandatory_opening as f64, Style::Number);
             sheet.number(row, 5, first.voluntary_opening as f64, Style::Number);
         }
+
         let opening_total = Expr::sum_of((3..=5).map(|col| Expr::cell(row, col)));
         sheet.formula(row, 6, &opening_total, Style::Number);
 
         let mut previous_balance = 3;
+
         for block in &blocks {
             if let Some(month) = rows.get(&(*member_id, block.period.as_str())) {
                 if !month.transaction_date.is_empty() {
                     sheet.date(row, block.start, &month.transaction_date);
                 }
+
                 let moves = [
                     (
                         month.principal_out,
@@ -611,22 +696,28 @@ fn savings_sheet(
                         month.voluntary_closing,
                     ),
                 ];
+
                 for (slot, (debet, kredit, _)) in moves.iter().enumerate() {
                     let slot = slot as u32;
                     sheet.amount(row, block.movement(slot, false), *debet, Style::Number);
                     sheet.amount(row, block.movement(slot, true), *kredit, Style::Number);
                 }
+
                 if let Some(shu) = block.shu {
                     sheet.amount(row, shu, month.shu, Style::Number);
                 }
+
                 for (slot, (_, _, closing)) in moves.iter().enumerate() {
                     let slot32 = slot as u32;
+
                     let mut balance = Expr::cell(row, previous_balance + slot32)
                         .add(Expr::cell(row, block.movement(slot32, true)))
                         .sub(Expr::cell(row, block.movement(slot32, false)));
+
                     if let (Some(shu), 2) = (block.shu, slot) {
                         balance = balance.add(Expr::cell(row, shu));
                     }
+
                     sheet.checked(
                         row,
                         block.balance + slot32,
@@ -635,9 +726,11 @@ fn savings_sheet(
                         Style::Number,
                     );
                 }
+
                 let total = Expr::sum_of((0..3).map(|slot| Expr::cell(row, block.balance + slot)));
                 sheet.formula(row, block.total(), &total, Style::Number);
             }
+
             previous_balance = block.balance;
         }
 
@@ -646,8 +739,10 @@ fn savings_sheet(
         if let Some(last) = rows.get(&(*member_id, last_period.as_str())) {
             let average = Expr::sum_of(blocks.iter().map(|block| Expr::cell(row, block.total())))
                 .div(Expr::num(blocks.len() as f64));
+
             sheet.checked(row, ratas, &average, last.savings_average, Style::Number);
             let incentive = Expr::cell(row, ratas).mul(Expr::Fixed(rate_cell.0, rate_cell.1));
+
             sheet.checked(
                 row,
                 insentif,
@@ -655,7 +750,9 @@ fn savings_sheet(
                 last.savings_incentive_raw,
                 Style::Number,
             );
+
             let rounded = Expr::cell(row, insentif).round_up(-3);
+
             sheet.checked(
                 row,
                 pembulatan,
@@ -667,20 +764,25 @@ fn savings_sheet(
     }
 
     let total_row = row + 2;
+
     for col in (1..=pembulatan).filter(|c| !gaps.contains(c)) {
         sheet.style(total_row, col, Style::TotalNumber);
     }
+
     sheet.text(total_row, 1, "JUMLAH", Style::TotalText);
     sheet.style(total_row, 2, Style::TotalText);
+
     if row >= FIRST {
         for col in numeric_cols {
             if blocks.iter().any(|block| block.start == col) {
                 continue;
             }
+
             let sum = Expr::Sum((FIRST, col), (row, col));
             sheet.formula(total_row, col, &sum, Style::TotalNumber);
         }
     }
+
     sheet
 }
 
@@ -696,30 +798,39 @@ struct LoanBlock {
 
 impl LoanBlock {
     const WIDTH: u32 = 13;
+
     fn due(&self) -> u32 {
         self.start
     }
+
     fn date(&self) -> u32 {
         self.start + 3
     }
+
     fn cash_in(&self) -> u32 {
         self.start + 4
     }
+
     fn debet(&self) -> u32 {
         self.start + 5
     }
+
     fn kredit(&self) -> u32 {
         self.start + 6
     }
+
     fn interest(&self) -> u32 {
         self.start + 7
     }
+
     fn provision(&self) -> u32 {
         self.start + 8
     }
+
     fn balance(&self) -> u32 {
         self.start + 9
     }
+
     fn arrears(&self) -> u32 {
         self.start + 10
     }
@@ -757,15 +868,18 @@ fn interest_term(
     if amount == 0 {
         return None;
     }
+
     if interest_type == InterestType::Declining {
         let declining = Expr::cell(row, previous_balance)
             .mul(Expr::cell(row, RATE))
             .div(Expr::num(12.0));
+
         // `amount` is rounded up after the sen of earlier months are added.
         if (sheet.eval(&declining) - amount as f64).abs() < 1.0 {
             return Some(declining);
         }
     }
+
     installment_term(sheet, row, INSTALLMENT + 1, amount)
 }
 
@@ -788,30 +902,36 @@ fn loans_sheet(
 ) -> Sheet {
     const HEAD: u32 = 3;
     let periods = filter.periods(ledger, year);
+
     let months: HashMap<(&str, &str), &LoanMonthDto> = ledger
         .loans
         .iter()
         .filter(|row| row.shown)
         .map(|row| ((row.loan_id.as_str(), row.period.as_str()), row))
         .collect();
+
     // Every loan that runs in some month up to the last one exported, also when
     // it was paid off later, as in the working sheet.
     let through_period = periods.last().cloned().unwrap_or_default();
+
     let shown: BTreeSet<&str> = ledger
         .loans
         .iter()
         .filter(|row| row.shown && row.period <= through_period && is_running(row))
         .map(|row| row.loan_id.as_str())
         .collect();
+
     let loan_by_id: HashMap<&str, &LoanDto> =
         loans.iter().map(|loan| (loan.id.as_str(), loan)).collect();
 
     let mut sheet = Sheet::new("PINJAMAN BULANAN");
+
     let title = if company.is_empty() {
         format!("DATA PINJAMAN TAHUN {year}")
     } else {
         format!("DATA PINJAMAN {} TAHUN {year}", company.to_uppercase())
     };
+
     sheet.text(1, 1, &title, Style::Title);
 
     // Layout.
@@ -823,6 +943,7 @@ fn loans_sheet(
             start: 18 + LoanBlock::WIDTH * index as u32,
         })
         .collect();
+
     let tail = 18 + LoanBlock::WIDTH * blocks.len() as u32;
     let recommender = tail + 3;
     // Quarters 0-3, then 4 for TOTAL PEMASUKAN TAHUN. As in the sheet, one empty
@@ -830,6 +951,7 @@ fn loans_sheet(
     // GD, GH, GL, GP), so JAN s/d MAR starts at FW and Insentif at GQ.
     let income = move |quarter: u32| tail + 5 + quarter * 4;
     let incentive = income(4) + 4;
+
     let gaps: Vec<u32> = if periods.is_empty() {
         Vec::new()
     } else {
@@ -837,7 +959,9 @@ fn loans_sheet(
             .chain((0..5).map(|quarter| income(quarter) + 3))
             .collect()
     };
+
     let rate_cell = (HEAD + 3, incentive);
+
     let last_col = if periods.is_empty() {
         17
     } else {
@@ -849,7 +973,9 @@ fn loans_sheet(
         .first()
         .cloned()
         .unwrap_or_else(|| format!("{year:04}-01"));
+
     let previous = month_label(&shift_period(&first_period, -1));
+
     for (col, label) in [
         (1, "No"),
         (2, "Nama"),
@@ -862,45 +988,56 @@ fn loans_sheet(
     ] {
         sheet.header((HEAD, col), (HEAD + 3, col), label);
     }
+
     sheet.header((HEAD, RATE), (HEAD + 3, RATE + 1), "Bunga per-bulan");
+
     sheet.header(
         (HEAD, OPENING),
         (HEAD + 3, OPENING),
         &format!("Saldo Posisi {previous}"),
     );
+
     let three = |sheet: &mut Sheet, col: u32, label: &str, labels: [&str; 3]| {
         sheet.header((HEAD, col), (HEAD + 1, col + 2), label);
+
         for (offset, label) in labels.iter().enumerate() {
             let col = col + offset as u32;
             sheet.header((HEAD + 2, col), (HEAD + 3, col), label);
         }
     };
+
     const PBJ: [&str; 3] = ["Pokok", "Bunga", "Jumlah"];
     three(&mut sheet, INSTALLMENT, "Kewajiban setor tiap bulan", PBJ);
+
     three(
         &mut sheet,
         PRIOR_ARREARS,
         &format!("Tunggakan s/d {previous}"),
         PBJ,
     );
+
     for block in &blocks {
         let label = month_label(&block.period);
+
         three(
             &mut sheet,
             block.due(),
             &format!("Kewajiban setor s/d {label}"),
             PBJ,
         );
+
         sheet.header(
             (HEAD, block.date()),
             (HEAD, block.provision()),
             &format!("BULAN {label}"),
         );
+
         sheet.header(
             (HEAD + 1, block.date()),
             (HEAD + 1, block.provision()),
             &format!("Mutasi bulan {label}"),
         );
+
         for (col, label) in [
             (block.date(), "Tanggal"),
             (block.cash_in(), "Jumlah"),
@@ -909,35 +1046,43 @@ fn loans_sheet(
         ] {
             sheet.header((HEAD + 2, col), (HEAD + 3, col), label);
         }
+
         sheet.header(
             (HEAD + 2, block.debet()),
             (HEAD + 2, block.kredit()),
             "Pokok",
         );
+
         sheet.header(
             (HEAD + 3, block.debet()),
             (HEAD + 3, block.debet()),
             "Debet",
         );
+
         sheet.header(
             (HEAD + 3, block.kredit()),
             (HEAD + 3, block.kredit()),
             "Kredit",
         );
+
         sheet.header(
             (HEAD, block.balance()),
             (HEAD + 3, block.balance()),
             &format!("Saldo Posisi {label}"),
         );
+
         three(
             &mut sheet,
             block.arrears(),
             &format!("Tunggakan s/d {label}"),
             PBJ,
         );
+
         sheet.width(block.date(), 12.0);
     }
+
     let last_period = periods.last().cloned().unwrap_or_default();
+
     if !periods.is_empty() {
         three(
             &mut sheet,
@@ -948,7 +1093,9 @@ fn loans_sheet(
             ),
             PBJ,
         );
+
         sheet.header((HEAD, recommender), (HEAD + 3, recommender), "Rekomendasi");
+
         for (quarter, label) in ["JAN s/d MAR", "APR s/d JUN", "JUL s/d SEP", "OKT s/d DES"]
             .iter()
             .enumerate()
@@ -960,32 +1107,39 @@ fn loans_sheet(
                 ["BUNGA", "PROVISI", "JUMLAH"],
             );
         }
+
         three(
             &mut sheet,
             income(4),
             &format!("TOTAL PEMASUKAN TAHUN {year}"),
             ["BUNGA", "PROVISI", "JUMLAH"],
         );
+
         sheet.header(
             (HEAD, incentive),
             (HEAD + 2, incentive + 1),
             "Insentif Pinjaman",
         );
+
         sheet.number(
             rate_cell.0,
             rate_cell.1,
             ledger.loan_incentive_rate,
             Style::HeaderPercent,
         );
+
         sheet.header(
             (HEAD + 3, incentive + 1),
             (HEAD + 3, incentive + 1),
             "Pembulatan",
         );
+
         sheet.width(recommender, 16.0);
     }
+
     sheet.width(1, 5.0);
     sheet.width(2, 32.0);
+
     for col in 3..=last_col {
         if col != recommender
             && !gaps.contains(&col)
@@ -994,6 +1148,7 @@ fn loans_sheet(
             sheet.width(col, 13.0);
         }
     }
+
     sheet.width(RATE + 1, 9.0);
     sheet.width(6, 7.0);
     sheet.width(TENOR, 8.0);
@@ -1002,11 +1157,13 @@ fn loans_sheet(
     // Numeric columns summed in SUB JUMLAH and JUMLAH TOTAL.
     let mut numeric: Vec<u32> = vec![PLAFOND];
     numeric.extend(OPENING..=PRIOR_ARREARS + 2);
+
     for block in &blocks {
         numeric.extend(
             (block.start..block.start + LoanBlock::WIDTH).filter(|col| *col != block.date()),
         );
     }
+
     if !periods.is_empty() {
         numeric.extend(tail..tail + 3);
         numeric.extend((tail + 4..=incentive + 1).filter(|col| !gaps.contains(col)));
@@ -1014,6 +1171,7 @@ fn loans_sheet(
 
     let mut row = HEAD + 3;
     let mut subtotals = Vec::new();
+
     for (group, title) in [
         (LoanGroup::Member, "PINJAMAN ANGGOTA PP BRI"),
         (LoanGroup::NonMember, "PINJAMAN NON ANGGOTA PP BRI"),
@@ -1021,6 +1179,7 @@ fn loans_sheet(
         if filter.loan_group.is_some_and(|only| only != group) {
             continue;
         }
+
         // Numbered before the search, as on the page.
         let section: Vec<(usize, &LoanDto)> = shown
             .iter()
@@ -1029,11 +1188,14 @@ fn loans_sheet(
             .enumerate()
             .filter(|(_, loan)| filter.keeps(&loan.id))
             .collect();
+
         row += 1;
         sheet.text(row, 2, title, Style::TotalText);
         let first = row + 1;
+
         for &(index, loan) in &section {
             row += 1;
+
             loan_row(
                 &mut sheet,
                 row,
@@ -1044,46 +1206,59 @@ fn loans_sheet(
                 last_col,
                 &gaps,
             );
+
             if let Some(last) = months.get(&(loan.id.as_str(), last_period.as_str())) {
                 loan_tail(
                     &mut sheet, row, loan, last, &blocks, tail, income, incentive, rate_cell,
                 );
             }
+
             if !periods.is_empty() {
                 sheet.text(row, recommender, &loan.recommender, Style::Text);
             }
         }
+
         row += 1;
+
         for col in (1..=last_col).filter(|col| !gaps.contains(col)) {
             sheet.style(row, col, Style::TotalNumber);
         }
+
         sheet.text(row, 1, "SUB JUMLAH", Style::TotalText);
         sheet.merge((row, 1), (row, 2));
+
         sheet.text(
             row,
             8,
             &format!("{} ORANG", section.len()),
             Style::TotalText,
         );
+
         if !section.is_empty() {
             for &col in &numeric {
                 let sum = Expr::Sum((first, col), (row - 1, col));
                 sheet.formula(row, col, &sum, Style::TotalNumber);
             }
         }
+
         subtotals.push(row);
         row += 1;
     }
+
     row += 1;
+
     for col in (1..=last_col).filter(|col| !gaps.contains(col)) {
         sheet.style(row, col, Style::TotalNumber);
     }
+
     sheet.text(row, 1, "JUMLAH TOTAL", Style::TotalText);
     sheet.merge((row, 1), (row, 2));
+
     for &col in &numeric {
         let total = Expr::sum_of(subtotals.iter().map(|&subtotal| Expr::cell(subtotal, col)));
         sheet.formula(row, col, &total, Style::TotalNumber);
     }
+
     sheet
 }
 
@@ -1102,26 +1277,32 @@ fn loan_row(
     for col in (1..=last_col).filter(|col| !gaps.contains(col)) {
         sheet.style(row, col, Style::Number);
     }
+
     sheet.number(row, 1, no as f64, Style::Integer);
     sheet.text(row, 2, &loan.member_name, Style::Text);
     sheet.number(row, PLAFOND, loan.plafond as f64, Style::Number);
     sheet.number(row, RATE, loan.rate / 100.0, Style::Percent);
+
     sheet.text(
         row,
         RATE + 1,
         &loan.interest_type.as_str().to_lowercase(),
         Style::Text,
     );
+
     sheet.text(row, 6, &loan.guarantee, Style::Text);
+
     sheet.text(
         row,
         7,
         loan.loan_type.map(|kind| kind.as_str()).unwrap_or_default(),
         Style::Text,
     );
+
     let realization = iso_date(&loan.realization_date);
     let due = iso_date(&loan.due_date);
     sheet.date(row, 8, &realization);
+
     // Tanggal Jatuh Tempo = Tanggal Realisasi + hari, as in the sheet (=H8+304).
     match (date_serial(&realization), date_serial(&due)) {
         (Some(start), Some(end)) => {
@@ -1130,6 +1311,7 @@ fn loan_row(
         }
         _ => sheet.date(row, 9, &due),
     }
+
     sheet.number(row, TENOR, loan.tenor as f64, Style::Integer);
 
     // Kewajiban setor tiap bulan, as in the sheet (L, M, N).
@@ -1137,12 +1319,15 @@ fn loan_row(
         let principal = Expr::cell(row, PLAFOND)
             .div(Expr::cell(row, TENOR))
             .round_up(-3);
+
         sheet.formula(row, INSTALLMENT, &principal, Style::Number);
     }
+
     let interest = Expr::cell(row, PLAFOND)
         .mul(Expr::cell(row, RATE))
         .div(Expr::num(12.0))
         .round_up(0);
+
     sheet.formula(row, INSTALLMENT + 1, &interest, Style::Number);
     let installment = Expr::cell(row, INSTALLMENT).add(Expr::cell(row, INSTALLMENT + 1));
     sheet.formula(row, INSTALLMENT + 2, &installment, Style::Number);
@@ -1157,10 +1342,12 @@ fn loan_row(
         sheet.amount(row, PRIOR_ARREARS, principal, Style::Number);
         sheet.amount(row, PRIOR_ARREARS + 1, interest, Style::Number);
     }
+
     let total = Expr::cell(row, PRIOR_ARREARS).add(Expr::cell(row, PRIOR_ARREARS + 1));
     sheet.formula(row, PRIOR_ARREARS + 2, &total, Style::Number);
 
     let (mut previous_balance, mut previous_arrears) = (OPENING, PRIOR_ARREARS);
+
     for block in blocks {
         if let Some(month) = months.get(&(loan.id.as_str(), block.period.as_str())) {
             loan_month(
@@ -1173,6 +1360,7 @@ fn loan_row(
                 previous_arrears,
             );
         }
+
         previous_balance = block.balance();
         previous_arrears = block.arrears();
     }
@@ -1193,11 +1381,13 @@ fn loan_month(
     previous_arrears: u32,
 ) {
     let (prior_principal, prior_interest) = prior_arrears(month);
+
     // Kewajiban setor s/d bulan ini = Tunggakan s/d bulan lalu + kewajiban bulan ini.
     let due_principal = plus(
         Expr::cell(row, previous_arrears),
         installment_term(sheet, row, INSTALLMENT, month.scheduled_principal),
     );
+
     sheet.checked(
         row,
         block.due(),
@@ -1205,6 +1395,7 @@ fn loan_month(
         prior_principal + month.scheduled_principal,
         Style::Number,
     );
+
     let due_interest = plus(
         Expr::cell(row, previous_arrears + 1),
         interest_term(
@@ -1215,6 +1406,7 @@ fn loan_month(
             month.scheduled_interest,
         ),
     );
+
     sheet.checked(
         row,
         block.due() + 1,
@@ -1222,6 +1414,7 @@ fn loan_month(
         prior_interest + month.scheduled_interest,
         Style::Number,
     );
+
     let due_total = Expr::cell(row, block.due()).add(Expr::cell(row, block.due() + 1));
     sheet.formula(row, block.due() + 2, &due_total, Style::Number);
 
@@ -1229,6 +1422,7 @@ fn loan_month(
     if !month.transaction_date.is_empty() {
         sheet.date(row, block.date(), &month.transaction_date);
     }
+
     // As in the sheet (PINJAMAN BULANAN): on a payment, Jumlah is Pokok + Bunga
     // paid and Pokok Kredit is `=V8-Y8`; Provisi stays in its own column. On a
     // disbursement without a payment, Jumlah holds the Provisi and Kredit is empty.
@@ -1236,6 +1430,7 @@ fn loan_month(
     sheet.amount(row, block.interest(), month.interest_paid, Style::Number);
     sheet.amount(row, block.provision(), month.provision, Style::Number);
     let paid = month.principal_paid + month.interest_paid;
+
     if paid != 0 {
         sheet.amount(row, block.cash_in(), paid, Style::Number);
         let principal = Expr::cell(row, block.cash_in()).sub(Expr::cell(row, block.interest()));
@@ -1248,6 +1443,7 @@ fn loan_month(
     let balance = Expr::cell(row, previous_balance)
         .add(Expr::cell(row, block.debet()))
         .sub(Expr::cell(row, block.kredit()));
+
     sheet.checked(
         row,
         block.balance(),
@@ -1258,6 +1454,7 @@ fn loan_month(
 
     // Tunggakan = Kewajiban setor s/d bulan ini - yang dibayar.
     let arrears_principal = Expr::cell(row, block.due()).sub(Expr::cell(row, block.kredit()));
+
     sheet.checked(
         row,
         block.arrears(),
@@ -1265,7 +1462,9 @@ fn loan_month(
         month.arrears_principal,
         Style::Number,
     );
+
     let arrears_interest = Expr::cell(row, block.due() + 1).sub(Expr::cell(row, block.interest()));
+
     sheet.checked(
         row,
         block.arrears() + 1,
@@ -1273,6 +1472,7 @@ fn loan_month(
         month.arrears_interest,
         Style::Number,
     );
+
     let arrears_total = Expr::cell(row, block.arrears()).add(Expr::cell(row, block.arrears() + 1));
     sheet.formula(row, block.arrears() + 2, &arrears_total, Style::Number);
 }
@@ -1294,12 +1494,15 @@ fn loan_tail(
     let Some(block) = blocks.last() else {
         return;
     };
+
     let next_principal = last.next_due_principal - last.arrears_principal;
     let next_interest = last.next_due_interest - last.arrears_interest;
+
     let due_principal = plus(
         Expr::cell(row, block.arrears()),
         installment_term(sheet, row, INSTALLMENT, next_principal),
     );
+
     sheet.checked(
         row,
         tail,
@@ -1307,6 +1510,7 @@ fn loan_tail(
         last.next_due_principal,
         Style::Number,
     );
+
     let due_interest = plus(
         Expr::cell(row, block.arrears() + 1),
         interest_term(
@@ -1317,6 +1521,7 @@ fn loan_tail(
             next_interest,
         ),
     );
+
     sheet.checked(
         row,
         tail + 1,
@@ -1324,21 +1529,25 @@ fn loan_tail(
         last.next_due_interest,
         Style::Number,
     );
+
     let due_total = Expr::cell(row, tail).add(Expr::cell(row, tail + 1));
     sheet.formula(row, tail + 2, &due_total, Style::Number);
 
     // Jumlah Pemasukan per triwulan: Bunga and Provisi of the quarter's months.
     for quarter in 0..4u32 {
         let col = income(quarter);
+
         let in_quarter: Vec<&LoanBlock> = blocks
             .iter()
             .filter(|block| quarter_of(&block.period) == quarter as usize)
             .collect();
+
         // Bunga, then Provisi (the column after Bunga in each month).
         let amounts = [
             last.income_interest[quarter as usize],
             last.income_provision[quarter as usize],
         ];
+
         for (offset, amount) in (0..).zip(amounts) {
             if in_quarter.is_empty() {
                 sheet.amount(row, col + offset, amount, Style::Number);
@@ -1348,16 +1557,21 @@ fn loan_tail(
                         .iter()
                         .map(|block| Expr::cell(row, block.interest() + offset)),
                 );
+
                 sheet.checked(row, col + offset, &sum, amount, Style::Number);
             }
         }
+
         let total = Expr::cell(row, col).add(Expr::cell(row, col + 1));
         sheet.formula(row, col + 2, &total, Style::Number);
     }
+
     // TOTAL PEMASUKAN TAHUN: the four quarters.
     let total_col = income(4);
+
     for (offset, amounts) in (0..).zip([&last.income_interest, &last.income_provision]) {
         let sum = Expr::sum_of((0..4).map(|quarter| Expr::cell(row, income(quarter) + offset)));
+
         sheet.checked(
             row,
             total_col + offset,
@@ -1366,6 +1580,7 @@ fn loan_tail(
             Style::Number,
         );
     }
+
     let total = Expr::cell(row, total_col).add(Expr::cell(row, total_col + 1));
     sheet.formula(row, total_col + 2, &total, Style::Number);
     let share = Expr::cell(row, total_col + 2).mul(Expr::Fixed(rate_cell.0, rate_cell.1));
@@ -1393,32 +1608,40 @@ mod tests {
     #[ignore]
     fn export_from_database() {
         let db = std::env::var("KOPERASI_EXPORT_DB").expect("KOPERASI_EXPORT_DB");
+
         let out = std::path::PathBuf::from(
             std::env::var("KOPERASI_EXPORT_OUT").expect("KOPERASI_EXPORT_OUT"),
         );
+
         tauri::async_runtime::block_on(async {
             let pool = sqlx::SqlitePool::connect(&format!("sqlite://{db}"))
                 .await
                 .unwrap();
+
             for kind in [ExportKind::CashBook, ExportKind::Savings, ExportKind::Loans] {
                 let filter = ExportFilter::default();
+
                 let bytes =
                     export_workbook(&kind, "default", 2026, Some("2026-10"), &filter, &pool)
                         .await
                         .unwrap();
+
                 std::fs::write(out.join(kind.file_name(2026)), bytes).unwrap();
             }
+
             // Bulan Oktober and Kelompok Anggota PP BRI, as picked on the page.
             let filter = ExportFilter {
                 period: Some("2026-10".into()),
                 ids: None,
                 loan_group: Some(LoanGroup::Member),
             };
+
             for kind in [ExportKind::Savings, ExportKind::Loans] {
                 let bytes =
                     export_workbook(&kind, "default", 2026, Some("2026-10"), &filter, &pool)
                         .await
                         .unwrap();
+
                 let name = format!("FILTER {}", kind.file_name(2026));
                 std::fs::write(out.join(name), bytes).unwrap();
             }

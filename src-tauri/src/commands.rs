@@ -184,6 +184,7 @@ pub(crate) async fn export_xlsx(
     state: State<'_, AppState>,
 ) -> Result<Option<String>, String> {
     let kind = application::ExportKind::parse(&kind)?;
+
     let filter = application::ExportFilter {
         period: period.filter(|value| !value.is_empty()),
         ids: ids.map(|ids| ids.into_iter().collect()),
@@ -192,7 +193,9 @@ pub(crate) async fn export_xlsx(
             .map(|value| crate::domain::LoanGroup::try_from(value.as_str()))
             .transpose()?,
     };
+
     let file_name = kind.file_name(year);
+
     let picked = tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
             .file()
@@ -202,12 +205,15 @@ pub(crate) async fn export_xlsx(
     })
     .await
     .map_err(|error| error.to_string())?;
+
     let Some(picked) = picked else {
         return Ok(None);
     };
+
     // Written exactly where the dialog confirmed (it already adds .xlsx from
     // the filter); renaming here could overwrite a file nobody confirmed.
     let path = picked.into_path().map_err(|error| error.to_string())?;
+
     let bytes = application::export_workbook(
         &kind,
         &company_id,
@@ -217,6 +223,7 @@ pub(crate) async fn export_xlsx(
         &state.db,
     )
     .await?;
+
     std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
     Ok(Some(path.display().to_string()))
 }
@@ -241,6 +248,7 @@ pub(crate) async fn export_database(
         "koperasi-{}.db",
         database::local_timestamp(&state.db).await?
     );
+
     let picked = tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
             .file()
@@ -250,9 +258,11 @@ pub(crate) async fn export_database(
     })
     .await
     .map_err(|error| error.to_string())?;
+
     let Some(picked) = picked else {
         return Ok(None);
     };
+
     let path = picked.into_path().map_err(|error| error.to_string())?;
     database::backup(&state.db, &path).await?;
     Ok(Some(path.display().to_string()))
@@ -267,6 +277,7 @@ pub(crate) async fn import_database(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let dialog = app.clone();
+
     let picked = tauri::async_runtime::spawn_blocking(move || {
         dialog
             .dialog()
@@ -276,26 +287,34 @@ pub(crate) async fn import_database(
     })
     .await
     .map_err(|error| error.to_string())?;
+
     let Some(picked) = picked else {
         return Ok(());
     };
+
     let source = picked.into_path().map_err(|error| error.to_string())?;
     let prepared = database::prepare_import(&source, &state.data_dir).await?;
+
     let kept = state.data_dir.join(format!(
         "koperasi-sebelum-impor-{}.db",
         database::local_timestamp(&state.db).await?
     ));
+
     if let Err(error) = database::backup(&state.db, &kept).await {
         let _ = std::fs::remove_file(&prepared);
+
         return Err(format!(
             "Data saat ini gagal dicadangkan, impor dibatalkan: {error}"
         ));
     }
+
     state.db.close().await;
+
     if let Err(error) = database::replace(&state.data_dir, &prepared) {
         return Err(format!(
             "Database gagal diganti ({error}); data lama tidak berubah. Tutup lalu buka lagi aplikasinya."
         ));
     }
+
     app.restart()
 }
