@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { FileSpreadsheet } from "lucide-vue-next";
+
 import {
   type ExportFilter,
   type ExportKind,
@@ -17,6 +18,7 @@ const exporting = ref(false);
 async function handleExport() {
   if (exporting.value) return;
   exporting.value = true;
+
   try {
     await exportXlsx(props.kind, props.filter);
   } finally {

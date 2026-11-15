@@ -5,16 +5,11 @@ import BalanceSheetListPanel from "../components/BalanceSheetListPanel.vue";
 import SheetAmountInput from "../components/SheetAmountInput.vue";
 import PageHeader from "../components/PageHeader.vue";
 import UiSelect from "../components/UiSelect.vue";
+import { useBalanceSheetDrafts } from "../composables/useBalanceSheetDrafts";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
+import { BalanceSheetItem, balanceSheetAt, sheetRows } from "../balance-sheet";
+
 import {
-  BalanceSheetItem,
-  type LineEdit,
-  LineEditKind,
-  balanceSheetAt,
-  sheetRows,
-} from "../balance-sheet";
-import {
-  type BalanceSheetDetail,
   Channel,
   formatPeriod,
   formatSheetNumber,
@@ -26,8 +21,7 @@ import {
 } from "../store/koperasi";
 
 const pageState = useWorkspacePageState("/balance-sheet");
-const { loans, selectedYear, refresh, setBalanceSheetItems } =
-  useKoperasiStore();
+const { loans, selectedYear, refresh } = useKoperasiStore();
 const { monthlyLedger, monthlyLedgerLoading } = useMonthlyLedger();
 const { cashBook } = useCashBook(Channel.Cash);
 const { balanceSheetItems } = useBalanceSheetItems();
@@ -37,6 +31,7 @@ const { cashBook: previousCashBook } = useCashBook(Channel.Cash, -1);
 const { balanceSheetItems: previousItems } = useBalanceSheetItems(-1);
 const { balanceSheetDetails } = useBalanceSheetDetails();
 const { balanceSheetDetails: previousDetails } = useBalanceSheetDetails(-1);
+
 // Catatan "Piutang Lainnya (Bon Sementara) terdiri": the rincian per person.
 const otherLoansByName = computed(() => [
   ...(balanceSheetDetails.value[BalanceSheetItem.OtherLoans] ?? [])
@@ -47,121 +42,28 @@ const otherLoansByName = computed(() => [
     )
     .entries(),
 ]);
+
 // The Catatan list being edited (Piutang Lainnya), if any.
 const editing = ref<BalanceSheetItem | null>(null);
-// Typed cells belong to the book year of their column: 31 Desember of the
-// year before, then the year shown.
-const columnYears = computed(() => [
-  selectedYear.value - 1,
-  selectedYear.value,
-]);
-const columnDetails = computed(() => [
-  withDraftLists(selectedYear.value - 1, previousDetails.value),
-  withDraftLists(selectedYear.value, balanceSheetDetails.value),
-]);
-async function commitCell(edit: LineEdit, column: number, value: number) {
-  const year = columnYears.value[column];
-  if (edit.kind === LineEditKind.Item) {
-    draftItems.value = {
-      ...draftItems.value,
-      [year]: {
-        ...draftItems.value[year],
-        [edit.key]: value - (edit.offset ?? 0),
-      },
-    };
-    return;
-  }
-  const list = columnDetails.value[column][edit.key] ?? [];
-  // Typed as shown: a negative amount (e.g. Akum. Penyusutan) with "-".
-  const saved = list.some((detail) => detail.name === edit.name)
-    ? list.map((detail) =>
-        detail.name === edit.name ? { ...detail, amount: value } : detail,
-      )
-    : [...list, { name: edit.name, amount: value, loanDate: null, note: "" }];
-  saveList(year, edit.key, saved);
-}
 
-function saveList(
-  year: number,
-  key: BalanceSheetItem,
-  list: BalanceSheetDetail[],
-) {
-  draftLists.value = {
-    ...draftLists.value,
-    [year]: { ...draftLists.value[year], [key]: list },
-  };
-}
+const {
+  hasChanges,
+  withDraftItems,
+  withDraftLists,
+  columnYears,
+  commitCell,
+  renamePos,
+  addPos,
+  removePos,
+  savingChanges,
+  saveChanges,
+  discardChanges,
+} = useBalanceSheetDrafts({
+  year: selectedYear,
+  previousDetails,
+  details: balanceSheetDetails,
+});
 
-const savingChanges = ref(false);
-async function saveChanges() {
-  savingChanges.value = true;
-  try {
-    const years = new Set(
-      [...Object.keys(draftItems.value), ...Object.keys(draftLists.value)].map(
-        Number,
-      ),
-    );
-    for (const year of years) {
-      const saved = await setBalanceSheetItems(
-        year,
-        draftItems.value[year] ?? {},
-        draftLists.value[year] ?? {},
-      );
-      if (!saved) return;
-      const { [year]: _items, ...items } = draftItems.value;
-      const { [year]: _lists, ...lists } = draftLists.value;
-      draftItems.value = items;
-      draftLists.value = lists;
-    }
-  } finally {
-    savingChanges.value = false;
-  }
-}
-function discardChanges() {
-  draftItems.value = {};
-  draftLists.value = {};
-}
-
-// A pos of a group's list in the Neraca: renamed in both years shown so
-// the row stays one row; added and removed in the year shown.
-function renamePos(key: BalanceSheetItem, from: string, to: string) {
-  const name = to.trim();
-  if (!name || name === from) return;
-  for (const [column, year] of columnYears.value.entries()) {
-    const list = columnDetails.value[column][key] ?? [];
-    if (!list.some((detail) => detail.name === from)) continue;
-    saveList(
-      year,
-      key,
-      list.map((detail) =>
-        detail.name === from ? { ...detail, name } : detail,
-      ),
-    );
-  }
-}
-function addPos(key: BalanceSheetItem) {
-  const list = columnDetails.value[1][key] ?? [];
-  const names = new Set(
-    columnDetails.value.flatMap((details) =>
-      (details[key] ?? []).map((detail) => detail.name),
-    ),
-  );
-  let name = "Pos baru";
-  for (let count = 2; names.has(name); count++) name = `Pos baru ${count}`;
-  saveList(selectedYear.value, key, [
-    ...list,
-    { name, amount: 0, loanDate: null, note: "" },
-  ]);
-}
-// Nothing is stored until Simpan, so removing needs no extra confirmation.
-function removePos(key: BalanceSheetItem, name: string) {
-  const list = columnDetails.value[1][key] ?? [];
-  saveList(
-    selectedYear.value,
-    key,
-    list.filter((detail) => detail.name !== name),
-  );
-}
 const sumOf = (entries: { amount: number }[] | [string, number][]) =>
   entries.reduce(
     (total, entry) => total + (Array.isArray(entry) ? entry[1] : entry.amount),
@@ -171,38 +73,22 @@ const sumOf = (entries: { amount: number }[] | [string, number][]) =>
 const periods = computed(() => [...monthlyLedger.value.periods].sort());
 // Empty means the last month of the year shown.
 const period = pageState.field("period", () => "");
+
 watch(periods, (list) => {
   if (period.value && !list.includes(period.value)) period.value = "";
 });
+
 const selectedPeriod = computed(
   () => period.value || periods.value[periods.value.length - 1] || "",
 );
+
 const periodOptions = computed(() =>
   [...periods.value]
     .reverse()
     .map((value) => ({ value, label: formatPeriod(value) })),
 );
-const previousPeriod = computed(() => `${selectedYear.value - 1}-12`);
 
-// Changes typed in the Neraca stay here, per book year, until Simpan; the
-// Neraca shows them already so the totals can be checked first.
-const draftItems = ref<Record<number, Record<string, number>>>({});
-const draftLists = ref<Record<number, Record<string, BalanceSheetDetail[]>>>(
-  {},
-);
-const hasChanges = computed(
-  () =>
-    Object.keys(draftItems.value).length > 0 ||
-    Object.keys(draftLists.value).length > 0,
-);
-const withDraftItems = (year: number, saved: Record<string, number>) => ({
-  ...saved,
-  ...draftItems.value[year],
-});
-const withDraftLists = (
-  year: number,
-  saved: Record<string, BalanceSheetDetail[]>,
-) => ({ ...saved, ...draftLists.value[year] });
+const previousPeriod = computed(() => `${selectedYear.value - 1}-12`);
 
 const current = computed(() =>
   balanceSheetAt(
@@ -214,6 +100,7 @@ const current = computed(() =>
     withDraftLists(selectedYear.value, balanceSheetDetails.value),
   ),
 );
+
 const previous = computed(() =>
   balanceSheetAt(
     previousPeriod.value,
@@ -231,7 +118,9 @@ const previous = computed(() =>
     withDraftLists(selectedYear.value - 1, previousDetails.value),
   ),
 );
+
 const rows = computed(() => sheetRows([previous.value, current.value]));
+
 const differences = computed(() => [
   previous.value.difference,
   current.value.difference,
@@ -242,8 +131,10 @@ const lastDay = (value: string) => {
   if (!year) return "";
   return `${new Date(year, month, 0).getDate()} ${formatPeriod(value)}`;
 };
+
 const columnLabel = (value: string) => {
   const [year, month] = value.split("-").map(Number);
+
   return new Date(year, month - 1, 1)
     .toLocaleDateString("en-US", {
       month: "short",
@@ -251,10 +142,12 @@ const columnLabel = (value: string) => {
     })
     .replace(" ", "-");
 };
+
 const columns = computed(() => [
   columnLabel(previousPeriod.value),
   columnLabel(selectedPeriod.value),
 ]);
+
 const hasEstimate = computed(() =>
   rows.value.some((row) =>
     [row.left, row.right].some(

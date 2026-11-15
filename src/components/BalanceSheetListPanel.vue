@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+
 import BalanceSheetDetailsEditor, {
   type DetailRow,
 } from "./BalanceSheetDetailsEditor.vue";
+
 import { type BalanceSheetItem, balanceSheetItems } from "../balance-sheet";
+
 import {
   type BalanceSheetDetail,
   useBalanceSheetDetails,
@@ -16,6 +19,7 @@ const props = defineProps<{ itemKey: BalanceSheetItem; title: string }>();
 const emit = defineEmits<{ done: [] }>();
 const { selectedYear, setBalanceSheetItems } = useKoperasiStore();
 const { balanceSheetDetails } = useBalanceSheetDetails();
+
 const config = computed(() => {
   const item = balanceSheetItems.find((entry) => entry.key === props.itemKey);
   return item && "detailed" in item ? item.detailed : {};
@@ -29,6 +33,7 @@ const toRows = (details: BalanceSheetDetail[]): DetailRow[] =>
     date: detail.loanDate ?? "",
     note: detail.note,
   }));
+
 const toDetails = (rows: DetailRow[]): BalanceSheetDetail[] =>
   rows
     .filter((row) => row.name.trim() || row.amount)
@@ -46,6 +51,7 @@ const saving = ref(false);
 
 async function save() {
   saving.value = true;
+
   try {
     if (
       await setBalanceSheetItems(

@@ -25,6 +25,7 @@ const props = withDefaults(
   }>(),
   { dateLabel: "Tanggal", addLabel: "Tambah baris", keepName: false },
 );
+
 const rows = defineModel<DetailRow[]>({ required: true });
 
 const emptyRow = (name = ""): DetailRow => ({
@@ -34,8 +35,10 @@ const emptyRow = (name = ""): DetailRow => ({
   date: "",
   note: "",
 });
+
 const dateFocus = ref(-1);
 const signed = (row: DetailRow) => (row.deduction ? -row.amount : row.amount);
+
 const total = computed(() =>
   rows.value.reduce((sum, row) => sum + signed(row), 0),
 );

@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import PageHeader from "../components/PageHeader.vue";
 import { cashAndBankAt } from "../balance-sheet";
+
 import {
   Channel,
   formatCurrency,
@@ -20,13 +21,17 @@ const { cashBook } = useCashBook(Channel.Cash);
 
 // The ledger runs through the current month, so its last period is "now".
 const periods = computed(() => [...monthlyLedger.value.periods].sort());
+
 const lastPeriod = computed(
   () => periods.value[periods.value.length - 1] ?? "",
 );
+
 const cashAndBank = computed(() =>
   cashAndBankAt(lastPeriod.value, cashBook.value),
 );
+
 const loanById = computed(() => new Map(loans.map((loan) => [loan.id, loan])));
+
 const memberById = computed(
   () => new Map(members.map((member) => [member.id, member])),
 );
@@ -34,9 +39,11 @@ const memberById = computed(
 const loanRows = computed(() =>
   monthlyLedger.value.loans.filter((row) => row.period === lastPeriod.value),
 );
+
 const savingsRows = computed(() =>
   monthlyLedger.value.savings.filter((row) => row.period === lastPeriod.value),
 );
+
 const sum = <T,>(rows: T[], amount: (row: T) => number) =>
   rows.reduce((total, row) => total + amount(row), 0);
 
@@ -44,6 +51,7 @@ const savings = computed(() => {
   const principal = sum(savingsRows.value, (row) => row.principalClosing);
   const mandatory = sum(savingsRows.value, (row) => row.mandatoryClosing);
   const voluntary = sum(savingsRows.value, (row) => row.voluntaryClosing);
+
   return {
     principal,
     mandatory,
@@ -53,20 +61,25 @@ const savings = computed(() => {
 });
 
 const groupOf = (row: LoanMonth) => loanById.value.get(row.loanId)?.loanGroup;
+
 const loanSummary = computed(() => {
   const rows = loanRows.value;
+
   const balance = (group: LoanGroup) =>
     sum(
       rows.filter((row) => groupOf(row) === group),
       (row) => row.closingBalance,
     );
+
   // Tunggakan is what is still owed: a loan paid ahead (lebih bayar, e.g. paid
   // off early through a suplesi) shows a negative arrears in the sheet, which
   // must not lower the total of the others.
   const arrearsPrincipal = sum(rows, (row) =>
     Math.max(row.arrearsPrincipal, 0),
   );
+
   const arrearsInterest = sum(rows, (row) => Math.max(row.arrearsInterest, 0));
+
   return {
     total: sum(rows, (row) => row.closingBalance),
     member: balance(LoanGroup.Member),
@@ -89,8 +102,10 @@ const months = computed(() =>
     const rows = monthlyLedger.value.loans.filter(
       (row) => row.period === period,
     );
+
     const interest = sum(rows, (row) => row.interestPaid);
     const provision = sum(rows, (row) => row.provision);
+
     return {
       period,
       interest,
@@ -100,13 +115,18 @@ const months = computed(() =>
     };
   }),
 );
+
 const incomeTotal = computed(() => sum(months.value, (month) => month.income));
+
 const disbursedTotal = computed(() =>
   sum(months.value, (month) => month.disbursed),
 );
+
 const maxOf = (key: "income" | "disbursed") =>
   Math.max(1, ...months.value.map((month) => month[key]));
+
 const shortMonth = (period: string) => formatPeriod(period).slice(0, 3);
+
 const barCharts = computed(() => [
   {
     key: "income" as const,
@@ -126,6 +146,7 @@ const topArrears = computed(() =>
   loanRows.value
     .map((row) => {
       const loan = loanById.value.get(row.loanId);
+
       return {
         loanId: row.loanId,
         name: loan?.memberName ?? row.loanId,
@@ -149,6 +170,7 @@ const savingsMembers = computed(
         row.principalClosing + row.mandatoryClosing + row.voluntaryClosing > 0,
     ).length,
 );
+
 const share = (part: number, whole: number) =>
   whole
     ? `${((part / whole) * 100).toLocaleString("id-ID", { maximumFractionDigits: 1 })}%`

@@ -3,6 +3,7 @@ import { watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { Plus, X } from "lucide-vue-next";
+
 import {
   activeWorkspaceTabId,
   openBlankWorkspaceTab,
@@ -44,6 +45,7 @@ function closeTab(tab: WorkspaceTab) {
   if (wasActive) {
     const nextTab =
       workspaceTabs.value[Math.min(index, workspaceTabs.value.length - 1)];
+
     activeWorkspaceTabId.value = nextTab.id;
     router.push(nextTab.fullPath);
   }

@@ -9,6 +9,7 @@ export const TransactionStatus = {
   Posted: "Terposting",
   Reversed: "Dibalik",
 } as const;
+
 export type TransactionStatus =
   (typeof TransactionStatus)[keyof typeof TransactionStatus];
 
@@ -17,6 +18,7 @@ export const LoanGroup = {
   Member: "Anggota PP BRI",
   NonMember: "Non Anggota PP BRI",
 } as const;
+
 export type LoanGroup = (typeof LoanGroup)[keyof typeof LoanGroup];
 
 // Jenis Pinjaman column of PINJAMAN BULANAN.
@@ -24,12 +26,14 @@ export const LoanType = {
   Monthly: "Bulanan",
   Temporary: "Sementara",
 } as const;
+
 export type LoanType = (typeof LoanType)[keyof typeof LoanType];
 
 export const TransactionDirection = {
   In: "Masuk",
   Out: "Keluar",
 } as const;
+
 export type TransactionDirection =
   (typeof TransactionDirection)[keyof typeof TransactionDirection];
 
@@ -38,6 +42,7 @@ export const SavingsAccountType = {
   Mandatory: "WAJIB",
   Voluntary: "MANASUKA",
 } as const;
+
 export type SavingsAccountType =
   (typeof SavingsAccountType)[keyof typeof SavingsAccountType];
 
@@ -45,6 +50,7 @@ export const SavingsMovement = {
   Deposit: "Setoran",
   Withdrawal: "Penarikan",
 } as const;
+
 export type SavingsMovement =
   (typeof SavingsMovement)[keyof typeof SavingsMovement];
 
@@ -55,6 +61,7 @@ export const Channel = {
   // Kas Buku Tabungan in/out that does not touch cash.
   SavingsBook: "TABUNGAN",
 } as const;
+
 export type Channel = (typeof Channel)[keyof typeof Channel];
 
 // Spelled as in PINJAMAN BULANAN.
@@ -64,12 +71,14 @@ export const Guarantee = {
   Tn: "TN",
   None: "",
 } as const;
+
 export type Guarantee = (typeof Guarantee)[keyof typeof Guarantee];
 
 export const InterestType = {
   Declining: "Menurun",
   Flat: "Plat",
 } as const;
+
 export type InterestType = (typeof InterestType)[keyof typeof InterestType];
 
 // Buku Kas category codes (the backend's component types).
@@ -90,6 +99,7 @@ export const CashCategory = {
   Dekopinda: "DEKOPINDA",
   Parcel: "PARCEL",
 } as const;
+
 export type CashCategory = (typeof CashCategory)[keyof typeof CashCategory];
 
 // Buku Kas categories: the cash transfers (each for one direction, with the
@@ -466,15 +476,18 @@ const loans = reactive<Loan[]>([]);
 /** Wajib and Manasuka balances; Pokok is on each member. */
 const savingsBalances = reactive<SavingsBalance[]>([]);
 const transactions = reactive<Transaction[]>([]);
+
 const totals = {
   cash: ref(0),
   savings: ref(0),
   loanPortfolio: ref(0),
   members: ref(0),
 };
+
 const loading = ref(true);
 const refreshing = ref(false);
 const backendError = ref<string | null>(null);
+
 const financialParameters = reactive<FinancialParameters>({
   principalSavings: 0,
   mandatorySavings: 0,
@@ -483,6 +496,7 @@ const financialParameters = reactive<FinancialParameters>({
   maxLoanOutstanding: 0,
   effectiveDate: "",
 });
+
 const toasts = ref<ToastMessage[]>([]);
 const snapshotVersion = ref(0);
 const companies = ref<Company[]>([]);
@@ -658,12 +672,14 @@ const backend = {
 const FIRST_REPORTING_YEAR = 2025;
 const currentYear = new Date().getFullYear();
 const selectedYear = ref(currentYear);
+
 const yearOptions = computed(() =>
   Array.from(
     { length: Math.max(1, currentYear - FIRST_REPORTING_YEAR + 1) },
     (_, index) => currentYear - index,
   ),
 );
+
 let toastId = 0;
 let initializePromise: Promise<void> | null = null;
 let refreshPromise: Promise<boolean> | null = null;
@@ -681,8 +697,10 @@ async function exportXlsx(kind: ExportKind, filter: ExportFilter = {}) {
       currentPeriod(),
       filter,
     );
+
     if (path)
       notify(translate("notifications.exported"), path, "success", path);
+
     return true;
   } catch (error) {
     notify(
@@ -690,6 +708,7 @@ async function exportXlsx(kind: ExportKind, filter: ExportFilter = {}) {
       errorMessage(error),
       "warning",
     );
+
     return false;
   }
 }
@@ -698,6 +717,7 @@ async function exportXlsx(kind: ExportKind, filter: ExportFilter = {}) {
 async function exportDatabase() {
   try {
     const path = await backend.exportDatabase();
+
     if (path)
       notify(
         translate("notifications.databaseExported"),
@@ -730,6 +750,7 @@ async function importDatabase() {
 async function openExportFolder(toast: ToastMessage) {
   if (!toast.exportPath || toast.openingFolder) return;
   toast.openingFolder = true;
+
   try {
     await revealItemInDir(toast.exportPath);
   } catch (error) {
@@ -751,6 +772,7 @@ function notify(
 ) {
   const id = ++toastId;
   toasts.value.push({ id, title, message, tone, exportPath });
+
   window.setTimeout(
     () => {
       toasts.value = toasts.value.filter((item) => item.id !== id);
@@ -766,11 +788,13 @@ function applySnapshot(
   if (companyId !== selectedCompanyId.value) return;
   members.splice(0, members.length, ...snapshot.members);
   loans.splice(0, loans.length, ...snapshot.loans);
+
   savingsBalances.splice(
     0,
     savingsBalances.length,
     ...snapshot.savingsBalances,
   );
+
   transactions.splice(0, transactions.length, ...snapshot.transactions);
   totals.cash.value = snapshot.totals.cash;
   totals.savings.value = snapshot.totals.savings;
@@ -785,13 +809,16 @@ function applyMutationSnapshot(snapshot: AppSnapshot, companyId: string) {
     queryKey: queryKeys.snapshot(companyId),
     exact: true,
   });
+
   queryClient.setQueryData(queryKeys.snapshot(companyId), snapshot);
+
   void queryClient.invalidateQueries({
     queryKey: queryKeys.company(companyId),
     predicate: (query) =>
       query.queryKey[2] === "monthly-ledger" ||
       query.queryKey[2] === "cash-book",
   });
+
   applySnapshot(snapshot, companyId);
 }
 
@@ -804,13 +831,16 @@ function fetchSnapshot(companyId: string) {
 
 async function initialize() {
   if (initializePromise) return initializePromise;
+
   initializePromise = (async () => {
     loading.value = true;
+
     try {
       companies.value = await queryClient.fetchQuery({
         queryKey: queryKeys.companies,
         queryFn: backend.listCompanies,
       });
+
       if (
         configuredCompanyId &&
         !companies.value.some((company) => company.id === configuredCompanyId)
@@ -819,6 +849,7 @@ async function initialize() {
           `VITE_COMPANY_ID "${configuredCompanyId}" tidak ditemukan dalam daftar perusahaan.`,
         );
       }
+
       if (
         !companies.value.some(
           (company) => company.id === selectedCompanyId.value,
@@ -826,10 +857,12 @@ async function initialize() {
       ) {
         selectedCompanyId.value = companies.value[0]?.id ?? "default";
       }
+
       const companyId = selectedCompanyId.value;
       applySnapshot(await fetchSnapshot(companyId), companyId);
     } catch (error) {
       backendError.value = errorMessage(error);
+
       notify(
         translate("notifications.backendUnavailable"),
         translate("notifications.backendHint"),
@@ -840,24 +873,31 @@ async function initialize() {
       initializePromise = null;
     }
   })();
+
   return initializePromise;
 }
 
 async function refresh() {
   if (refreshPromise) return refreshPromise;
+
   refreshPromise = (async () => {
     refreshing.value = true;
+
     try {
       const companyId = selectedCompanyId.value;
+
       await queryClient.invalidateQueries({
         queryKey: queryKeys.company(companyId),
         refetchType: "none",
       });
+
       applySnapshot(await fetchSnapshot(companyId), companyId);
+
       await queryClient.refetchQueries({
         queryKey: queryKeys.company(companyId),
         type: "active",
       });
+
       return true;
     } catch (error) {
       notify(
@@ -865,12 +905,14 @@ async function refresh() {
         errorMessage(error),
         "warning",
       );
+
       return false;
     } finally {
       refreshing.value = false;
       refreshPromise = null;
     }
   })();
+
   return refreshPromise;
 }
 
@@ -878,12 +920,15 @@ async function selectCompany(companyId: string) {
   if (configuredCompanyId && companyId !== configuredCompanyId) return false;
   if (companyId === selectedCompanyId.value) return true;
   selectedCompanyId.value = companyId;
+
   const cached = queryClient.getQueryData<AppSnapshot>(
     queryKeys.snapshot(companyId),
   );
+
   loading.value = !cached;
   backendError.value = null;
   if (cached) applySnapshot(cached, companyId);
+
   try {
     applySnapshot(await fetchSnapshot(companyId), companyId);
     if (companyId !== selectedCompanyId.value) return false;
@@ -892,11 +937,13 @@ async function selectCompany(companyId: string) {
   } catch (error) {
     if (companyId !== selectedCompanyId.value) return false;
     if (!cached) backendError.value = errorMessage(error);
+
     notify(
       translate("notifications.refreshFailed"),
       errorMessage(error),
       "warning",
     );
+
     return false;
   } finally {
     if (companyId === selectedCompanyId.value) loading.value = false;
@@ -905,6 +952,7 @@ async function selectCompany(companyId: string) {
 
 async function addMember(input: AddMemberInput, options: PostingOptions = {}) {
   const companyId = selectedCompanyId.value;
+
   try {
     applyMutationSnapshot(
       await backend.addMember({
@@ -914,10 +962,12 @@ async function addMember(input: AddMemberInput, options: PostingOptions = {}) {
       }),
       companyId,
     );
+
     notify(
       translate("notifications.memberAdded"),
       translate("notifications.memberAddedMessage", { name: input.name }),
     );
+
     return true;
   } catch (error) {
     notify(
@@ -925,6 +975,7 @@ async function addMember(input: AddMemberInput, options: PostingOptions = {}) {
       errorMessage(error),
       "warning",
     );
+
     return false;
   }
 }
@@ -936,16 +987,19 @@ async function addMember(input: AddMemberInput, options: PostingOptions = {}) {
  */
 function nextMemberNumber() {
   let highest = 0;
+
   for (const member of members) {
     const match = /^A(\d+)$/i.exec(member.memberNumber.trim());
     if (match) highest = Math.max(highest, Number(match[1]));
   }
+
   return `A${String(highest + 1).padStart(4, "0")}`;
 }
 
 function memberNumberOwner(memberNumber: string, exceptId = "") {
   const value = memberNumber.trim().toLocaleLowerCase(DEFAULT_LOCALE);
   if (!value) return undefined;
+
   return members.find(
     (member) =>
       member.id !== exceptId &&
@@ -960,11 +1014,13 @@ async function updateMember(
   joinedAt: string,
 ) {
   const companyId = selectedCompanyId.value;
+
   try {
     applyMutationSnapshot(
       await backend.updateMember({ memberId, name, memberNumber, joinedAt }),
       companyId,
     );
+
     notify(
       translate("notifications.memberSaved"),
       translate("notifications.memberSavedMessage", {
@@ -972,6 +1028,7 @@ async function updateMember(
         memberNumber: memberNumber.trim(),
       }),
     );
+
     return true;
   } catch (error) {
     notify(
@@ -979,6 +1036,7 @@ async function updateMember(
       errorMessage(error),
       "warning",
     );
+
     return false;
   }
 }
@@ -986,6 +1044,7 @@ async function updateMember(
 /** Search text matched against a member's name and ID Anggota. */
 export function matchesMember(search: string, name: string, memberNumber = "") {
   const value = search.trim().toLocaleLowerCase(DEFAULT_LOCALE);
+
   return (
     !value ||
     name.toLocaleLowerCase(DEFAULT_LOCALE).includes(value) ||
@@ -1003,6 +1062,7 @@ async function createLoan(
   disburse: PostingOptions = {},
 ) {
   const companyId = selectedCompanyId.value;
+
   try {
     applyMutationSnapshot(
       await backend.createLoan({
@@ -1014,10 +1074,12 @@ async function createLoan(
       }),
       companyId,
     );
+
     notify(
       translate("notifications.loanDisbursed"),
       translate("notifications.loanDisbursedMessage"),
     );
+
     return true;
   } catch (error) {
     notify(
@@ -1025,6 +1087,7 @@ async function createLoan(
       errorMessage(error),
       "warning",
     );
+
     return false;
   }
 }
@@ -1064,6 +1127,7 @@ export function formatDate(businessDate: string) {
 function operationalTimestamp(businessDate = todayIso()) {
   const now = new Date();
   const pad = (value: number) => String(value).padStart(2, "0");
+
   return {
     businessDate,
     displayDate: formatDate(businessDate),
@@ -1078,6 +1142,7 @@ async function postSavingsWithdrawal(
 ) {
   const input = { ...savings, movement: SavingsMovement.Withdrawal };
   const companyId = selectedCompanyId.value;
+
   try {
     applyMutationSnapshot(
       await backend.postSavingsWithdrawal({
@@ -1087,10 +1152,12 @@ async function postSavingsWithdrawal(
       }),
       companyId,
     );
+
     notify(
       translate("notifications.movementPosted", { movement: input.movement }),
       translate("notifications.movementPostedMessage"),
     );
+
     return true;
   } catch (error) {
     notify(
@@ -1098,6 +1165,7 @@ async function postSavingsWithdrawal(
       errorMessage(error),
       "warning",
     );
+
     return false;
   }
 }
@@ -1108,9 +1176,12 @@ async function postPayment(input: PaymentInput, options: PostingOptions = {}) {
     channel: options.channel ?? Channel.Cash,
     ...operationalTimestamp(options.businessDate),
   };
+
   const companyId = selectedCompanyId.value;
+
   try {
     applyMutationSnapshot(await backend.postPayment(backendInput), companyId);
+
     notify(
       translate("notifications.paymentPosted"),
       translate("notifications.paymentPostedMessage", {
@@ -1127,6 +1198,7 @@ async function postPayment(input: PaymentInput, options: PostingOptions = {}) {
         ),
       }),
     );
+
     return true;
   } catch (error) {
     notify(
@@ -1134,6 +1206,7 @@ async function postPayment(input: PaymentInput, options: PostingOptions = {}) {
       errorMessage(error),
       "warning",
     );
+
     return false;
   }
 }
@@ -1141,13 +1214,16 @@ async function postPayment(input: PaymentInput, options: PostingOptions = {}) {
 async function loadFinancialParameters() {
   try {
     const companyId = selectedCompanyId.value;
+
     const parameters = await queryClient.fetchQuery({
       queryKey: queryKeys.parameters(companyId),
       queryFn: () => backend.getFinancialParameters(companyId),
     });
+
     if (companyId === selectedCompanyId.value) {
       Object.assign(financialParameters, parameters);
     }
+
     return true;
   } catch (error) {
     notify(
@@ -1155,6 +1231,7 @@ async function loadFinancialParameters() {
       errorMessage(error),
       "warning",
     );
+
     return false;
   }
 }
@@ -1164,6 +1241,7 @@ async function postCashEntry(
   options: PostingOptions = {},
 ) {
   const companyId = selectedCompanyId.value;
+
   try {
     applyMutationSnapshot(
       await backend.postCashEntry({
@@ -1173,10 +1251,12 @@ async function postCashEntry(
       }),
       companyId,
     );
+
     notify(
       translate("notifications.paymentPosted"),
       `${input.description} · ${formatCurrency(input.amount)}`,
     );
+
     return true;
   } catch (error) {
     notify(
@@ -1184,12 +1264,14 @@ async function postCashEntry(
       errorMessage(error),
       "warning",
     );
+
     return false;
   }
 }
 
 async function getCashBook(year: number, channel: Channel) {
   const companyId = selectedCompanyId.value;
+
   return queryClient.fetchQuery({
     queryKey: queryKeys.cashBook(companyId, year, channel),
     queryFn: () => backend.getCashBook(year, channel, companyId),
@@ -1200,6 +1282,7 @@ async function reverseTransaction(
   transaction: Pick<Transaction, "id" | "date" | "description" | "amount">,
 ) {
   const companyId = selectedCompanyId.value;
+
   try {
     applyMutationSnapshot(
       await backend.reverseTransaction({
@@ -1208,6 +1291,7 @@ async function reverseTransaction(
       }),
       companyId,
     );
+
     notify(
       translate("notifications.reversalPosted"),
       translate("notifications.reversalPostedMessage", {
@@ -1217,6 +1301,7 @@ async function reverseTransaction(
       }),
       "warning",
     );
+
     return true;
   } catch (error) {
     notify(
@@ -1224,6 +1309,7 @@ async function reverseTransaction(
       errorMessage(error),
       "warning",
     );
+
     return false;
   }
 }
@@ -1238,6 +1324,7 @@ async function getTransactionGroup(id: string) {
       errorMessage(error),
       "warning",
     );
+
     return null;
   }
 }
@@ -1260,16 +1347,19 @@ export function currentPeriod(today = new Date()) {
  * recorded, so its installments count toward arrears. */
 export function useMonthlyLedger(yearOffset = 0) {
   const through = currentPeriod();
+
   const query = useQuery(
     computed(() => {
       const companyId = selectedCompanyId.value;
       const year = selectedYear.value + yearOffset;
+
       return {
         queryKey: queryKeys.monthlyLedger(companyId, year, through),
         queryFn: () => backend.getMonthlyLedger(year, companyId, through),
       };
     }),
   );
+
   watch(query.error, (error) => {
     if (error)
       notify(
@@ -1278,6 +1368,7 @@ export function useMonthlyLedger(yearOffset = 0) {
         "warning",
       );
   });
+
   return {
     monthlyLedger: computed(() => query.data.value ?? emptyMonthlyLedger),
     monthlyLedgerLoading: query.isPending,
@@ -1297,16 +1388,19 @@ function useBalanceSheet(yearOffset: number) {
     computed(() => {
       const companyId = selectedCompanyId.value;
       const year = selectedYear.value + yearOffset;
+
       return {
         queryKey: queryKeys.balanceSheet(companyId, year),
         queryFn: () => backend.getBalanceSheet(year, companyId),
       };
     }),
   );
+
   watch(query.error, (error) => {
     if (error)
       notify("Pos neraca gagal dimuat", errorMessage(error), "warning");
   });
+
   return query;
 }
 
@@ -1314,6 +1408,7 @@ function useBalanceSheet(yearOffset: number) {
  * from it), by key. */
 export function useBalanceSheetItems(yearOffset = 0) {
   const query = useBalanceSheet(yearOffset);
+
   return {
     balanceSheetItems: computed(() => query.data.value?.items ?? {}),
   };
@@ -1333,6 +1428,7 @@ export interface BalanceSheetDetail {
 /** Rincian of the typed Neraca lines of the selected book year, by key. */
 export function useBalanceSheetDetails(yearOffset = 0) {
   const query = useBalanceSheet(yearOffset);
+
   return {
     balanceSheetDetails: computed(() => query.data.value?.details ?? {}),
   };
@@ -1346,12 +1442,15 @@ async function setBalanceSheetItems(
   details: Record<string, BalanceSheetDetail[]> = {},
 ) {
   const companyId = selectedCompanyId.value;
+
   try {
     // One save: the lines and their rincian are stored together or not at all.
     await backend.setBalanceSheet({ year, items, details });
+
     await queryClient.invalidateQueries({
       queryKey: queryKeys.balanceSheet(companyId, year),
     });
+
     notify("Pos neraca disimpan", `Tahun buku ${year}.`);
     return true;
   } catch (error) {
@@ -1365,15 +1464,18 @@ export function useCashBook(channel: Channel, yearOffset = 0) {
     computed(() => {
       const companyId = selectedCompanyId.value;
       const year = selectedYear.value + yearOffset;
+
       return {
         queryKey: queryKeys.cashBook(companyId, year, channel),
         queryFn: () => backend.getCashBook(year, channel, companyId),
       };
     }),
   );
+
   watch(query.error, (error) => {
     if (error) notify("Buku kas gagal dimuat", errorMessage(error), "warning");
   });
+
   return { cashBook: query.data, loadingBook: query.isPending };
 }
 
@@ -1406,6 +1508,7 @@ export function formatPeriod(period: string) {
 /** Month before the period, e.g. "2026-01" -> "December 2025" (localized). */
 export function formatPreviousPeriod(period: string) {
   const [year, month] = period.split("-").map(Number);
+
   return month === 1
     ? `${monthNames[11]} ${year - 1}`
     : `${monthNames[month - 2]} ${year}`;
@@ -1431,14 +1534,17 @@ const shortMonthNames = [
 export function formatLoanLabel(loan: Loan) {
   const iso = loan.realizationDate.match(/^(\d{4})-(\d{2})/);
   const sheet = loan.realizationDate.match(/^\d{1,2}-([A-Za-z]{3})-(\d{4})$/);
+
   const month = iso
     ? formatPeriod(`${iso[1]}-${iso[2]}`)
     : sheet && shortMonthNames.includes(sheet[1])
       ? formatPeriod(`${sheet[2]}-${shortMonthNames.indexOf(sheet[1]) + 1}`)
       : loan.realizationDate;
+
   const kind = ["Pinjaman", loan.loanType, loan.interestType]
     .filter(Boolean)
     .join(" ");
+
   return [kind, month, formatCurrency(loan.plafond)]
     .filter(Boolean)
     .join(" · ");
@@ -1461,6 +1567,10 @@ export function formatSheetNumber(value: number) {
   return value < 0 ? `(${formatted})` : formatted;
 }
 
+/** An incentive rate (a fraction) as a percentage: 0.0365 → "3,65%". */
+export const formatRate = (rate: number) =>
+  `${(rate * 100).toLocaleString("id-ID", { maximumFractionDigits: 2 })}%`;
+
 export function formatCurrency(value: number, compact = false) {
   return new Intl.NumberFormat(DEFAULT_LOCALE, {
     style: "currency",
@@ -1480,17 +1590,20 @@ async function setIncentiveRate(
 ) {
   const companyId = selectedCompanyId.value;
   const label = kind === "loan" ? "Insentif pinjaman" : "Insentif simpanan";
+
   try {
     await backend.setIncentiveRates({
       year,
       [kind === "loan" ? "loanIncentiveRate" : "savingsIncentiveRate"]:
         percent / 100,
     });
+
     // Later years without their own rate inherit this one.
     await queryClient.invalidateQueries({
       queryKey: ["company", companyId, "monthly-ledger"],
       predicate: (query) => Number(query.queryKey[3]) >= year,
     });
+
     notify(`${label} disimpan`, `Tahun ${year}: ${percent}%.`);
     return true;
   } catch (error) {

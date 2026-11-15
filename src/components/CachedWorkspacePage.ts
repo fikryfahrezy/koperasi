@@ -24,20 +24,25 @@ export default defineComponent({
   setup(props) {
     const page = shallowRef<ComponentPublicInstance>();
     const scrollPositions = new Map<string, { top: number; left: number }[]>();
+
     const scrollers = (): HTMLElement[] => {
       const root = page.value?.$el;
       if (!root?.querySelectorAll) return [];
       const content = root.closest(".app-content");
+
       return [
         ...(content ? [content] : []),
         ...root.querySelectorAll(".data-table-wrap"),
       ];
     };
+
     let revision = 0;
+
     watch(
       () => [props.active, props.tabId] as const,
       async ([active, tabId], [wasActive, previousTabId]) => {
         const currentRevision = ++revision;
+
         if (wasActive) {
           scrollPositions.set(
             previousTabId,
@@ -47,10 +52,12 @@ export default defineComponent({
             })),
           );
         }
+
         if (!active) return;
         await nextTick();
         if (revision !== currentRevision) return;
         const saved = scrollPositions.get(tabId);
+
         scrollers().forEach((element, index) => {
           element.scrollTop = saved?.[index]?.top ?? 0;
           element.scrollLeft = saved?.[index]?.left ?? 0;
@@ -58,6 +65,7 @@ export default defineComponent({
       },
       { flush: "pre" },
     );
+
     watch(
       () => props.openTabIds,
       (ids) => {
@@ -65,6 +73,7 @@ export default defineComponent({
           if (!ids.includes(id)) scrollPositions.delete(id);
       },
     );
+
     return () =>
       h(KeepAlive, null, {
         default: () =>

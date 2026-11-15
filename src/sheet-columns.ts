@@ -6,15 +6,19 @@
 /** 1 -> "A", 27 -> "AA". */
 export function columnLetter(column: number) {
   let letters = "";
+
   for (let n = column; n > 0; n = Math.floor((n - 1) / 26))
     letters = String.fromCharCode(65 + ((n - 1) % 26)) + letters;
+
   return letters;
 }
 
 const letters = (columns: number[]) =>
   columns.map((column) => (column > 0 ? columnLetter(column) : ""));
+
 const range = (first: number, count: number) =>
   Array.from({ length: count }, (_, index) => first + index);
+
 const monthOf = (period: string) => Number(period.slice(5, 7));
 
 /** TAHUN 2026: Tanggal, Uraian, Debet, Kredit, Saldo, Keluar, Masuk, Kas + Tabungan. */
@@ -36,6 +40,7 @@ export const loanOpeningLetters = letters(range(11, 7));
 /** The 13 columns of one month on the Pinjaman page. */
 export function loanMonthLetters(period: string) {
   const start = 18 + 13 * (monthOf(period) - 1);
+
   return letters(
     range(start, 13).map((column) => (column > LOAN_LAST_COLUMN ? 0 : column)),
   );
@@ -49,6 +54,7 @@ export function loanTailLetters(nextPeriod: string) {
     monthOf(nextPeriod) === 1
       ? letters(range(LOAN_LAST_COLUMN + 1, 3)) // FR–FT Kewajiban s/d Januari
       : loanMonthLetters(nextPeriod).slice(0, 3);
+
   return [
     ...nextDue,
     ...letters([
@@ -96,8 +102,10 @@ function savingsBalanceColumn(month: number) {
 /** Saldo (3) + total of the month before the first month shown, once before it. */
 export function savingsOpeningLetters(firstPeriod: string, year: number) {
   const month = monthOf(firstPeriod);
+
   const previous =
     year === 2026 && savingsMonths[month] ? savingsBalanceColumn(month - 1) : 0;
+
   return previous ? letters(range(previous, 4)) : Array<string>(4).fill("");
 }
 
@@ -111,6 +119,7 @@ export function savingsMonthLetters(
   const block = year === 2026 ? savingsMonths[month] : undefined;
   if (!block) return Array<string>(hasShu ? 12 : 11).fill("");
   const balance = savingsBalanceColumn(month);
+
   return letters([
     block.date,
     ...block.pokok,

@@ -11,6 +11,7 @@ const refreshing = ref(false);
 async function handleRefresh() {
   if (!props.refresh || refreshing.value) return;
   refreshing.value = true;
+
   try {
     await props.refresh();
   } finally {

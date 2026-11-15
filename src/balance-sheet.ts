@@ -20,6 +20,7 @@ export const BalanceSheetGroup = {
   LongTermLiabilities: "Kewajiban Jangka Panjang",
   Equity: "Modal Sendiri",
 } as const;
+
 export type BalanceSheetGroup =
   (typeof BalanceSheetGroup)[keyof typeof BalanceSheetGroup];
 
@@ -48,6 +49,7 @@ export const BalanceSheetItem = {
   ExtraLongTermLiabilities: "EXTRA_LONG_TERM_LIABILITIES",
   ExtraEquity: "EXTRA_EQUITY",
 } as const;
+
 export type BalanceSheetItem =
   (typeof BalanceSheetItem)[keyof typeof BalanceSheetItem];
 
@@ -162,6 +164,7 @@ export const groupListKey: Record<BalanceSheetGroup, BalanceSheetItem> = {
     BalanceSheetItem.ExtraLongTermLiabilities,
   [BalanceSheetGroup.Equity]: BalanceSheetItem.ExtraEquity,
 };
+
 export type BalanceSheetItemKey = (typeof balanceSheetItems)[number]["key"];
 
 /** Biaya columns of Buku Kas (L–W), subtracted from income for Laba Bersih. */
@@ -188,6 +191,7 @@ export type LineEdit =
    * typed − the Buku Kas saldo). */
   | { kind: typeof LineEditKind.Item; key: BalanceSheetItem; offset?: number }
   | { kind: typeof LineEditKind.Detail; key: BalanceSheetItem; name: string };
+
 export type BalanceSheetLine = {
   /** Matches the line across columns (labels can carry the year). */
   id: string;
@@ -198,6 +202,7 @@ export type BalanceSheetLine = {
   /** Set where the amount is typed, not derived. */
   edit?: LineEdit;
 };
+
 export type BalanceSheetSection = {
   title: string;
   /** Its list of pos added by hand. */
@@ -217,15 +222,19 @@ export function cashAndBankAt(period: string, cashBook: CashBook | undefined) {
   const cashRows = (cashBook?.rows ?? []).filter(
     (row) => row.businessDate.slice(0, 7) <= period,
   );
+
   const lastCashRow = cashRows[cashRows.length - 1];
   const cash = lastCashRow?.balance ?? cashBook?.openingBalance ?? 0;
+
   // Deleted rows and their reversals are left out, as on Buku Kas.
   const postedRows = cashRows.filter(
     (row) => row.status !== TransactionStatus.Reversed && !row.isReversal,
   );
+
   const bank =
     (cashBook?.savingsBookOpeningBalance ?? 0) +
     sum(postedRows.map((row) => row.savingsBookIn - row.savingsBookOut));
+
   return { cash, bank, postedRows };
 }
 
@@ -241,9 +250,11 @@ export function balanceSheetAt(
   details: Record<string, BalanceSheetDetail[]> = {},
 ) {
   const item = (key: BalanceSheetItemKey) => items[key] ?? 0;
+
   // One line per pos of a group's list (Aktiva Tetap is only its list).
   const listLines = (group: BalanceSheetGroup): BalanceSheetLine[] => {
     const key = groupListKey[group];
+
     return (details[key] ?? []).map((detail) => ({
       id: `${key}:${detail.name}`,
       label: detail.name,
@@ -251,20 +262,24 @@ export function balanceSheetAt(
       edit: { kind: LineEditKind.Detail, key, name: detail.name },
     }));
   };
+
   const year = Number(period.slice(0, 4));
   const groupOf = new Map(loans.map((loan) => [loan.id, loan.loanGroup]));
   const loanRows = ledger.loans.filter((row) => row.period === period);
   const savingsRows = ledger.savings.filter((row) => row.period === period);
+
   const loanBalance = (group: LoanGroup) =>
     sum(
       loanRows
         .filter((row) => groupOf.get(row.loanId) === group)
         .map((row) => row.closingBalance),
     );
+
   // Catatan of the RAT Neraca: Piutang Non Anggota per Rekomendasi.
   const recommenderOf = new Map(
     loans.map((loan) => [loan.id, loan.recommender.trim()]),
   );
+
   const nonMemberByRecommender = [
     ...loanRows
       .filter((row) => groupOf.get(row.loanId) === LoanGroup.NonMember)
@@ -281,7 +296,9 @@ export function balanceSheetAt(
         Number(!a.recommender) - Number(!b.recommender) ||
         a.recommender.localeCompare(b.recommender),
     );
+
   const { cash, bank, postedRows } = cashAndBankAt(period, cashBook);
+
   // 0 means not typed: a bank balance of exactly 0 is not expected.
   const typedBank =
     period.endsWith("-12") && items[BalanceSheetItem.BankBalance]
@@ -292,6 +309,7 @@ export function balanceSheetAt(
   const monthsSoFar = ledger.loans.filter((row) => row.period <= period);
   const interest = sum(monthsSoFar.map((row) => row.interestPaid));
   const provision = sum(monthsSoFar.map((row) => row.provision));
+
   const expenses = expenseCategories.map((category) => ({
     label: category.label,
     amount: sum(
@@ -302,6 +320,7 @@ export function balanceSheetAt(
       ),
     ),
   }));
+
   const expenseTotal = sum(expenses.map((expense) => expense.amount));
   const netIncome = interest + provision - expenseTotal;
 
@@ -314,6 +333,7 @@ export function balanceSheetAt(
     lastLines: BalanceSheetLine[] = [],
   ): BalanceSheetSection => {
     const lines = [...fixedLines, ...listLines(title), ...lastLines];
+
     return {
       title,
       listKey: groupListKey[title],
@@ -322,6 +342,7 @@ export function balanceSheetAt(
       total: sum(lines.map((line) => line.amount)),
     };
   };
+
   const typed = (
     key: BalanceSheetItem,
     label?: string,
@@ -374,6 +395,7 @@ export function balanceSheetAt(
     ]),
     section(BalanceSheetGroup.FixedAssets, "Jumlah Aktiva Tetap", []),
   ];
+
   const liabilities = [
     section(
       BalanceSheetGroup.CurrentLiabilities,
@@ -423,8 +445,10 @@ export function balanceSheetAt(
       ],
     ),
   ];
+
   const totalAssets = sum(assets.map((part) => part.total));
   const totalLiabilities = sum(liabilities.map((part) => part.total));
+
   return {
     assets,
     liabilities,
@@ -435,6 +459,7 @@ export function balanceSheetAt(
     nonMemberByRecommender,
   };
 }
+
 export type BalanceSheet = ReturnType<typeof balanceSheetAt>;
 
 type SheetCell =
@@ -456,6 +481,7 @@ type SheetCell =
     }
   | { kind: "total"; label: string; amounts: number[] }
   | { kind: "blank" };
+
 export type SheetRow = { left: SheetCell; right: SheetCell };
 
 /** The NERACA layout: Aktiva and Pasiva side by side, one column per sheet
@@ -469,14 +495,17 @@ export function sheetRows(sheets: BalanceSheet[]): SheetRow[] {
     indexes.flatMap((index): SheetCell[] => {
       const parts = sheets.map((sheet) => pick(sheet)[index]);
       const [first] = parts;
+
       // Columns can list different lines (Aktiva Tetap is a list per book
       // year), so lines are matched by id, in order of first appearance; the
       // label is the last column's.
       const ids = [
         ...new Set(parts.flatMap((part) => part.lines.map((line) => line.id))),
       ];
+
       const lineOf = (part: BalanceSheetSection, id: string) =>
         part.lines.find((line) => line.id === id);
+
       return [
         { kind: "heading", label: first.title, listKey: first.listKey },
         ...ids.map((id, lineIndex): SheetCell => {
@@ -484,12 +513,15 @@ export function sheetRows(sheets: BalanceSheet[]): SheetRow[] {
           const labels = parts
             .map((part) => lineOf(part, id)?.label)
             .filter((value) => value !== undefined);
+
           const label = labels[labels.length - 1];
+
           // A pos of a list missing in one year can be typed there too:
           // saving adds it to that year's list.
           const listEdit = parts
             .map((part) => lineOf(part, id)?.edit)
             .find((edit) => edit?.kind === LineEditKind.Detail);
+
           return {
             kind: "line",
             label: `${lineIndex + 1}. ${label}`,
@@ -509,11 +541,13 @@ export function sheetRows(sheets: BalanceSheet[]): SheetRow[] {
         { kind: "blank" },
       ];
     });
+
   const zip = (left: SheetCell[], right: SheetCell[]) =>
     Array.from({ length: Math.max(left.length, right.length) }, (_, index) => ({
       left: left[index] ?? { kind: "blank" as const },
       right: right[index] ?? { kind: "blank" as const },
     }));
+
   return [
     ...zip(
       cells((sheet) => sheet.assets, [0]),

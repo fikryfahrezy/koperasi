@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
+import { computed } from "vue";
 import { useRoute } from "vue-router";
+
 import {
   ArrowLeft,
   BadgeInfo,
@@ -8,18 +9,24 @@ import {
   UserRound,
   WalletCards,
 } from "lucide-vue-next";
+
 import DateInput from "../components/DateInput.vue";
 import PageHeader from "../components/PageHeader.vue";
 import StatusPill from "../components/StatusPill.vue";
+import { useMemberDraft } from "../composables/useMemberDraft";
+
+import {
+  arrearsLedger,
+  arrearsOf,
+  arrearsPeriodOf,
+  scheduleOf,
+} from "../member-arrears";
+
 import {
   currentPeriod,
   formatCurrency,
   formatDate,
   formatLoanLabel,
-  formatPeriod,
-  formatPreviousPeriod,
-  type Loan,
-  type LoanMonth,
   SavingsAccountType,
   TransactionDirection,
   useKoperasiStore,
@@ -27,78 +34,29 @@ import {
 } from "../store/koperasi";
 
 const route = useRoute();
-const {
-  members,
-  loans,
-  savingsBalances,
-  transactions,
-  refresh,
-  memberNumberOwner,
-  updateMember,
-} = useKoperasiStore();
+
+const { members, loans, savingsBalances, transactions, refresh } =
+  useKoperasiStore();
 
 const member = computed(() =>
   members.find((item) => item.id === String(route.params.id)),
 );
-const saving = ref(false);
-const draft = reactive({ name: "", memberNumber: "", joinedAt: "" });
-// Imported members carry a placeholder such as "Migrasi 2026" instead of a date.
-const storedJoinedAt = computed(() => {
-  const value = member.value?.joinedAt ?? "";
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
-});
-function resetDraft() {
-  draft.name = member.value?.name ?? "";
-  draft.memberNumber = member.value?.memberNumber ?? "";
-  draft.joinedAt = storedJoinedAt.value;
-}
-watch(
-  () => [
-    member.value?.id,
-    member.value?.name,
-    member.value?.memberNumber,
-    member.value?.joinedAt,
-  ],
-  resetDraft,
-  { immediate: true },
-);
-const memberNumberTaken = computed(() =>
-  memberNumberOwner(draft.memberNumber, member.value?.id),
-);
-const dirty = computed(
-  () =>
-    Boolean(member.value) &&
-    (draft.name.trim() !== member.value?.name ||
-      draft.memberNumber.trim() !== member.value?.memberNumber ||
-      draft.joinedAt !== storedJoinedAt.value),
-);
-async function saveMember() {
-  if (!member.value || !dirty.value) return;
-  if (!draft.name.trim() || !draft.memberNumber.trim()) return;
-  if (memberNumberTaken.value) return;
-  saving.value = true;
-  try {
-    await updateMember(
-      member.value.id,
-      draft.name,
-      draft.memberNumber,
-      draft.joinedAt,
-    );
-  } finally {
-    saving.value = false;
-  }
-}
+
+const { draft, saving, dirty, memberNumberTaken, resetDraft, saveMember } =
+  useMemberDraft(member);
 
 const memberLoans = computed(() =>
   member.value
     ? loans.filter((loan) => loan.memberId === member.value?.id)
     : [],
 );
+
 const savingsOf = (accountType: SavingsAccountType) =>
   savingsBalances.find(
     (item) =>
       item.memberId === member.value?.id && item.accountType === accountType,
   )?.balance ?? 0;
+
 const savingsBreakdown = computed(() => [
   { label: "Simpanan pokok", amount: member.value?.principalSavings ?? 0 },
   { label: "Simpanan wajib", amount: savingsOf(SavingsAccountType.Mandatory) },
@@ -108,200 +66,16 @@ const savingsBreakdown = computed(() => [
   },
 ]);
 
-// Arrears run through the current month, even before its transactions are
-// recorded; for an earlier year, through that year's latest month.
 const thisPeriod = currentPeriod();
 const { monthlyLedger } = useMonthlyLedger();
-const arrearsPeriod = computed(() => {
-  const periods = monthlyLedger.value.periods.filter(
-    (period) => period <= thisPeriod,
-  );
-  return periods.length ? periods.reduce((a, b) => (a > b ? a : b)) : "";
-});
-type ArrearsPart = "Principal" | "Interest";
 
-/** Whether a loan month's arrears of `part` count. A paid-off loan has no
- * principal arrears, as in the sheet: an early payoff reads as a large
- * "lebih bayar" that hides other loans' arrears. Interest it still owes
- * stays, so a payoff short on interest is not lost. */
-function countsArrears(row: LoanMonth, part: ArrearsPart) {
-  return (
-    row.closingBalance > 0 || (part === "Interest" && row.arrearsInterest > 0)
-  );
-}
-
-const memberLedgerRows = computed(() => {
-  const ids = new Set(memberLoans.value.map((loan) => loan.id));
-  return monthlyLedger.value.loans
-    .filter((row) => ids.has(row.loanId) && row.period <= arrearsPeriod.value)
-    .sort((a, b) => a.period.localeCompare(b.period));
-});
-
-/** Unpaid amount per month, oldest first: the arrears are matched against
- * the latest installments, walking back month by month. Arrears reaching
- * past the selected year are reported as "s/d" the month before it. */
-function unpaidMonths(part: ArrearsPart, loanList: Loan[]) {
-  const byPeriod = new Map<string, number>();
-  let earlier = 0;
-  let firstPeriod = "";
-  for (const loan of loanList) {
-    const rows = memberLedgerRows.value.filter((row) => row.loanId === loan.id);
-    const latest = rows.find((row) => row.period === arrearsPeriod.value);
-    let remaining =
-      latest && countsArrears(latest, part) ? latest[`arrears${part}`] : 0;
-    for (let i = rows.length - 1; i >= 0 && remaining > 0; i--) {
-      const unpaid = Math.min(rows[i][`scheduled${part}`], remaining);
-      if (unpaid <= 0) continue;
-      byPeriod.set(
-        rows[i].period,
-        (byPeriod.get(rows[i].period) ?? 0) + unpaid,
-      );
-      remaining -= unpaid;
-    }
-    if (remaining > 0 && rows.length) {
-      earlier += remaining;
-      if (!firstPeriod || rows[0].period < firstPeriod)
-        firstPeriod = rows[0].period;
-    }
-  }
-  const months = [...byPeriod]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([period, amount]) => ({ label: formatPeriod(period), amount }));
-  if (earlier > 0)
-    months.unshift({
-      label: `s/d ${formatPreviousPeriod(firstPeriod)}`,
-      amount: earlier,
-    });
-  return months;
-}
-
-/** One month's installment (or the arrears carried into the year) and what
- * has paid it so far. */
-interface Installment {
-  period: string;
-  due: number;
-  paid: number;
-  /** Date of each deposit that paid part of it; "" for one before the year. */
-  paidOn: string[];
-}
-
-const paidKey = {
-  Principal: "principalPaid",
-  Interest: "interestPaid",
-} as const;
-
-/** Riwayat angsuran: the year's installments of one loan and when each was
- * paid. A deposit is not tied to an installment, so it pays the oldest unpaid
- * one first and any surplus pays the next months ahead. What stays unpaid is
- * then the latest months, as in `unpaidMonths`, and adds up to the arrears. */
-function installmentsOf(loan: Loan, part: ArrearsPart) {
-  const rows = memberLedgerRows.value.filter((row) => row.loanId === loan.id);
-  const items: Installment[] = [];
-  const credit: { amount: number; date: string }[] = [];
-  const [first] = rows;
-  if (!first) return { items, ahead: 0 };
-  const prior =
-    first[`arrears${part}`] - first[`scheduled${part}`] + first[paidKey[part]];
-  if (prior > 0) items.push({ period: "", due: prior, paid: 0, paidOn: [] });
-  else if (prior < 0) credit.push({ amount: -prior, date: "" });
-  for (const row of rows) {
-    const scheduled = row[`scheduled${part}`];
-    if (scheduled > 0)
-      items.push({ period: row.period, due: scheduled, paid: 0, paidOn: [] });
-    const paid = row[paidKey[part]];
-    if (paid > 0) credit.push({ amount: paid, date: row.transactionDate });
-    for (const item of items) {
-      while (item.paid < item.due && credit.length) {
-        const deposit = credit[0];
-        const amount = Math.min(item.due - item.paid, deposit.amount);
-        item.paid += amount;
-        item.paidOn.push(deposit.date);
-        deposit.amount -= amount;
-        if (!deposit.amount) credit.shift();
-      }
-    }
-  }
-  return { items, ahead: credit.reduce((sum, item) => sum + item.amount, 0) };
-}
-
-function installmentStatus(item: Installment, year: string) {
-  const date = item.paidOn[item.paidOn.length - 1];
-  const when =
-    date === undefined
-      ? ""
-      : date === ""
-        ? `sebelum ${year}`
-        : `${item.period && date.slice(0, 7) < item.period ? "di muka " : ""}${formatDate(date)}`;
-  if (item.paid >= item.due) return `Dibayar ${when}`;
-  if (item.paid > 0)
-    return `Kurang ${formatCurrency(item.due - item.paid)} · sebagian dibayar ${when}`;
-  return "Belum dibayar";
-}
-
-/** Rows of the Riwayat angsuran table: arrears carried into the year first,
- * then each month, with its principal and interest installments. */
-function scheduleOf(loan: Loan) {
-  const principal = installmentsOf(loan, "Principal");
-  const interest = installmentsOf(loan, "Interest");
-  const year = arrearsPeriod.value.slice(0, 4);
-  const firstPeriod =
-    memberLedgerRows.value.find((row) => row.loanId === loan.id)?.period ?? "";
-  const periods = [
-    ...new Set(
-      [...principal.items, ...interest.items].map((item) => item.period),
-    ),
-  ].sort();
-  const cell = (item?: Installment) =>
-    item && {
-      amount: item.due,
-      status: installmentStatus(item, year),
-      unpaid: item.paid < item.due,
-    };
-  return {
-    rows: periods.map((period) => ({
-      label: period
-        ? formatPeriod(period)
-        : `Tunggakan s/d ${formatPreviousPeriod(firstPeriod)}`,
-      principal: cell(principal.items.find((item) => item.period === period)),
-      interest: cell(interest.items.find((item) => item.period === period)),
-    })),
-    // Paid ahead of the installments due so far; meaningless once paid off.
-    ahead:
-      loan.balance > 0
-        ? { principal: principal.ahead, interest: interest.ahead }
-        : { principal: 0, interest: 0 },
-  };
-}
-
-const arrearsNote = computed(() =>
-  arrearsPeriod.value ? `Per ${formatPeriod(arrearsPeriod.value)}` : "",
+const ledger = computed(() =>
+  arrearsLedger(
+    monthlyLedger.value.loans,
+    new Set(memberLoans.value.map((loan) => loan.id)),
+    arrearsPeriodOf(monthlyLedger.value.periods, thisPeriod),
+  ),
 );
-
-/** Tunggakan pokok and bunga of the given loans (see `countsArrears`). */
-function arrearsOf(loanList: Loan[], withMonths: boolean) {
-  const ids = new Set(loanList.map((loan) => loan.id));
-  const latest = memberLedgerRows.value.filter(
-    (row) => ids.has(row.loanId) && row.period === arrearsPeriod.value,
-  );
-  const part = (label: string, key: ArrearsPart) => {
-    const amount = latest
-      .filter((row) => countsArrears(row, key))
-      .reduce((sum, row) => sum + row[`arrears${key}`], 0);
-    return {
-      label,
-      amount,
-      note:
-        amount < 0
-          ? [arrearsNote.value, "Lebih bayar"].filter(Boolean).join(" · ")
-          : arrearsNote.value,
-      months: withMonths && amount > 0 ? unpaidMonths(key, loanList) : [],
-    };
-  };
-  return [
-    part("Tunggakan pokok", "Principal"),
-    part("Tunggakan bunga", "Interest"),
-  ];
-}
 
 // Totals on top; each loan below lists its own arrears per month.
 const loanSummary = computed(() => [
@@ -311,25 +85,28 @@ const loanSummary = computed(() => [
     note: "",
     months: [],
   },
-  ...arrearsOf(memberLoans.value, false).map((item) => ({
+  ...arrearsOf(ledger.value, memberLoans.value, false).map((item) => ({
     ...item,
     label: `Total ${item.label.toLocaleLowerCase("id-ID")}`,
   })),
 ]);
+
 // Totals only add something when more than one loan is still running.
 const showLoanTotals = computed(
   () => memberLoans.value.filter((loan) => loan.balance > 0).length > 1,
 );
+
 const loanDetails = computed(() =>
   memberLoans.value.map((loan) => {
     // A paid-off loan lists only the interest it still owes.
-    const arrears = arrearsOf([loan], true).filter(
+    const arrears = arrearsOf(ledger.value, [loan], true).filter(
       (part) => loan.balance > 0 || part.amount > 0,
     );
+
     return {
       loan,
       arrears,
-      schedule: scheduleOf(loan),
+      schedule: scheduleOf(ledger.value, loan),
       behind: arrears.some((item) => item.amount > 0),
     };
   }),
@@ -337,10 +114,12 @@ const loanDetails = computed(() =>
 
 // "Aktivitas terbaru" is hidden for now.
 const showRecentActivity = false;
+
 const memberTransactions = computed(() => {
   if (!member.value) return [];
   const { memberNumber } = member.value;
   const memberName = member.value.name.toLocaleLowerCase("id-ID");
+
   return transactions
     .filter((item) =>
       memberNumber

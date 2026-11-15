@@ -10,6 +10,7 @@ export type VirtualTableNavigation = {
 };
 
 type CellPosition = { cell: HTMLTableCellElement; column: number };
+
 type TableState = {
   selected: HTMLTableCellElement | null;
   virtual?: VirtualTableNavigation;
@@ -21,9 +22,11 @@ type TableState = {
   frame: number | null;
   tooltip: ReturnType<typeof createClippedCellTooltip>;
 };
+
 const tables = new Map<HTMLTableElement, TableState>();
 let activeTable: HTMLTableElement | null = null;
 const arrowKeys = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
+
 const nativeArrowControl =
   'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="combobox"], [role="listbox"], [role="menu"], [role="tablist"], [role="slider"], [role="spinbutton"]';
 
@@ -38,15 +41,19 @@ function rows(table: HTMLTableElement): CellPosition[][] {
     .map((row) => {
       let column = 0;
       const cells: CellPosition[] = [];
+
       for (const cell of Array.from(row.cells)) {
         const span = Number(cell.dataset?.virtualSpan) || cell.colSpan;
+
         if (cell.dataset?.virtualGap === undefined) {
           cells.push({ cell, column });
           if (cell.dataset) cell.dataset.virtualColumn = String(column);
           cell.setAttribute?.("aria-colindex", String(column + 1));
         }
+
         column += span;
       }
+
       return cells;
     })
     .filter((row) => row.length > 0);
@@ -65,11 +72,13 @@ function select(
   if (!focus) return;
   if (state.frame !== null) return;
   const origin = document.activeElement;
+
   // Keep every logical arrow step, but only focus and measure the final cell
   // once per frame. Slow devices never accumulate a queue of scroll work.
   state.frame = requestAnimationFrame(() => {
     state.frame = null;
     const selected = state.selected;
+
     if (
       !selected ||
       !table.isConnected ||
@@ -77,6 +86,7 @@ function select(
       document.activeElement !== origin
     )
       return;
+
     selected.focus({ preventScroll: true });
     scrollTableCellIntoView(table, selected);
   });
@@ -100,11 +110,14 @@ export function scrollTableCellIntoView(
   const viewportTop = viewport.top + scroller.clientTop;
   const viewportBottom = viewportTop + scroller.clientHeight;
   const rect = cell.getBoundingClientRect();
+
   // Header cells stick individually; the thead remains in normal flow.
   const headerBottoms = Array.from(
     table.tHead?.querySelectorAll<HTMLTableCellElement>("th") ?? [],
   ).map((headerCell) => headerCell.getBoundingClientRect().bottom);
+
   const top = Math.max(viewportTop, ...headerBottoms);
+
   // The footer cells are sticky; the tfoot itself remains in normal flow.
   const footerTops = Array.from(
     table.tFoot?.querySelectorAll<HTMLTableCellElement>("td") ?? [],
@@ -115,19 +128,23 @@ export function scrollTableCellIntoView(
         footerRect.bottom > viewportTop && footerRect.top < viewportBottom,
     )
     .map((footerRect) => footerRect.top);
+
   const bottom =
     cell.parentElement?.parentElement?.tagName === "TFOOT"
       ? viewportBottom
       : Math.min(viewportBottom, ...footerTops);
+
   const stickyCells = Array.from(cell.parentElement!.children).filter(
     (sibling) => sibling.classList.contains("sheet-sticky"),
   );
+
   const left = cell.classList.contains("sheet-sticky")
     ? viewport.left
     : Math.max(
         viewport.left,
         ...stickyCells.map((sibling) => sibling.getBoundingClientRect().right),
       );
+
   scroller.scrollBy({
     top:
       rect.top < top
@@ -148,12 +165,14 @@ function queueVirtualFocus(table: HTMLTableElement, state: TableState) {
   if (state.frame !== null) return;
   const origin = document.activeElement;
   const revision = state.revision;
+
   state.frame = requestAnimationFrame(async () => {
     state.frame = null;
     const index = state.logicalRow;
     if (index === null || !state.virtual || revision !== state.revision) return;
     const column = state.column;
     await state.virtual.scrollToRow(index, column);
+
     if (
       revision !== state.revision ||
       index !== state.logicalRow ||
@@ -168,14 +187,17 @@ function queueVirtualFocus(table: HTMLTableElement, state: TableState) {
         ))
     )
       return;
+
     const row = state.grid.find(
       (cells) => virtualRowIndex(cells[0]?.cell ?? null) === index,
     );
+
     const next = row?.find(
       ({ cell, column: start }) =>
         column >= start &&
         column < start + (Number(cell.dataset?.virtualSpan) || cell.colSpan),
     );
+
     if (!next) return;
     select(table, next.cell, false);
     next.cell.focus({ preventScroll: true });
@@ -192,6 +214,7 @@ function navigateVirtual(
   if (!virtual.count) return;
   event.preventDefault();
   activeTable = table;
+
   if (state.logicalRow === null) {
     state.logicalRow = virtualRowIndex(state.grid[0]?.[0]?.cell ?? null) ?? 0;
     state.column = 0;
@@ -207,14 +230,17 @@ function navigateVirtual(
     const spans = virtual.columnSpans(state.logicalRow);
     const starts: number[] = [];
     let column = 0;
+
     for (const span of spans) {
       starts.push(column);
       column += span;
     }
+
     const current = starts.findIndex(
       (start, index) =>
         state.column >= start && state.column < start + spans[index]!,
     );
+
     state.column =
       starts[
         Math.max(
@@ -226,6 +252,7 @@ function navigateVirtual(
         )
       ] ?? 0;
   }
+
   queueVirtualFocus(table, state);
 }
 
@@ -240,20 +267,25 @@ function onKeydown(event: KeyboardEvent) {
     event.shiftKey
   )
     return;
+
   const target = event.target;
   if (target instanceof Element && target.closest(nativeArrowControl)) return;
+
   if (
     document.querySelector(
       '[aria-modal="true"], [role="listbox"], [role="menu"]',
     )
   )
     return;
+
   const focusedTable =
     target instanceof Element
       ? target.closest<HTMLTableElement>("table")
       : null;
+
   const isVisible = (candidate: HTMLTableElement) =>
     candidate.isConnected && candidate.getClientRects().length > 0;
+
   // A focused table is already visible. Avoid layout reads on the repeat path.
   const table =
     focusedTable && tables.has(focusedTable)
@@ -261,17 +293,21 @@ function onKeydown(event: KeyboardEvent) {
       : activeTable && isVisible(activeTable)
         ? activeTable
         : Array.from(tables.keys()).find(isVisible);
+
   if (!table) return;
   const state = tables.get(table)!;
+
   if (state.virtual) {
     navigateVirtual(table, state, event);
     return;
   }
+
   const grid = state.grid;
   const position = state.selected ? state.positions.get(state.selected) : null;
   const rowIndex = position?.row ?? -1;
   if (!grid.length) return;
   event.preventDefault();
+
   if (
     rowIndex < 0 ||
     (state.frame === null &&
@@ -282,8 +318,10 @@ function onKeydown(event: KeyboardEvent) {
     select(table, cell, true);
     return;
   }
+
   const row = grid[rowIndex]!;
   const cellIndex = position!.cell;
+
   if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
     const next =
       row[
@@ -295,6 +333,7 @@ function onKeydown(event: KeyboardEvent) {
           ),
         )
       ]!;
+
     state.column = next.column;
     if (next.cell !== state.selected) select(table, next.cell, true);
   } else {
@@ -308,11 +347,13 @@ function onKeydown(event: KeyboardEvent) {
           ),
         )
       ]!;
+
     const next =
       nextRow.find(
         ({ cell, column }) =>
           state.column >= column && state.column < column + cell.colSpan,
       ) ?? nextRow[nextRow.length - 1]!;
+
     if (next.cell !== state.selected) select(table, next.cell, true);
   }
 }
@@ -321,24 +362,29 @@ function onCellFocus(event: Event) {
   const target = event.target;
   if (!(target instanceof Element)) return;
   const table = event.currentTarget as HTMLTableElement;
+
   const cell =
     target instanceof Element
       ? target.closest<HTMLTableCellElement>("td")
       : null;
+
   if (!cell) return;
   const state = tables.get(table)!;
   state.tooltip.show(cell);
+
   if (
     event.type === "focusin" &&
     state.selected === cell &&
     (!state.virtual || state.logicalRow === virtualRowIndex(cell))
   )
     return;
+
   const position = state.positions.get(cell);
   if (!position) return;
   cancelFocus(state);
   state.logicalRow = virtualRowIndex(cell);
   state.column = state.grid[position.row]![position.cell]!.column;
+
   select(
     table,
     cell,
@@ -351,12 +397,15 @@ function sync(table: HTMLTableElement) {
   const state = tables.get(table)!;
   state.grid = rows(table);
   state.positions.clear();
+
   state.grid.forEach((row, rowIndex) => {
     row.forEach(({ cell }, cellIndex) => {
       state.positions.set(cell, { row: rowIndex, cell: cellIndex });
     });
   });
+
   const cells = state.grid.flat();
+
   if (
     !state.selected ||
     !state.positions.has(state.selected) ||
@@ -366,6 +415,7 @@ function sync(table: HTMLTableElement) {
     state.selected = cells[0]?.cell ?? null;
     if (!state.virtual) state.column = 0;
   }
+
   for (const { cell } of cells) {
     const tabIndex = cell === state.selected ? 0 : -1;
     if (cell.tabIndex !== tabIndex) cell.tabIndex = tabIndex;
@@ -378,6 +428,7 @@ export const tableNavigation: ObjectDirective<
 > = {
   mounted(table, binding) {
     if (!tables.size) document.addEventListener("keydown", onKeydown);
+
     tables.set(table, {
       selected: null,
       virtual: binding?.value,
@@ -389,6 +440,7 @@ export const tableNavigation: ObjectDirective<
       frame: null,
       tooltip: createClippedCellTooltip(table),
     });
+
     table.addEventListener("click", onCellFocus);
     table.addEventListener("focusin", onCellFocus);
     sync(table);
@@ -396,6 +448,7 @@ export const tableNavigation: ObjectDirective<
   updated(table, binding) {
     const state = tables.get(table)!;
     const value = binding?.value;
+
     if (
       state.virtual?.context !== value?.context ||
       state.virtual?.rows !== value?.rows
@@ -407,6 +460,7 @@ export const tableNavigation: ObjectDirective<
       state.column = 0;
       state.tooltip.hide();
     }
+
     state.virtual = value;
     sync(table);
   },

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { RouterLink, useRouter } from "vue-router";
+
 import {
   BookOpen,
   Coins,
@@ -9,7 +10,9 @@ import {
   Scale,
   Users,
 } from "lucide-vue-next";
+
 import { useI18n } from "vue-i18n";
+
 import {
   navigateActiveWorkspaceTab,
   workspaceSectionPath,
@@ -17,6 +20,7 @@ import {
 
 const router = useRouter();
 const { t } = useI18n();
+
 const menuItems = [
   {
     to: "/dashboard",
@@ -29,6 +33,7 @@ const menuItems = [
   { to: "/balance-sheet", labelKey: "sidebar.nav.balanceSheet", icon: Scale },
   { to: "/members", labelKey: "sidebar.nav.members", icon: Users },
 ];
+
 // Kept apart on the right: it manages the whole database, not daily work.
 const dataItem = { to: "/data", labelKey: "sidebar.nav.data", icon: Database };
 

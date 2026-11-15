@@ -7,9 +7,17 @@ import PageHeader from "../components/PageHeader.vue";
 import UiModal from "../components/UiModal.vue";
 import CashEntryDialog from "../components/CashEntryDialog.vue";
 import ExportButton from "../components/ExportButton.vue";
+
+import {
+  deletedRowsOf,
+  isExcluded,
+  matchesSearch,
+  plainWords,
+  savingsBookTotalsOf,
+} from "../cash-book-rows";
+
 import {
   Channel,
-  type Transaction,
   type TransactionGroup,
   formatCurrency,
   formatDate,
@@ -17,10 +25,10 @@ import {
   formatSheetNumber,
   type CashBookRow,
   TransactionDirection,
-  TransactionStatus,
   useKoperasiStore,
   useCashBook,
 } from "../store/koperasi";
+
 import { cashBookLetters } from "../sheet-columns";
 
 const pageState = useWorkspacePageState("/cash-ledger");
@@ -36,6 +44,7 @@ const {
 
 // --- Cash ledger (following the daily cash ledger spreadsheet) ----------------------------
 const { cashBook, loadingBook } = useCashBook(Channel.Cash);
+
 const pendingDelete = pageState.field<CashBookRow | null>(
   "pendingDelete",
   () => null,
@@ -47,79 +56,35 @@ const pendingDetail = pageState.field<CashBookRow | null>(
   "pendingDetail",
   () => null,
 );
+
 const detailItems = computed(() =>
   (pendingDetail.value?.components ?? []).map((item) => {
     const loan = item.loanId
       ? loans.find((candidate) => candidate.id === item.loanId)
       : undefined;
+
     return { ...item, loanLabel: loan ? formatLoanLabel(loan) : "" };
   }),
 );
 
 // Hapus of an imported row also cancels the movements paired with it: list them.
 const deleteGroup = ref<TransactionGroup | null>(null);
+
 watch(pendingDelete, async (row) => {
   deleteGroup.value = null;
   if (!row?.groupId) return;
   const group = await getTransactionGroup(row.id);
   if (pendingDelete.value?.id === row.id) deleteGroup.value = group;
 });
+
 const deleteAlso = computed(() =>
   (deleteGroup.value?.transactions ?? [])
     .filter((transaction) => transaction.id !== pendingDelete.value?.id)
-    .map((transaction) => ({ ...transaction, ...plainWords(transaction) })),
+    .map((transaction) => ({
+      ...transaction,
+      ...plainWords(transaction, loans),
+    })),
 );
-const itemWords: Record<string, string> = {
-  LOAN_PRINCIPAL: "pokok",
-  LOAN_INTEREST: "bunga",
-  LOAN_PROVISION: "provisi",
-  LOAN_DISBURSEMENT: "pencairan",
-  SAVINGS_DEPOSIT: "setor",
-  SAVINGS_WITHDRAWAL: "ambil",
-  SAVINGS_SHU: "SHU",
-};
-const accountWords: Record<string, string> = {
-  POKOK: "pokok",
-  WAJIB: "wajib",
-  MANASUKA: "manasuka",
-};
-/** "Pembayaran pinjaman Rp 13.900.000" with "pokok 10.007.331 · bunga 200.147"
- * for a loan or savings movement; other rows keep their description. */
-function plainWords(transaction: Transaction) {
-  const items = transaction.components;
-  const loan = loans.find((candidate) =>
-    items.some((item) => item.loanId === candidate.id),
-  );
-  const parts = items.map((item) =>
-    item.accountType
-      ? `${accountWords[item.accountType] ?? item.accountType} ${formatSheetNumber(item.amount)}`
-      : `${itemWords[item.componentType] ?? item.label} ${formatSheetNumber(item.amount)}`,
-  );
-  const imported = transaction.reference.includes("-MIG");
-  if (items.some((item) => item.loanId)) {
-    const disbursed = items.some(
-      (item) => item.componentType === "LOAN_DISBURSEMENT",
-    );
-    return {
-      title: `${disbursed ? "Pencairan" : "Pembayaran"} pinjaman${loan ? ` ${formatCurrency(loan.plafond)}` : ""}`,
-      detail: [...parts, imported ? "dari sheet PINJAMAN" : ""]
-        .filter(Boolean)
-        .join(" · "),
-    };
-  }
-  if (items.some((item) => item.accountType)) {
-    const withdrawn = items.some(
-      (item) => item.componentType === "SAVINGS_WITHDRAWAL",
-    );
-    return {
-      title: withdrawn ? "Pengambilan simpanan" : "Setoran simpanan",
-      detail: [...parts, imported ? "dari sheet SIMPANAN" : ""]
-        .filter(Boolean)
-        .join(" · "),
-    };
-  }
-  return { title: transaction.description, detail: "" };
-}
 
 onMounted(() => {
   void loadFinancialParameters();
@@ -128,72 +93,35 @@ onMounted(() => {
 const rows = computed(() => cashBook.value?.rows ?? []);
 const query = pageState.field("query", () => "");
 const debouncedQuery = useDebouncedRef(query, pageState.tabId);
-// Users see a reversal as a deletion: the reversed row and its reversal are never shown.
-const filteredRows = computed(() => {
-  const search = debouncedQuery.value.trim().toLowerCase();
-  return rows.value.filter(
-    (row) =>
-      !isExcluded(row) &&
-      (row.description.toLowerCase().includes(search) ||
-        (search !== "" && row.memberNumber.toLowerCase().includes(search))),
-  );
-});
-// "Riwayat hapus" swaps the sheet for every deleted row of the year, newest
-// deletion first. The reversal row carries when it was deleted; its reference
-// extends the original's.
+
+const filteredRows = computed(() =>
+  rows.value.filter(
+    (row) => !isExcluded(row) && matchesSearch(row, debouncedQuery.value),
+  ),
+);
+
+// "Riwayat hapus" swaps the sheet for every deleted row of the year.
 const showDeleted = pageState.field("showDeleted", () => false);
+
 // The export holds the rows the search leaves.
 const exportFilter = computed(() =>
   debouncedQuery.value.trim()
     ? { ids: filteredRows.value.map((row) => row.id) }
     : {},
 );
-const deletedRows = computed(() => {
-  const reversals = rows.value.filter((row) => row.isReversal);
-  return rows.value
-    .filter((row) => row.status === TransactionStatus.Reversed)
-    .map((row) => {
-      const reversal = reversals.find((candidate) =>
-        candidate.reference.startsWith(`${row.reference}/REV/`),
-      );
-      return {
-        ...row,
-        // General cash rows are booked to "Koperasi": no one to show. A name
-        // without an ID Anggota is a Non Anggota borrower.
-        // As on the sheet: Debet is cash out, Kredit is cash in.
-        summary: [
-          `${row.direction === TransactionDirection.Out ? "Debet" : "Kredit"} ${formatCurrency(row.amount)}`,
-          row.memberNumber
-            ? `${row.memberNumber} ${row.memberName}`
-            : row.memberName && row.memberName !== "Koperasi"
-              ? `${row.memberName} (Non Anggota)`
-              : "",
-        ]
-          .filter(Boolean)
-          .join(" · "),
-        deletedAt: reversal
-          ? [formatDate(reversal.businessDate), reversal.time]
-              .filter(Boolean)
-              .join(" ")
-          : "",
-        deletedOrder: reversal ? `${reversal.businessDate} ${reversal.id}` : "",
-      };
-    })
-    .sort((a, b) => b.deletedOrder.localeCompare(a.deletedOrder));
-});
-const filteredDeletedRows = computed(() => {
-  const search = debouncedQuery.value.trim().toLowerCase();
-  return deletedRows.value.filter(
-    (row) =>
-      row.description.toLowerCase().includes(search) ||
-      (search !== "" && row.memberNumber.toLowerCase().includes(search)),
-  );
-});
+
+const deletedRows = computed(() => deletedRowsOf(rows.value));
+
+const filteredDeletedRows = computed(() =>
+  deletedRows.value.filter((row) => matchesSearch(row, debouncedQuery.value)),
+);
+
 // As in the spreadsheet, the date appears only on the first row of each day.
 const showDate = (index: number) =>
   index === 0 ||
   filteredRows.value[index - 1].businessDate !==
     filteredRows.value[index].businessDate;
+
 // KAS BUKU TABUNGAN (the bank savings book), as on the sheet: Keluar = Tambahan
 // Kas dari Tabungan, Masuk = the opening balance and Transfer ke Tabungan. The last column is
 // cash + bank on the opening row. No running bank balance: the bank also receives
@@ -201,19 +129,8 @@ const showDate = (index: number) =>
 const savingsBookOpening = computed(
   () => cashBook.value?.savingsBookOpeningBalance ?? null,
 );
-const savingsBookTotals = computed(() =>
-  rows.value
-    .filter((row) => !isExcluded(row))
-    .reduce(
-      (sum, row) => ({
-        out: sum.out + row.savingsBookOut,
-        in: sum.in + row.savingsBookIn,
-      }),
-      { out: 0, in: 0 },
-    ),
-);
-const isExcluded = (item: CashBookRow) =>
-  item.status === TransactionStatus.Reversed || item.isReversal;
+
+const savingsBookTotals = computed(() => savingsBookTotalsOf(rows.value));
 
 const entryDialog = ref<InstanceType<typeof CashEntryDialog> | null>(null);
 
@@ -223,6 +140,7 @@ async function deletePending() {
   const reversed = await reverseTransaction(submitted.value!);
   if (reversed) submitted.value = null;
 }
+
 async function refreshPage() {
   await refresh();
   await loadFinancialParameters();

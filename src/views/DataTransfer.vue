@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+
 import {
   DatabaseBackup,
   FolderOpen,
   TriangleAlert,
   Upload,
 } from "lucide-vue-next";
+
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import PageHeader from "../components/PageHeader.vue";
 import UiModal from "../components/UiModal.vue";
@@ -32,6 +34,7 @@ onMounted(async () => {
 async function handleExport() {
   if (exporting.value) return;
   exporting.value = true;
+
   try {
     await exportDatabase();
   } finally {
@@ -43,6 +46,7 @@ async function handleImport() {
   if (importing.value) return;
   confirmImport.value = false;
   importing.value = true;
+
   try {
     // Only returns when cancelled or refused; otherwise the app restarts.
     await importDatabase();

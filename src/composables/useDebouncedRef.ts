@@ -8,6 +8,7 @@ export function useDebouncedRef(
 ) {
   const debounced = shallowRef(source.value);
   let timer: ReturnType<typeof setTimeout> | undefined;
+
   const cancel = () => {
     clearTimeout(timer);
     timer = undefined;
@@ -17,10 +18,12 @@ export function useDebouncedRef(
     () => [source.value, context.value] as const,
     ([value, tabId], [, previousTabId]) => {
       cancel();
+
       if (!value.trim() || tabId !== previousTabId) {
         debounced.value = value;
         return;
       }
+
       timer = setTimeout(() => {
         debounced.value = value;
         timer = undefined;
@@ -28,6 +31,7 @@ export function useDebouncedRef(
     },
     { flush: "sync" },
   );
+
   onScopeDispose(cancel);
   return readonly(debounced);
 }

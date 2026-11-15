@@ -3,6 +3,7 @@ import { computed, watch } from "vue";
 import type { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import RupiahInput from "./RupiahInput.vue";
 import UiModal from "./UiModal.vue";
+
 import {
   formatCurrency,
   SavingsAccountType,
@@ -14,15 +15,19 @@ const props = defineProps<{
   /** The page's per-tab state, so each workspace tab keeps its own draft. */
   pageState: ReturnType<typeof useWorkspacePageState>;
 }>();
+
 const pageState = props.pageState;
 
 const { addMember, memberNumberOwner, nextMemberNumber, financialParameters } =
   useKoperasiStore();
+
 // Simpanan pokok: the parameter is both the starting amount and the minimum.
 const minimumPrincipal = computed(
   () => financialParameters.principalSavings || 50_000,
 );
+
 const open = pageState.field("open", () => false);
+
 const form = pageState.field("form", () => ({
   memberNumber: "",
   name: "",
@@ -30,12 +35,15 @@ const form = pageState.field("form", () => ({
   // 0 until the form opens, then the Simpanan Pokok parameter.
   principalSavings: 0,
 }));
+
 watch(
   () => open.value,
   (isOpen) => {
     if (!isOpen) return;
+
     if (!form.value.principalSavings)
       form.value.principalSavings = minimumPrincipal.value;
+
     // Suggest the next ID Anggota; the user can still change it.
     if (!form.value.memberNumber.trim())
       form.value.memberNumber = nextMemberNumber();
@@ -46,10 +54,12 @@ watch(
 const memberNumberTaken = computed(() =>
   memberNumberOwner(form.value.memberNumber),
 );
+
 async function submit() {
   const tabId = pageState.tabId.value;
   const submittedForm = form.forTab(tabId);
   const submittedOpen = open.forTab(tabId);
+
   if (
     !form.value.memberNumber.trim() ||
     memberNumberTaken.value ||
@@ -58,6 +68,7 @@ async function submit() {
     form.value.principalSavings < minimumPrincipal.value
   )
     return;
+
   const saved = await addMember({
     memberNumber: form.value.memberNumber.trim(),
     name: form.value.name,
@@ -69,8 +80,10 @@ async function submit() {
       },
     ],
   });
+
   if (!saved) return;
   submittedOpen.value = false;
+
   Object.assign(submittedForm.value, {
     memberNumber: "",
     name: "",
