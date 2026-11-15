@@ -127,9 +127,10 @@ const monthRowsForPeriod = (selectedPeriod: string) =>
     });
 
 // Jumlah pemasukan per triwulan and Insentif Pinjaman (kolom EJ–EW) come from
-// the backend, which also hides paid-off loans whose borrower has another loan
-// running and moves their income to that loan (rules 1.10). Total pemasukan
-// tahun, between them, adds up the four quarters: the base of the insentif.
+// the backend: as in the working sheet every loan keeps its own income, and a
+// paid-off loan stays listed to the end of the year (rules 1.10). Total
+// pemasukan tahun, between them, adds up the four quarters: the base of the
+// insentif.
 const quarterLabels = [
   "Jan s/d Mar",
   "Apr s/d Jun",
@@ -290,10 +291,8 @@ const periodTables = computed(() =>
   }),
 );
 
-// The rows are those of the last month shown: a loan paid off in an earlier
-// month is hidden there (its income moves to a loan still shown), so it stays
-// hidden when several months are shown. Each month's totals still count every
-// loan of that month.
+// The rows are those of the last month shown: every loan that has run up to
+// that month. Each month's totals still count every loan of that month.
 const sections = computed(() => {
   const last = periodTables.value[periodTables.value.length - 1];
   return sectionsForRows(
