@@ -63,16 +63,20 @@ pub(crate) async fn ensure_reference_unused(
     reference: &str,
 ) -> Result<(), String> {
     let duplicate: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM transactions WHERE company_id = ? AND reference = ?",
+        "SELECT COUNT(*)
+         FROM transactions
+         WHERE company_id = ? AND reference = ?",
     )
     .bind(company_id)
     .bind(reference)
     .fetch_one(&mut *db)
     .await
     .map_err(|error| error.to_string())?;
+
     if duplicate > 0 {
         return Err("Nomor referensi sudah pernah diposting.".into());
     }
+
     Ok(())
 }
 
@@ -82,7 +86,9 @@ pub(crate) async fn savings_balance(
     savings_account_id: &str,
 ) -> Result<i64, String> {
     sqlx::query_scalar(
-        "SELECT balance FROM savings_balances WHERE company_id = ? AND savings_account_id = ?",
+        "SELECT balance
+         FROM savings_balances
+         WHERE company_id = ? AND savings_account_id = ?",
     )
     .bind(company_id)
     .bind(savings_account_id)
@@ -97,13 +103,17 @@ pub(crate) async fn loan_balance(
     company_id: &str,
     loan_id: &str,
 ) -> Result<i64, String> {
-    sqlx::query_scalar("SELECT balance FROM loan_balances WHERE company_id = ? AND loan_id = ?")
-        .bind(company_id)
-        .bind(loan_id)
-        .fetch_optional(&mut *db)
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "Pinjaman tidak ditemukan.".to_string())
+    sqlx::query_scalar(
+        "SELECT balance
+         FROM loan_balances
+         WHERE company_id = ? AND loan_id = ?",
+    )
+    .bind(company_id)
+    .bind(loan_id)
+    .fetch_optional(&mut *db)
+    .await
+    .map_err(|error| error.to_string())?
+    .ok_or_else(|| "Pinjaman tidak ditemukan.".to_string())
 }
 
 /// Writes a single transaction. Zero-value components are skipped; the transaction amount
@@ -118,49 +128,67 @@ pub(crate) async fn append(
         .into_iter()
         .filter(|component| component.amount != 0)
         .collect();
+
     if components.iter().any(|component| component.amount < 0) {
         return Err("Komponen transaksi tidak boleh negatif.".into());
     }
+
     let amount = components
         .iter()
         .try_fold(0_i64, |total, component| {
             total.checked_add(component.amount)
         })
         .ok_or("Total transaksi terlalu besar.")?;
+
     if amount <= 0 {
         return Err("Nominal transaksi harus lebih dari nol.".into());
     }
-    sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_id, member_name, channel, description, reference, direction, amount, reversed_transaction_id, actor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .bind(&entry.id)
+
+    sqlx::query(
+        "INSERT INTO transactions (
+             id, company_id, business_date, display_date, display_time, member_id, member_name,
+             channel, description, reference, direction, amount, reversed_transaction_id, actor
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&entry.id)
+    .bind(company_id)
+    .bind(entry.business_date)
+    .bind(entry.display_date)
+    .bind(entry.display_time)
+    .bind(entry.member_id)
+    .bind(entry.member_name)
+    .bind(entry.channel.as_str())
+    .bind(entry.description)
+    .bind(entry.reference)
+    .bind(entry.direction.as_str())
+    .bind(amount)
+    .bind(entry.reversed_transaction_id)
+    .bind(entry.actor)
+    .execute(&mut *db)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    for component in components {
+        sqlx::query(
+            "INSERT INTO transaction_components (
+                 company_id, transaction_id, component_type, label, amount, loan_id,
+                 savings_account_id
+             )
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
         .bind(company_id)
-        .bind(entry.business_date)
-        .bind(entry.display_date)
-        .bind(entry.display_time)
-        .bind(entry.member_id)
-        .bind(entry.member_name)
-        .bind(entry.channel.as_str())
-        .bind(entry.description)
-        .bind(entry.reference)
-        .bind(entry.direction.as_str())
-        .bind(amount)
-        .bind(entry.reversed_transaction_id)
-        .bind(entry.actor)
+        .bind(&entry.id)
+        .bind(component.component_type.as_str())
+        .bind(&component.label)
+        .bind(component.amount)
+        .bind(&component.loan_id)
+        .bind(&component.savings_account_id)
         .execute(&mut *db)
         .await
         .map_err(|error| error.to_string())?;
-    for component in components {
-        sqlx::query("INSERT INTO transaction_components (company_id, transaction_id, component_type, label, amount, loan_id, savings_account_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
-            .bind(company_id)
-            .bind(&entry.id)
-            .bind(component.component_type.as_str())
-            .bind(&component.label)
-            .bind(component.amount)
-            .bind(&component.loan_id)
-            .bind(&component.savings_account_id)
-            .execute(&mut *db)
-            .await
-            .map_err(|error| error.to_string())?;
     }
+
     Ok(amount)
 }
 
@@ -172,15 +200,19 @@ pub(crate) async fn audit(
     action: AuditAction,
     after: serde_json::Value,
 ) -> Result<(), String> {
-    sqlx::query("INSERT INTO audit_events (company_id, entity_type, entity_id, action, after_json, actor) VALUES (?, ?, ?, ?, ?, ?)")
-        .bind(company_id)
-        .bind(entity_type.as_str())
-        .bind(entity_id)
-        .bind(action.as_str())
-        .bind(serde_json::to_string(&after).unwrap_or_default())
-        .bind(APP_ACTOR)
-        .execute(&mut *db)
-        .await
-        .map_err(|error| error.to_string())?;
+    sqlx::query(
+        "INSERT INTO audit_events (company_id, entity_type, entity_id, action, after_json, actor)
+         VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(company_id)
+    .bind(entity_type.as_str())
+    .bind(entity_id)
+    .bind(action.as_str())
+    .bind(serde_json::to_string(&after).unwrap_or_default())
+    .bind(APP_ACTOR)
+    .execute(&mut *db)
+    .await
+    .map_err(|error| error.to_string())?;
+
     Ok(())
 }

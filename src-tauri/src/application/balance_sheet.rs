@@ -45,13 +45,16 @@ pub(crate) async fn get_balance_sheet(
     pool: &SqlitePool,
 ) -> Result<BalanceSheetDto, String> {
     let rows = sqlx::query(
-        "SELECT item_key, amount FROM balance_sheet_items WHERE company_id = ? AND year = ?",
+        "SELECT item_key, amount
+         FROM balance_sheet_items
+         WHERE company_id = ? AND year = ?",
     )
     .bind(company_id)
     .bind(year)
     .fetch_all(pool)
     .await
     .map_err(|error| error.to_string())?;
+
     let items = rows
         .into_iter()
         .map(|row| {
@@ -61,17 +64,24 @@ pub(crate) async fn get_balance_sheet(
             ))
         })
         .collect::<Result<BTreeMap<String, i64>, String>>()?;
+
     let rows = sqlx::query(
-        "SELECT item_key, name, amount, loan_date, note FROM balance_sheet_details WHERE company_id = ? AND year = ? ORDER BY item_key, position",
+        "SELECT item_key, name, amount, loan_date, note
+         FROM balance_sheet_details
+         WHERE company_id = ? AND year = ?
+         ORDER BY item_key, position",
     )
     .bind(company_id)
     .bind(year)
     .fetch_all(pool)
     .await
     .map_err(|error| error.to_string())?;
+
     let mut details: BTreeMap<String, Vec<BalanceSheetDetailDto>> = BTreeMap::new();
+
     for row in rows {
         let key: String = row.try_get("item_key").map_err(|error| error.to_string())?;
+
         details.entry(key).or_default().push(BalanceSheetDetailDto {
             name: row.try_get("name").map_err(|error| error.to_string())?,
             amount: row.try_get("amount").map_err(|error| error.to_string())?,
@@ -81,6 +91,7 @@ pub(crate) async fn get_balance_sheet(
             note: row.try_get("note").map_err(|error| error.to_string())?,
         });
     }
+
     Ok(BalanceSheetDto { items, details })
 }
 
@@ -100,6 +111,7 @@ pub(crate) async fn set_balance_sheet(
     {
         return Err(format!("Pos neraca tidak dikenal: {key}"));
     }
+
     if input
         .details
         .values()
@@ -108,13 +120,17 @@ pub(crate) async fn set_balance_sheet(
     {
         return Err("Nama rincian wajib diisi".to_string());
     }
+
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
+
     for (key, amount) in &input.items {
         set_item(&mut db, company_id, input.year, key, *amount).await?;
     }
+
     for (key, details) in &input.details {
         sqlx::query(
-            "DELETE FROM balance_sheet_details WHERE company_id = ? AND year = ? AND item_key = ?",
+            "DELETE FROM balance_sheet_details
+             WHERE company_id = ? AND year = ? AND item_key = ?",
         )
         .bind(company_id)
         .bind(input.year)
@@ -122,14 +138,19 @@ pub(crate) async fn set_balance_sheet(
         .execute(&mut *db)
         .await
         .map_err(|error| error.to_string())?;
+
         for (position, detail) in details.iter().enumerate() {
             let loan_date = detail
                 .loan_date
                 .as_deref()
                 .map(str::trim)
                 .filter(|date| !date.is_empty());
+
             sqlx::query(
-                "INSERT INTO balance_sheet_details (company_id, year, item_key, position, name, amount, loan_date, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO balance_sheet_details (
+                     company_id, year, item_key, position, name, amount, loan_date, note
+                 )
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(company_id)
             .bind(input.year)
@@ -143,9 +164,11 @@ pub(crate) async fn set_balance_sheet(
             .await
             .map_err(|error| error.to_string())?;
         }
+
         let total: i64 = details.iter().map(|detail| detail.amount).sum();
         set_item(&mut db, company_id, input.year, key, total).await?;
     }
+
     db.commit().await.map_err(|error| error.to_string())
 }
 
@@ -157,7 +180,10 @@ async fn set_item(
     amount: i64,
 ) -> Result<(), String> {
     sqlx::query(
-        "INSERT INTO balance_sheet_items (company_id, year, item_key, amount) VALUES (?, ?, ?, ?) ON CONFLICT(company_id, year, item_key) DO UPDATE SET amount = excluded.amount, updated_at = CURRENT_TIMESTAMP",
+        "INSERT INTO balance_sheet_items (company_id, year, item_key, amount)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT (company_id, year, item_key)
+         DO UPDATE SET amount = excluded.amount, updated_at = CURRENT_TIMESTAMP",
     )
     .bind(company_id)
     .bind(year)
@@ -202,6 +228,7 @@ mod tests {
     fn items_are_kept_per_book_year() {
         tauri::async_runtime::block_on(async {
             let pool = crate::database::memory_pool().await;
+
             for input in [
                 items(2030, "DEBT_PPBRI", 10_000_000),
                 items(2030, "OTHER_LOANS", 28_109_000),
@@ -209,14 +236,17 @@ mod tests {
             ] {
                 set_balance_sheet(input, "default", &pool).await.unwrap();
             }
+
             let sheet = get_balance_sheet("default", 2030, &pool).await.unwrap();
             assert_eq!(sheet.items.get("DEBT_PPBRI"), Some(&5_000_000));
             assert_eq!(sheet.items.get("OTHER_LOANS"), Some(&28_109_000));
+
             assert!(get_balance_sheet("default", 2029, &pool)
                 .await
                 .unwrap()
                 .items
                 .is_empty());
+
             assert!(
                 set_balance_sheet(items(2030, "UNKNOWN", 1), "default", &pool)
                     .await
@@ -229,6 +259,7 @@ mod tests {
     fn details_replace_the_rincian_and_set_the_line_total() {
         tauri::async_runtime::block_on(async {
             let pool = crate::database::memory_pool().await;
+
             set_balance_sheet(
                 rincian("OTHER_LOANS", vec![detail("Lama", 9, None)]),
                 "default",
@@ -236,6 +267,7 @@ mod tests {
             )
             .await
             .unwrap();
+
             set_balance_sheet(
                 rincian(
                     "OTHER_LOANS",
@@ -250,17 +282,20 @@ mod tests {
             )
             .await
             .unwrap();
+
             let sheet = get_balance_sheet("default", 2030, &pool).await.unwrap();
             let rows = &sheet.details["OTHER_LOANS"];
             assert_eq!(rows.len(), 3);
             assert_eq!(rows[1], detail("Peminjam A", -1_391_000, None));
             assert_eq!(rows[2].loan_date.as_deref(), Some("2023-01-04"));
             assert_eq!(sheet.items.get("OTHER_LOANS"), Some(&2_809_000));
+
             assert!(
                 set_balance_sheet(rincian("UNKNOWN", vec![]), "default", &pool)
                     .await
                     .is_err()
             );
+
             assert!(set_balance_sheet(
                 rincian("OTHER_LOANS", vec![detail(" ", 1, None)]),
                 "default",
@@ -275,11 +310,13 @@ mod tests {
     fn lines_and_rincian_are_saved_together_or_not_at_all() {
         tauri::async_runtime::block_on(async {
             let pool = crate::database::memory_pool().await;
+
             let both = |debt: i64, rows| SetBalanceSheetInput {
                 year: 2030,
                 items: BTreeMap::from([("DEBT_PPBRI".to_string(), debt)]),
                 details: BTreeMap::from([("FIXED_ASSETS".to_string(), rows)]),
             };
+
             set_balance_sheet(
                 both(10_000_000, vec![detail("Meja", 1_500_000, None)]),
                 "default",
@@ -287,9 +324,11 @@ mod tests {
             )
             .await
             .unwrap();
+
             let sheet = get_balance_sheet("default", 2030, &pool).await.unwrap();
             assert_eq!(sheet.items.get("DEBT_PPBRI"), Some(&10_000_000));
             assert_eq!(sheet.items.get("FIXED_ASSETS"), Some(&1_500_000));
+
             // A rincian row without a name rejects the whole save: the line
             // typed with it is not changed either.
             assert!(set_balance_sheet(
@@ -299,8 +338,10 @@ mod tests {
             )
             .await
             .is_err());
+
             let sheet = get_balance_sheet("default", 2030, &pool).await.unwrap();
             assert_eq!(sheet.items.get("DEBT_PPBRI"), Some(&10_000_000));
+
             assert_eq!(
                 sheet.details["FIXED_ASSETS"],
                 vec![detail("Meja", 1_500_000, None)]

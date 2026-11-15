@@ -55,6 +55,7 @@ fn period_of(business_date: &str) -> String {
 fn next_period(period: &str) -> Option<String> {
     let year: i32 = period.get(0..4)?.parse().ok()?;
     let month: u32 = period.get(5..7)?.parse().ok()?;
+
     Some(if month >= 12 {
         format!("{:04}-01", year + 1)
     } else {
@@ -65,13 +66,16 @@ fn next_period(period: &str) -> Option<String> {
 fn period_range(first: &str, last: &str) -> Vec<String> {
     let mut periods = Vec::new();
     let mut current = first.to_string();
+
     while current.as_str() <= last {
         periods.push(current.clone());
+
         match next_period(&current) {
             Some(next) => current = next,
             None => break,
         }
     }
+
     periods
 }
 
@@ -85,14 +89,18 @@ fn iso_date(value: &str) -> Option<String> {
     const MONTHS: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
+
     let bytes = value.as_bytes();
+
     if value.len() == 10 && bytes[4] == b'-' && bytes[7] == b'-' {
         return Some(value.to_string());
     }
+
     let mut parts = value.split('-');
     let (day, month, year) = (parts.next()?, parts.next()?, parts.next()?);
     let day: u32 = day.parse().ok()?;
     let month = MONTHS.iter().position(|name| *name == month)? + 1;
+
     (year.len() == 4 && year.chars().all(|ch| ch.is_ascii_digit()))
         .then(|| format!("{year}-{month:02}-{day:02}"))
 }
@@ -119,9 +127,11 @@ fn scheduled_installment(
     if opening <= 0 || plafond <= 0 || tenor <= 0 {
         return (0, 0.0);
     }
+
     if due_period.is_some_and(|due| period > due) {
         return (0, 0.0);
     }
+
     let principal = if loan_type == Some(LoanType::Temporary) {
         if due_period == Some(period) {
             opening
@@ -131,11 +141,13 @@ fn scheduled_installment(
     } else {
         ((plafond + tenor * 1_000 - 1) / (tenor * 1_000)) * 1_000
     };
+
     let interest_base = if interest_type == InterestType::Flat {
         plafond
     } else {
         opening
     };
+
     (
         principal.min(opening),
         interest_base as f64 * annual_rate / 100.0 / 12.0,
@@ -149,6 +161,7 @@ fn drop_empty<T>(rows: &mut Vec<T>, key: impl Fn(&T) -> &String, empty: impl Fn(
         .filter(|row| !empty(row))
         .map(|row| key(row).clone())
         .collect();
+
     rows.retain(|row| active.contains(key(row)));
 }
 
@@ -156,6 +169,7 @@ fn track_first(firsts: &mut HashMap<String, String>, id: &str, period: &str) {
     let first = firsts
         .entry(id.to_string())
         .or_insert_with(|| period.to_string());
+
     if period < first.as_str() {
         *first = period.to_string();
     }
@@ -175,8 +189,12 @@ pub(crate) async fn get_monthly_ledger(
     // --- Savings -----------------------------------------------------------
     let mut savings_months: HashMap<(String, String), SavingsMonth> = HashMap::new();
     let mut member_first_period: HashMap<String, String> = HashMap::new();
+
     for row in sqlx::query(
-        "SELECT sa.member_id, sa.account_type, c.component_type, c.amount, c.business_date FROM effective_components c JOIN savings_accounts sa ON sa.company_id = c.company_id AND sa.id = c.savings_account_id WHERE c.company_id = ?",
+        "SELECT sa.member_id, sa.account_type, c.component_type, c.amount, c.business_date
+         FROM effective_components c
+         JOIN savings_accounts sa ON sa.company_id = c.company_id AND sa.id = c.savings_account_id
+         WHERE c.company_id = ?",
     )
     .bind(company_id)
     .fetch_all(pool)
@@ -193,12 +211,15 @@ pub(crate) async fn get_monthly_ledger(
         let period = period_of(&business_date);
         all_periods.insert(period.clone());
         track_first(&mut member_first_period, &member_id, &period);
+
         let slot = match account_type {
             SavingsAccountType::Principal => 0,
             SavingsAccountType::Mandatory => 1,
             SavingsAccountType::Voluntary => 2,
         };
+
         let month = savings_months.entry((member_id, period)).or_default();
+
         match component_type {
             ComponentType::SavingsOpening => month.opening[slot] += amount,
             ComponentType::SavingsWithdrawal => month.outgoing[slot] += amount,
@@ -208,6 +229,7 @@ pub(crate) async fn get_monthly_ledger(
                 return Err(format!("Komponen simpanan tidak valid: {}", other.as_str()));
             }
         }
+
         if !component_type.is_opening() {
             later(&mut month.transaction_date, business_date);
         }
@@ -216,8 +238,11 @@ pub(crate) async fn get_monthly_ledger(
     // --- Loans -----------------------------------------------------------
     let mut loan_months: HashMap<(String, String), LoanMonth> = HashMap::new();
     let mut loan_first_period: HashMap<String, String> = HashMap::new();
+
     for row in sqlx::query(
-        "SELECT c.loan_id, c.component_type, c.amount, c.business_date FROM effective_components c WHERE c.company_id = ? AND c.loan_id IS NOT NULL",
+        "SELECT c.loan_id, c.component_type, c.amount, c.business_date
+         FROM effective_components c
+         WHERE c.company_id = ? AND c.loan_id IS NOT NULL",
     )
     .bind(company_id)
     .fetch_all(pool)
@@ -234,6 +259,7 @@ pub(crate) async fn get_monthly_ledger(
         all_periods.insert(period.clone());
         track_first(&mut loan_first_period, &loan_id, &period);
         let month = loan_months.entry((loan_id, period)).or_default();
+
         match component_type {
             ComponentType::LoanOpening => month.opening += amount,
             ComponentType::LoanOpeningArrearsPrincipal => month.opening_arrears_principal += amount,
@@ -248,6 +274,7 @@ pub(crate) async fn get_monthly_ledger(
                 return Err(format!("Komponen pinjaman tidak valid: {}", other.as_str()));
             }
         }
+
         if !component_type.is_opening() {
             later(&mut month.transaction_date, business_date);
         }
@@ -257,6 +284,7 @@ pub(crate) async fn get_monthly_ledger(
     else {
         let (loan_incentive_rate, savings_incentive_rate) =
             incentive_rates(company_id, year, pool).await?;
+
         return Ok(MonthlyLedgerDto {
             loan_incentive_rate,
             savings_incentive_rate,
@@ -265,11 +293,14 @@ pub(crate) async fn get_monthly_ledger(
             loans: Vec::new(),
         });
     };
+
     let last = match through {
         Some(through) if through > last.as_str() => through.to_string(),
         _ => last,
     };
+
     let timeline = period_range(&first, &last);
+
     let periods: Vec<String> = timeline
         .iter()
         .filter(|period| period.starts_with(&year_prefix))
@@ -277,31 +308,38 @@ pub(crate) async fn get_monthly_ledger(
         .collect();
 
     let mut savings = Vec::new();
+
     let member_ids: Vec<String> = sqlx::query_scalar("SELECT id FROM members WHERE company_id = ?")
         .bind(company_id)
         .fetch_all(pool)
         .await
         .map_err(|error| error.to_string())?;
+
     for member_id in member_ids {
         let Some(first_period) = member_first_period.get(&member_id) else {
             continue;
         };
+
         let mut balance = [0_i64; 3];
+
         for period in timeline.iter().filter(|period| *period >= first_period) {
             let month = savings_months
                 .get(&(member_id.clone(), period.clone()))
                 .cloned()
                 .unwrap_or_default();
+
             let opening = [
                 balance[0] + month.opening[0],
                 balance[1] + month.opening[1],
                 balance[2] + month.opening[2],
             ];
+
             balance = [
                 opening[0] + month.incoming[0] - month.outgoing[0],
                 opening[1] + month.incoming[1] - month.outgoing[1],
                 opening[2] + month.incoming[2] - month.outgoing[2] + month.shu,
             ];
+
             if period.starts_with(&year_prefix) {
                 savings.push(SavingsMonthDto {
                     member_id: member_id.clone(),
@@ -327,8 +365,11 @@ pub(crate) async fn get_monthly_ledger(
     }
 
     let mut loans = Vec::new();
+
     for row in sqlx::query(
-        "SELECT id, plafond, rate_annual, tenor, interest_type, loan_type, due_date FROM loans WHERE company_id = ?",
+        "SELECT id, plafond, rate_annual, tenor, interest_type, loan_type, due_date
+         FROM loans
+         WHERE company_id = ?",
     )
     .bind(company_id)
     .fetch_all(pool)
@@ -342,25 +383,32 @@ pub(crate) async fn get_monthly_ledger(
         let interest_type: String = col!(row, "interest_type");
         let interest_type = InterestType::try_from(interest_type.as_str())?;
         let loan_type: Option<String> = col!(row, "loan_type");
+
         let loan_type = loan_type
             .map(|value| LoanType::try_from(value.as_str()))
             .transpose()?;
+
         let due_date: String = col!(row, "due_date");
         let due_period = date_period(&due_date);
+
         let Some(first_period) = loan_first_period.get(&loan_id) else {
             continue;
         };
+
         // Interest arrears keep their sen from month to month, as the sheet
         // does (e.g. DF = DC + DA*D/12); only the amounts shown are rounded up
         // to a whole rupiah, so Tunggakan -30.000,12 shows as -30.000 and a
         // Kewajiban of 160.146,50 as 160.147.
         let (mut balance, mut arrears_principal, mut arrears_interest) = (0_i64, 0_i64, 0.0_f64);
+
         for period in timeline.iter().filter(|period| *period >= first_period) {
             let month = loan_months
                 .get(&(loan_id.clone(), period.clone()))
                 .cloned()
                 .unwrap_or_default();
+
             let opening = balance + month.opening;
+
             let (scheduled_principal, scheduled_interest) = scheduled_installment(
                 plafond,
                 tenor,
@@ -371,14 +419,19 @@ pub(crate) async fn get_monthly_ledger(
                 period,
                 opening,
             );
+
             let prior_arrears_principal = arrears_principal + month.opening_arrears_principal;
-            arrears_principal = prior_arrears_principal + scheduled_principal - month.principal_paid;
+
+            arrears_principal =
+                prior_arrears_principal + scheduled_principal - month.principal_paid;
+
             let prior_arrears_interest = arrears_interest + month.opening_arrears_interest as f64;
             let due_interest = prior_arrears_interest + scheduled_interest;
             arrears_interest = due_interest - month.interest_paid as f64;
             balance = opening + month.disbursed - month.principal_paid;
             // Arrears never exceed what is still owed, as in the sheet.
             arrears_principal = arrears_principal.min(balance.max(0));
+
             if balance <= 0 {
                 // A paid-off loan (e.g. settled early by suplesi) owes nothing more:
                 // the installments it paid ahead are not a negative Tunggakan, and
@@ -386,6 +439,7 @@ pub(crate) async fn get_monthly_ledger(
                 arrears_principal = 0;
                 arrears_interest = arrears_interest.max(0.0);
             }
+
             if period.starts_with(&year_prefix) {
                 // Next month's installment, for "Kewajiban s/d bulan depan".
                 let (next_scheduled_principal, next_scheduled_interest) = next_period(period)
@@ -402,6 +456,7 @@ pub(crate) async fn get_monthly_ledger(
                         )
                     })
                     .unwrap_or((0, 0.0));
+
                 loans.push(LoanMonthDto {
                     loan_id: loan_id.clone(),
                     period: period.clone(),
@@ -454,6 +509,7 @@ pub(crate) async fn get_monthly_ledger(
             .all(|amount| *amount == 0)
         },
     );
+
     drop_empty(
         &mut loans,
         |row| &row.loan_id,
@@ -474,10 +530,13 @@ pub(crate) async fn get_monthly_ledger(
             .all(|amount| *amount == 0)
         },
     );
+
     let (loan_incentive_rate, savings_incentive_rate) =
         incentive_rates(company_id, year, pool).await?;
+
     apply_loan_report_per_loan(&mut loans, loan_incentive_rate);
     apply_savings_report(&mut savings, &periods, savings_incentive_rate);
+
     Ok(MonthlyLedgerDto {
         loan_incentive_rate,
         savings_incentive_rate,
@@ -498,6 +557,7 @@ mod tests {
         assert_eq!(date_period("2026-04-05").as_deref(), Some("2026-04"));
         assert_eq!(date_period("-"), None);
         assert_eq!(iso_date("5-Apr-2026").as_deref(), Some("2026-04-05"));
+
         let monthly = |period, opening| {
             scheduled_installment(
                 20_000_000,
@@ -510,7 +570,9 @@ mod tests {
                 opening,
             )
         };
+
         assert_eq!(monthly("2026-01", 19_166_600), (834_000, 383_332.0));
+
         // Past jatuh tempo nothing new falls due.
         let overdue = scheduled_installment(
             35_000_000,
@@ -522,7 +584,9 @@ mod tests {
             "2026-01",
             20_000_000,
         );
+
         assert_eq!(overdue, (0, 0.0));
+
         // Sementara: interest monthly, the whole balance in the jatuh tempo month.
         let temporary = |period| {
             scheduled_installment(
@@ -536,6 +600,7 @@ mod tests {
                 5_000_000,
             )
         };
+
         assert_eq!(temporary("2026-02"), (0, 100_000.0));
         assert_eq!(temporary("2026-04"), (5_000_000, 100_000.0));
         assert_eq!(temporary("2026-05"), (0, 0.0));
@@ -545,8 +610,20 @@ mod tests {
     fn reads_imported_loan_components_and_rejects_unknown_types() {
         tauri::async_runtime::block_on(async {
             let pool = crate::database::memory_pool().await;
-            sqlx::query("INSERT INTO loans (id, company_id, loan_group, member_name, plafond, rate_annual, tenor, interest_type, loan_type, realization_date, due_date) VALUES ('imported', 'default', 'Anggota PP BRI', 'Imported member', 1000000, 24, 10, 'Menurun', 'Bulanan', '2026-01-01', '2026-11-01')")
-                .execute(&pool).await.unwrap();
+
+            sqlx::query(
+                "INSERT INTO loans (
+                     id, company_id, loan_group, member_name, plafond, rate_annual, tenor,
+                     interest_type, loan_type, realization_date, due_date
+                 )
+                 VALUES (
+                     'imported', 'default', 'Anggota PP BRI', 'Imported member', 1000000, 24, 10,
+                     'Menurun', 'Bulanan', '2026-01-01', '2026-11-01'
+                 )",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
 
             // Literal persisted values exercise compatibility with imported data.
             for (id, date, components) in [
@@ -573,29 +650,60 @@ mod tests {
                 ),
             ] {
                 let amount: i64 = components.iter().map(|(_, amount)| amount).sum();
-                sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, channel, description, reference, direction, amount, actor) VALUES (?, 'default', ?, ?, '00:00', 'Imported member', ?, 'Imported', ?, ?, ?, 'Import')")
-                    .bind(id).bind(date).bind(date).bind(Channel::NonCash.as_str()).bind(id)
-                    .bind(TransactionDirection::In.as_str()).bind(amount)
-                    .execute(&pool).await.unwrap();
+
+                sqlx::query(
+                    "INSERT INTO transactions (
+                         id, company_id, business_date, display_date, display_time, member_name,
+                         channel, description, reference, direction, amount, actor
+                     )
+                     VALUES (
+                         ?, 'default', ?, ?, '00:00', 'Imported member', ?, 'Imported', ?, ?, ?,
+                         'Import'
+                     )",
+                )
+                .bind(id)
+                .bind(date)
+                .bind(date)
+                .bind(Channel::NonCash.as_str())
+                .bind(id)
+                .bind(TransactionDirection::In.as_str())
+                .bind(amount)
+                .execute(&pool)
+                .await
+                .unwrap();
+
                 for (component_type, amount) in components {
-                    sqlx::query("INSERT INTO transaction_components (company_id, transaction_id, component_type, label, amount, loan_id) VALUES ('default', ?, ?, 'Imported', ?, 'imported')")
-                        .bind(id).bind(component_type).bind(amount)
-                        .execute(&pool).await.unwrap();
+                    sqlx::query(
+                        "INSERT INTO transaction_components (
+                             company_id, transaction_id, component_type, label, amount, loan_id
+                         )
+                         VALUES ('default', ?, ?, 'Imported', ?, 'imported')",
+                    )
+                    .bind(id)
+                    .bind(component_type)
+                    .bind(amount)
+                    .execute(&pool)
+                    .await
+                    .unwrap();
                 }
             }
 
             let ledger = get_monthly_ledger("default", 2026, None, &pool)
                 .await
                 .unwrap();
+
             let opening = &ledger.loans[0];
             assert_eq!(opening.opening_balance, 1_000_000);
             assert_eq!(opening.transaction_date, "");
+
             assert_eq!(
                 (opening.arrears_principal, opening.arrears_interest),
                 (130_000, 24_000)
             );
+
             let payment = &ledger.loans[1];
             assert_eq!(payment.transaction_date, "2026-02-10");
+
             assert_eq!(
                 (
                     payment.disbursed,
@@ -605,19 +713,32 @@ mod tests {
                 ),
                 (200_000, 100_000, 10_000, 2_000)
             );
+
             assert_eq!(payment.closing_balance, 1_100_000);
+
             assert_eq!(
                 (payment.arrears_principal, payment.arrears_interest),
                 (130_000, 34_000)
             );
 
             // Unknown types must fail instead of silently disappearing from the ledger.
-            sqlx::query("INSERT INTO transaction_components (company_id, transaction_id, component_type, label, amount, loan_id) VALUES ('default', 'payment', 'UNKNOWN_COMPONENT', 'Invalid import', 1, 'imported')")
-                .execute(&pool).await.unwrap();
+            sqlx::query(
+                "INSERT INTO transaction_components (
+                     company_id, transaction_id, component_type, label, amount, loan_id
+                 )
+                 VALUES (
+                     'default', 'payment', 'UNKNOWN_COMPONENT', 'Invalid import', 1, 'imported'
+                 )",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+
             let error = get_monthly_ledger("default", 2026, None, &pool)
                 .await
                 .err()
                 .unwrap();
+
             assert!(error.contains("ComponentType"));
             assert!(error.contains("UNKNOWN_COMPONENT"));
         });
@@ -627,8 +748,21 @@ mod tests {
     fn paid_off_loan_has_no_negative_arrears() {
         tauri::async_runtime::block_on(async {
             let pool = crate::database::memory_pool().await;
-            sqlx::query("INSERT INTO loans (id, company_id, loan_group, member_name, plafond, rate_annual, tenor, interest_type, loan_type, realization_date, due_date) VALUES ('early', 'default', 'Anggota PP BRI', 'Peminjam A', 1000000, 24, 10, 'Menurun', 'Bulanan', '2026-01-01', '2026-11-01')")
-                .execute(&pool).await.unwrap();
+
+            sqlx::query(
+                "INSERT INTO loans (
+                     id, company_id, loan_group, member_name, plafond, rate_annual, tenor,
+                     interest_type, loan_type, realization_date, due_date
+                 )
+                 VALUES (
+                     'early', 'default', 'Anggota PP BRI', 'Peminjam A', 1000000, 24, 10,
+                     'Menurun', 'Bulanan', '2026-01-01', '2026-11-01'
+                 )",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+
             for (id, date, components) in [
                 (
                     "open",
@@ -651,25 +785,53 @@ mod tests {
                 ),
             ] {
                 let amount: i64 = components.iter().map(|(_, amount)| amount).sum();
-                sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, channel, description, reference, direction, amount, actor) VALUES (?, 'default', ?, ?, '00:00', 'Peminjam A', ?, 'Test', ?, ?, ?, 'Test')")
-                    .bind(id).bind(date).bind(date).bind(Channel::NonCash.as_str()).bind(id)
-                    .bind(TransactionDirection::In.as_str()).bind(amount)
-                    .execute(&pool).await.unwrap();
+
+                sqlx::query(
+                    "INSERT INTO transactions (
+                         id, company_id, business_date, display_date, display_time, member_name,
+                         channel, description, reference, direction, amount, actor
+                     )
+                     VALUES (
+                         ?, 'default', ?, ?, '00:00', 'Peminjam A', ?, 'Test', ?, ?, ?, 'Test'
+                     )",
+                )
+                .bind(id)
+                .bind(date)
+                .bind(date)
+                .bind(Channel::NonCash.as_str())
+                .bind(id)
+                .bind(TransactionDirection::In.as_str())
+                .bind(amount)
+                .execute(&pool)
+                .await
+                .unwrap();
+
                 for (component_type, amount) in components {
-                    sqlx::query("INSERT INTO transaction_components (company_id, transaction_id, component_type, label, amount, loan_id) VALUES ('default', ?, ?, 'Test', ?, 'early')")
-                        .bind(id).bind(component_type).bind(amount)
-                        .execute(&pool).await.unwrap();
+                    sqlx::query(
+                        "INSERT INTO transaction_components (
+                             company_id, transaction_id, component_type, label, amount, loan_id
+                         )
+                         VALUES ('default', ?, ?, 'Test', ?, 'early')",
+                    )
+                    .bind(id)
+                    .bind(component_type)
+                    .bind(amount)
+                    .execute(&pool)
+                    .await
+                    .unwrap();
                 }
             }
 
             let ledger = get_monthly_ledger("default", 2026, Some("2026-02"), &pool)
                 .await
                 .unwrap();
+
             let february = ledger
                 .loans
                 .iter()
                 .find(|row| row.period == "2026-02")
                 .unwrap();
+
             assert_eq!(february.closing_balance, 0);
             assert_eq!(february.arrears_principal, 0);
             assert!(february.arrears_interest >= 0);
@@ -686,6 +848,7 @@ mod tests {
             period_range("2025-11", "2026-02"),
             vec!["2025-11", "2025-12", "2026-01", "2026-02"]
         );
+
         assert_eq!(next_period("2026-12").as_deref(), Some("2027-01"));
     }
 
@@ -705,6 +868,7 @@ mod tests {
             ),
             (695_000, 486_100.0)
         );
+
         // Flat interest still uses the loan limit rather than the opening balance.
         assert_eq!(
             scheduled_installment(
@@ -719,6 +883,7 @@ mod tests {
             ),
             (695_000, 500_000.0)
         );
+
         // The remaining balance is smaller than the installment.
         assert_eq!(
             scheduled_installment(
@@ -733,6 +898,7 @@ mod tests {
             ),
             (100_000, 2_000.0)
         );
+
         // Interest keeps its sen (one Anggota loan, Agustus 2026: 9.507.331 * 2%).
         let (_, interest) = scheduled_installment(
             13_900_000,
@@ -744,7 +910,9 @@ mod tests {
             "2026-08",
             9_507_331,
         );
+
         assert!((interest - 190_146.62).abs() < 1e-6);
+
         // No loan limit provided: no repayment schedule.
         assert_eq!(
             scheduled_installment(

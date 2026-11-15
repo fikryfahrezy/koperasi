@@ -11,6 +11,7 @@ use crate::contracts::{LoanMonthDto, SavingsMonthDto};
 /// and the share rounded up to the next thousand (Pembulatan).
 fn incentive(base: f64, rate: f64) -> (i64, i64) {
     let share = base * rate;
+
     (
         share.round() as i64,
         ((share / 1000.0).ceil() * 1000.0) as i64,
@@ -54,12 +55,16 @@ pub(crate) fn apply_loan_report(
     incentive_rate: f64,
 ) {
     let mut order: Vec<usize> = (0..loans.len()).collect();
+
     order.sort_by(|&a, &b| {
         (&loans[a].loan_id, &loans[a].period).cmp(&(&loans[b].loan_id, &loans[b].period))
     });
+
     let mut running: Option<(String, [i64; 4], [i64; 4])> = None;
+
     for &index in &order {
         let row = &mut loans[index];
+
         let (interest, provision) = match &mut running {
             Some((loan_id, interest, provision)) if *loan_id == row.loan_id => {
                 (interest, provision)
@@ -70,6 +75,7 @@ pub(crate) fn apply_loan_report(
                 (interest, provision)
             }
         };
+
         interest[quarter_of(&row.period)] += row.interest_paid;
         provision[quarter_of(&row.period)] += row.provision;
         row.income_interest = *interest;
@@ -78,40 +84,49 @@ pub(crate) fn apply_loan_report(
     }
 
     let mut groups: HashMap<(String, String), Vec<usize>> = HashMap::new();
+
     for (index, row) in loans.iter().enumerate() {
         let borrower = borrowers
             .get(&row.loan_id)
             .filter(|borrower| !borrower.is_empty())
             .cloned()
             .unwrap_or_else(|| format!("loan:{}", row.loan_id));
+
         groups
             .entry((row.period.clone(), borrower))
             .or_default()
             .push(index);
     }
+
     for group in groups.values() {
         let (closed, open): (Vec<usize>, Vec<usize>) =
             group.iter().partition(|&&index| is_closed(&loans[index]));
+
         let realized_last = |candidates: &[usize]| {
             candidates.iter().copied().max_by(|&a, &b| {
                 let realized = |index: usize| realized.get(&loans[index].loan_id);
+
                 realized(a)
                     .cmp(&realized(b))
                     .then_with(|| loans[b].loan_id.cmp(&loans[a].loan_id))
             })
         };
+
         let is_temporary = |index: usize| temporary.contains(&loans[index].loan_id);
+
         let running_monthly: Vec<usize> = open
             .iter()
             .copied()
             .filter(|&index| !is_temporary(index))
             .collect();
+
         let Some(host) = realized_last(&running_monthly)
             .or_else(|| realized_last(&open))
             .or_else(|| realized_last(&closed))
         else {
             continue;
         };
+
         let running_temporary: Vec<usize> = if is_temporary(host) {
             Vec::new()
         } else {
@@ -120,17 +135,21 @@ pub(crate) fn apply_loan_report(
                 .filter(|&index| is_temporary(index))
                 .collect()
         };
+
         let carried = closed
             .iter()
             .map(|&index| (index, false))
             .chain(running_temporary.iter().map(|&index| (index, true)));
+
         for (index, shown) in carried.filter(|&(index, _)| index != host) {
             let (interest, provision) =
                 (loans[index].income_interest, loans[index].income_provision);
+
             for quarter in 0..4 {
                 loans[host].income_interest[quarter] += interest[quarter];
                 loans[host].income_provision[quarter] += provision[quarter];
             }
+
             let row = &mut loans[index];
             row.shown = shown;
             row.income_interest = [0; 4];
@@ -141,6 +160,7 @@ pub(crate) fn apply_loan_report(
     for row in loans.iter_mut() {
         let income: i64 =
             row.income_interest.iter().sum::<i64>() + row.income_provision.iter().sum::<i64>();
+
         (row.incentive_raw, row.incentive) = incentive(income as f64, incentive_rate);
     }
 }
@@ -158,15 +178,19 @@ pub(crate) fn apply_loan_report_per_loan(loans: &mut [LoanMonthDto], incentive_r
         &HashSet::new(),
         incentive_rate,
     );
+
     let mut first_running: HashMap<String, String> = HashMap::new();
+
     for row in loans.iter().filter(|row| is_running(row)) {
         let first = first_running
             .entry(row.loan_id.clone())
             .or_insert_with(|| row.period.clone());
+
         if row.period < *first {
             first.clone_from(&row.period);
         }
     }
+
     for row in loans.iter_mut() {
         row.shown = first_running
             .get(&row.loan_id)
@@ -190,14 +214,18 @@ pub(crate) fn apply_savings_report(
     incentive_rate: f64,
 ) {
     let mut order: Vec<usize> = (0..savings.len()).collect();
+
     order.sort_by(|&a, &b| {
         (&savings[a].member_id, &savings[a].period)
             .cmp(&(&savings[b].member_id, &savings[b].period))
     });
+
     let mut running: Option<(String, i64)> = None;
+
     for index in order {
         let row = &mut savings[index];
         let total = row.principal_closing + row.mandatory_closing + row.voluntary_closing;
+
         let sum = match &mut running {
             Some((member_id, sum)) if *member_id == row.member_id => {
                 *sum += total;
@@ -208,11 +236,13 @@ pub(crate) fn apply_savings_report(
                 total
             }
         };
+
         let months = periods
             .iter()
             .filter(|period| **period <= row.period)
             .count()
             .max(1);
+
         let average = sum as f64 / months as f64;
         row.savings_average = average.round() as i64;
         (row.savings_incentive_raw, row.savings_incentive) = incentive(average, incentive_rate);
@@ -243,6 +273,7 @@ mod tests {
         let mut new_mar = loan("new", "2026-03", 0, 10_000_000);
         new_mar.disbursed = 10_000_000;
         new_mar.provision = 100_000;
+
         let mut loans = vec![
             old_jan,
             loan("new", "2026-01", 0, 0),
@@ -251,13 +282,16 @@ mod tests {
             loan("old", "2026-12", 0, 0),
             loan("new", "2026-12", 10_000_000, 9_000_000),
         ];
+
         apply_loan_report_per_loan(&mut loans, 0.1);
+
         let row = |id: &str, period: &str| {
             loans
                 .iter()
                 .find(|row| row.loan_id == id && row.period == period)
                 .unwrap()
         };
+
         assert!(row("old", "2026-01").shown);
         assert!(!row("new", "2026-01").shown);
         assert!(row("old", "2026-12").shown);
@@ -278,20 +312,24 @@ mod tests {
         let mut new_jan = loan("new", "2026-01", 0, 25_000_000);
         new_jan.disbursed = 25_000_000;
         new_jan.provision = 12_500;
+
         let mut loans = vec![
             old_jan,
             new_jan,
             loan("old", "2026-09", 0, 0),
             loan("new", "2026-09", 25_000_000, 25_000_000),
         ];
+
         let borrowers = HashMap::from([
             ("old".to_string(), "M043".to_string()),
             ("new".to_string(), "M043".to_string()),
         ]);
+
         let realized = HashMap::from([
             ("old".to_string(), "2025-12-10".to_string()),
             ("new".to_string(), "2026-01-28".to_string()),
         ]);
+
         apply_loan_report(&mut loans, &borrowers, &realized, &HashSet::new(), 0.101);
 
         // January, the payoff month: the old loan is already hidden and the
@@ -303,6 +341,7 @@ mod tests {
         assert!(!loans[2].shown);
         assert_eq!(loans[3].income_interest, [500_000, 0, 0, 0]);
         assert_eq!(loans[3].income_provision, [12_500, 0, 0, 0]);
+
         // 10,1% × 512.500 = 51.762,5 → 52.000
         assert_eq!(
             (loans[3].incentive_raw, loans[3].incentive),
@@ -316,6 +355,7 @@ mod tests {
         paid.interest_paid = 0;
         let mut loans = vec![paid];
         let borrowers = HashMap::from([("paid".to_string(), "M001".to_string())]);
+
         apply_loan_report(
             &mut loans,
             &borrowers,
@@ -323,6 +363,7 @@ mod tests {
             &HashSet::new(),
             0.101,
         );
+
         assert!(loans[0].shown);
     }
 
@@ -334,20 +375,24 @@ mod tests {
         let mut new_may = loan("new", "2026-05", 0, 0);
         new_may.disbursed = 2_000_000;
         new_may.provision = 10_000;
+
         let mut loans = vec![
             old_jan,
             new_may,
             loan("old", "2026-09", 0, 0),
             loan("new", "2026-09", 0, 0),
         ];
+
         let borrowers = HashMap::from([
             ("old".to_string(), "M109".to_string()),
             ("new".to_string(), "M109".to_string()),
         ]);
+
         let realized = HashMap::from([
             ("old".to_string(), "2025-05-21".to_string()),
             ("new".to_string(), "2026-04-22".to_string()),
         ]);
+
         apply_loan_report(&mut loans, &borrowers, &realized, &HashSet::new(), 0.101);
         assert!(!loans[2].shown);
         assert_eq!(loans[2].income_interest, [0; 4]);
@@ -359,6 +404,7 @@ mod tests {
     #[test]
     fn does_not_merge_loans_without_a_borrower() {
         let mut loans = vec![loan("a", "2026-09", 0, 0), loan("b", "2026-09", 0, 0)];
+
         apply_loan_report(
             &mut loans,
             &HashMap::new(),
@@ -366,6 +412,7 @@ mod tests {
             &HashSet::new(),
             0.101,
         );
+
         assert!(loans[0].shown && loans[1].shown);
     }
 
@@ -375,22 +422,26 @@ mod tests {
         // one under the larger id.
         let mut paid_jan = loan("c", "2026-01", 1_000_000, 0);
         paid_jan.interest_paid = 20_000;
+
         let mut loans = vec![
             paid_jan,
             loan("c", "2026-02", 0, 0),
             loan("a", "2026-02", 5_000_000, 5_000_000),
             loan("b", "2026-02", 5_000_000, 5_000_000),
         ];
+
         let borrowers = HashMap::from([
             ("a".to_string(), "M001".to_string()),
             ("b".to_string(), "M001".to_string()),
             ("c".to_string(), "M001".to_string()),
         ]);
+
         let realized = HashMap::from([
             ("a".to_string(), "2024-03-01".to_string()),
             ("b".to_string(), "2025-06-01".to_string()),
             ("c".to_string(), "2023-01-01".to_string()),
         ]);
+
         apply_loan_report(&mut loans, &borrowers, &realized, &HashSet::new(), 0.101);
         assert!(!loans[1].shown);
         assert_eq!(loans[2].income_interest, [0; 4]);
@@ -412,6 +463,7 @@ mod tests {
         let mut temporary = loan("temporary", "2025-10", 0, 500_000);
         temporary.disbursed = 500_000;
         temporary.interest_paid = 30_000;
+
         let mut loans = vec![
             paid,
             monthly,
@@ -420,16 +472,19 @@ mod tests {
             loan("monthly", "2025-12", 5_000_000, 4_500_000),
             loan("temporary", "2025-12", 500_000, 500_000),
         ];
+
         let borrowers = HashMap::from([
             ("paid".to_string(), "M053".to_string()),
             ("monthly".to_string(), "M053".to_string()),
             ("temporary".to_string(), "M053".to_string()),
         ]);
+
         let realized = HashMap::from([
             ("paid".to_string(), "2024-12-02".to_string()),
             ("monthly".to_string(), "2025-10-01".to_string()),
             ("temporary".to_string(), "2025-10-22".to_string()),
         ]);
+
         let temporary_ids = HashSet::from(["temporary".to_string()]);
         apply_loan_report(&mut loans, &borrowers, &realized, &temporary_ids, 0.101);
 
@@ -447,16 +502,20 @@ mod tests {
     fn a_temporary_loan_takes_the_income_without_a_monthly_loan() {
         let mut paid = loan("paid", "2026-01", 1_000_000, 0);
         paid.interest_paid = 20_000;
+
         let mut loans = vec![
             paid,
             loan("paid", "2026-02", 0, 0),
             loan("temporary", "2026-02", 2_000_000, 2_000_000),
         ];
+
         let borrowers = HashMap::from([
             ("paid".to_string(), "M001".to_string()),
             ("temporary".to_string(), "M001".to_string()),
         ]);
+
         let temporary_ids = HashSet::from(["temporary".to_string()]);
+
         apply_loan_report(
             &mut loans,
             &borrowers,
@@ -464,6 +523,7 @@ mod tests {
             &temporary_ids,
             0.101,
         );
+
         assert!(!loans[1].shown);
         assert_eq!(loans[2].income_interest, [20_000, 0, 0, 0]);
     }
@@ -475,7 +535,9 @@ mod tests {
             6_997_630, 6_997_630, 7_072_630, 7_072_630, 7_147_630, 7_147_630, 7_347_630, 7_397_630,
             7_447_630, 7_497_630, 7_547_630, 7_597_630,
         ];
+
         let periods: Vec<String> = (1..=12).map(|month| format!("2025-{month:02}")).collect();
+
         let mut savings: Vec<SavingsMonthDto> = periods
             .iter()
             .zip(totals)
@@ -486,9 +548,11 @@ mod tests {
                 ..Default::default()
             })
             .collect();
+
         apply_savings_report(&mut savings, &periods, 0.0365);
         let december = &savings[11];
         assert_eq!(december.savings_average, 7_272_630);
+
         // 3,65% × 7.272.630 = 265.450,995 → 266.000 (kolom DN, DO)
         assert_eq!(
             (december.savings_incentive_raw, december.savings_incentive),

@@ -240,24 +240,29 @@ pub(crate) fn round_up_amount(value: f64) -> i64 {
 
 pub(crate) fn calculate_rate_amount(amount: i64, rate: f64) -> Result<i64, String> {
     let value = amount as f64 * rate;
+
     if amount < 0 || rate < 0.0 || !value.is_finite() || value >= i64::MAX as f64 {
         return Err("Hasil perhitungan pinjaman terlalu besar.".into());
     }
+
     Ok(value.round() as i64)
 }
 
 pub(crate) fn timestamp_id(prefix: &str) -> String {
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
+
     let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
     format!("{prefix}-{millis}-{sequence}")
 }
 
 fn date_parts(value: &str) -> Result<(i64, i64, i64), String> {
     let bytes = value.as_bytes();
+
     if bytes.len() != 10
         || bytes[4] != b'-'
         || bytes[7] != b'-'
@@ -268,28 +273,36 @@ fn date_parts(value: &str) -> Result<(i64, i64, i64), String> {
     {
         return Err("Tanggal bisnis tidak valid.".into());
     }
+
     let year = value[0..4]
         .parse::<i64>()
         .map_err(|_| "Tanggal bisnis tidak valid.")?;
+
     let month = value[5..7]
         .parse::<i64>()
         .map_err(|_| "Tanggal bisnis tidak valid.")?;
+
     let day = value[8..10]
         .parse::<i64>()
         .map_err(|_| "Tanggal bisnis tidak valid.")?;
+
     if year == 0 || !(1..=12).contains(&month) {
         return Err("Tanggal bisnis tidak valid.".into());
     }
+
     let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+
     let max_day = match month {
         2 if leap => 29,
         2 => 28,
         4 | 6 | 9 | 11 => 30,
         _ => 31,
     };
+
     if !(1..=max_day).contains(&day) {
         return Err("Tanggal bisnis tidak valid.".into());
     }
+
     Ok((year, month, day))
 }
 
@@ -299,23 +312,29 @@ pub(crate) fn validate_business_date(value: &str) -> Result<(), String> {
 
 pub(crate) fn add_months(value: &str, months: i64) -> Result<String, String> {
     let (year, month, day) = date_parts(value)?;
+
     let absolute_month = year
         .checked_mul(12)
         .and_then(|value| value.checked_add(month - 1))
         .and_then(|value| value.checked_add(months))
         .ok_or("Tanggal jatuh tempo di luar rentang yang didukung.")?;
+
     let due_year = absolute_month.div_euclid(12);
     let due_month = absolute_month.rem_euclid(12) + 1;
+
     if !(1..=9999).contains(&due_year) {
         return Err("Tanggal jatuh tempo di luar rentang yang didukung.".into());
     }
+
     let leap = due_year % 4 == 0 && (due_year % 100 != 0 || due_year % 400 == 0);
+
     let max_day = match due_month {
         2 if leap => 29,
         2 => 28,
         4 | 6 | 9 | 11 => 30,
         _ => 31,
     };
+
     Ok(format!(
         "{due_year:04}-{due_month:02}-{:02}",
         day.min(max_day)
@@ -337,19 +356,26 @@ pub(crate) fn calculate_loan(
     {
         return Err("Parameter perhitungan pinjaman tidak valid.".into());
     }
+
     let principal_installment = ((plafond as f64 / tenor as f64) / 1000.0).ceil() as i64;
+
     let principal_installment = principal_installment
         .checked_mul(1000)
         .ok_or("Hasil perhitungan pinjaman terlalu besar.")?;
+
     let first_interest = round_up_interest(plafond as f64 * annual_rate / 12.0);
     let provision = calculate_rate_amount(plafond, provision_rate)?;
+
     let first_total = principal_installment
         .checked_add(first_interest)
         .ok_or("Hasil perhitungan pinjaman terlalu besar.")?;
+
     let annual_rate_percent = annual_rate * 100.0;
+
     if !annual_rate_percent.is_finite() {
         return Err("Hasil perhitungan pinjaman terlalu besar.".into());
     }
+
     Ok(LoanCalculation {
         principal_installment,
         first_interest,
