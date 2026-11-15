@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+
 import {
   BanknoteArrowDown,
   BanknoteArrowUp,
@@ -9,50 +10,46 @@ import {
   TriangleAlert,
   WalletMinimal,
 } from "lucide-vue-next";
-import type { useWorkspacePageState } from "../composables/useWorkspacePageState";
+
+import { useCashForm } from "../composables/cash-entry/useCashForm";
+
+import {
+  guaranteeOptions,
+  interestTypeOptions,
+  loanGroupOptions,
+  loanTypeOptions,
+  useLoanForm,
+} from "../composables/cash-entry/useLoanForm";
+
+import { usePaymentForm } from "../composables/cash-entry/usePaymentForm";
+import { useSavingsWithdrawalForm } from "../composables/cash-entry/useSavingsWithdrawalForm";
+import type { WorkspacePageState } from "../composables/useWorkspacePageState";
 import DateInput from "./DateInput.vue";
 import MemberCombobox from "./MemberCombobox.vue";
 import RupiahInput from "./RupiahInput.vue";
 import UiModal from "./UiModal.vue";
 import UiSelect from "./UiSelect.vue";
+
 import {
-  CashCategory,
-  cashCategories,
-  Channel,
   formatCurrency,
   formatLoanLabel,
-  formatPeriod,
-  Guarantee,
-  InterestType,
   LoanGroup,
-  LoanType,
-  type LoanPreview,
-  roundUpInterest,
-  SavingsAccountType,
   todayIso,
   TransactionDirection,
   useKoperasiStore,
-  useMonthlyLedger,
 } from "../store/koperasi";
 
-/** Catat transaksi: the single entry point for every Buku Kas movement. */
+/** Catat transaksi: the single entry point for every Buku Kas movement. Each
+ * kind of transaction keeps its own form (see composables/cash-entry); this
+ * dialog picks one, holds the date and the Uraian, and submits it. */
 const props = defineProps<{
   /** The page's per-tab state, so each workspace tab keeps its own draft. */
-  pageState: ReturnType<typeof useWorkspacePageState>;
+  pageState: WorkspacePageState;
 }>();
+
 const pageState = props.pageState;
 
-const {
-  members,
-  loans,
-  savingsBalances,
-  financialParameters,
-  createLoan,
-  postCashEntry,
-  postPayment,
-  postSavingsWithdrawal,
-  previewLoan,
-} = useKoperasiStore();
+const { financialParameters } = useKoperasiStore();
 
 // Setoran simpanan is part of Setoran anggota: a member without a running loan
 // deposits savings there too.
@@ -63,624 +60,99 @@ const Category = {
   CashIn: "cash-in",
   CashOut: "cash-out",
 } as const;
-// Kategori option for Kas Buku Tabungan movements that do not touch Saldo Kas;
-// posted on the TABUNGAN channel without a Buku Kas category.
-const SAVINGS_BOOK_ONLY = "SAVINGS_BOOK_ONLY";
+
 type Category = (typeof Category)[keyof typeof Category];
 const modalOpen = pageState.field("modalOpen", () => false);
 const submitting = ref(false);
 const category = pageState.field<Category>("category", () => Category.Payment);
+
 // A tab saved before the merge may still hold the old Setoran simpanan.
 if (!Object.values(Category).includes(category.value))
   category.value = Category.Payment;
+
 const posting = pageState.field("posting", () => ({
   businessDate: todayIso(),
 }));
-const paymentForm = pageState.field("paymentForm", () => ({
-  loanGroup: LoanGroup.Member as LoanGroup,
-  memberId: "",
-  // Non Anggota: the borrower, by name (see `borrowerKey`).
-  borrower: "",
-  // Principal and interest per running loan of the member or borrower.
-  lines: {} as Record<string, { principal: number; interest: number }>,
-  pokok: 0,
-  wajib: 0,
-  voluntary: 0,
-}));
-// Pengambilan: Pokok, Wajib, and Manasuka in one transaction, as one Buku Kas row.
-const savingsForm = pageState.field("savingsForm", () => ({
-  memberId: "",
-  principal: 0,
-  mandatory: 0,
-  voluntary: 0,
-}));
-const loanForm = pageState.field("loanForm", () => ({
-  loanGroup: LoanGroup.Member as LoanGroup,
-  memberId: "",
-  borrowerName: "",
-  plafond: 10_000_000,
-  tenor: null as number | null,
-  interestType: InterestType.Declining as InterestType,
-  loanType: LoanType.Monthly as LoanType,
-  guarantee: Guarantee.Pg as Guarantee,
-  recommender: "",
-  // Bunga per tahun (%); null follows the Bunga parameter until typed.
-  annualRate: null as number | null,
-}));
-const otherForm = pageState.field("otherForm", () => ({
-  category: "" as CashCategory | typeof SAVINGS_BOOK_ONLY | "",
-  description: "",
-  amount: 0,
-}));
+
+const isCash = computed(
+  () =>
+    category.value === Category.CashIn || category.value === Category.CashOut,
+);
+
+const isSavings = computed(() => category.value === Category.SavingsWithdrawal);
+
+const payment = usePaymentForm(pageState, () => posting.value.businessDate);
+
+const {
+  paymentForm,
+  isNonMemberPayment,
+  paymentBorrowerOptions,
+  paymentMemberOptions,
+  paymentLoans,
+  paymentLine,
+  paymentTotal,
+  interestDueLines,
+  payoffInterestWarning,
+} = payment;
+
+// Every form picks from all members.
+const memberOptions = paymentMemberOptions;
+
+const loan = useLoanForm(pageState);
+
+const {
+  loanForm,
+  loanProvision,
+  loanPreview,
+  topUpLoans,
+  loanPayoff,
+  payoffTotal,
+  exceedsTopUpPlafond,
+  borrowerOutstanding,
+  outstandingAfterLoan,
+  exceedsOutstandingLimit,
+  loanAnnualRate,
+} = loan;
+
+const savings = useSavingsWithdrawalForm(pageState);
+
+const {
+  savingsForm,
+  savingsTotal,
+  savingsMemberBalances,
+  withdrawAllSavings,
+  setSavingsDefaults,
+} = savings;
+
+const cash = useCashForm(pageState, () =>
+  category.value === Category.CashIn
+    ? TransactionDirection.In
+    : TransactionDirection.Out,
+);
+
+const { otherForm, cashCategoryOptions } = cash;
+const isSavingsBook = computed(() => isCash.value && cash.isSavingsBook.value);
+
 // Uraian of payments, loans, and savings follows the generated text (as the
 // backend writes it) until the user types their own; empty falls back to it.
 const typedDescription = pageState.field("typedDescription", () => ({
   text: "",
   edited: false,
 }));
-// Provisi follows the parameter rate until the user types their own amount.
-const loanProvision = pageState.field("loanProvision", () => ({
-  amount: 0,
-  edited: false,
-}));
-// Suplesi: the member's running loans this new loan pays off, with the
-// interest still due on each.
-const loanPayoffs = pageState.field(
-  "loanPayoffs",
-  () => ({}) as Record<string, { selected: boolean; interest: number }>,
-);
-const loanPreview = pageState.field<LoanPreview | null>(
-  "loanPreview",
-  () => null,
+
+const generatedDescription = computed(
+  () =>
+    (
+      ({
+        [Category.Payment]: payment.generatedDescription.value,
+        [Category.Loan]: loan.generatedDescription.value,
+        [Category.SavingsWithdrawal]: savings.generatedDescription.value,
+        [Category.CashIn]: "",
+        [Category.CashOut]: "",
+      }) satisfies Record<Category, string>
+    )[category.value],
 );
 
-const memberOptions = computed(() =>
-  members.map((member) => ({
-    value: member.id,
-    label: member.name,
-    code: member.memberNumber,
-  })),
-);
-const interestTypeOptions = [
-  { value: InterestType.Declining, label: "Menurun" },
-  { value: InterestType.Flat, label: "Plat" },
-];
-const loanGroupOptions = [
-  { value: LoanGroup.Member, label: "Anggota PP BRI" },
-  { value: LoanGroup.NonMember, label: "Non Anggota PP BRI" },
-];
-const guaranteeOptions = [
-  { value: Guarantee.Pg, label: "PG" },
-  { value: Guarantee.Tn, label: "TN" },
-  { value: Guarantee.None, label: "Kosong" },
-];
-const loanTypeOptions = [
-  { value: LoanType.Monthly, label: "Bulanan" },
-  { value: LoanType.Temporary, label: "Sementara" },
-];
-const isCash = computed(
-  () =>
-    category.value === Category.CashIn || category.value === Category.CashOut,
-);
-const isSavingsBook = computed(
-  () => isCash.value && otherForm.value.category === SAVINGS_BOOK_ONLY,
-);
-const cashDirection = computed(() =>
-  category.value === Category.CashIn
-    ? TransactionDirection.In
-    : TransactionDirection.Out,
-);
-// Tambahan Kas is only cash in and Transfer ke Tabungan only cash out.
-// Alphabetical after "Tanpa kategori", with Lainnya last. Grouped: first the
-// expense columns of Buku Kas TAHUN 2026 (L–W), then the app's own categories.
-const sheetCategories = new Set<string>(
-  cashCategories.slice(3).map((option) => option.value),
-);
-const cashCategoryOptions = computed(() => [
-  { value: "", label: "Tanpa kategori" },
-  ...[
-    ...cashCategories.filter(
-      (option) => !option.direction || option.direction === cashDirection.value,
-    ),
-    {
-      value: SAVINGS_BOOK_ONLY,
-      label:
-        cashDirection.value === TransactionDirection.In
-          ? "Tambahan Kas Tabungan"
-          : "Pengeluaran Kas Tabungan",
-    },
-  ]
-    .sort(
-      (a, b) =>
-        Number(a.value === CashCategory.Other) -
-          Number(b.value === CashCategory.Other) ||
-        a.label.localeCompare(b.label, "id-ID", { sensitivity: "base" }),
-    )
-    .map((option) => ({
-      ...option,
-      group: sheetCategories.has(option.value) ? "Biaya" : "Kas & tabungan",
-    }))
-    .sort(
-      (a, b) =>
-        Number(a.group === "Kas & tabungan") -
-        Number(b.group === "Kas & tabungan"),
-    ),
-]);
-const cashCategoryDescriptions: string[] = cashCategories.flatMap((option) =>
-  option.description ? [option.description] : [],
-);
-watch([() => otherForm.value.category, cashDirection], () => {
-  const form = otherForm.value;
-  if (
-    !cashCategoryOptions.value.some((option) => option.value === form.category)
-  )
-    form.category = "";
-  // Fill in the sheet's Uraian for the transfer categories, without
-  // overwriting text the user typed.
-  const selected = cashCategories.find(
-    (option) => option.value === form.category,
-  );
-  const description = selected?.description ?? "";
-  if (
-    !form.description.trim() ||
-    cashCategoryDescriptions.includes(form.description)
-  )
-    form.description = description;
-});
-/** Non Anggota borrowers have no member record, so their loans are grouped by
- * name, ignoring case and outer spaces (the backend matches the same way). */
-const borrowerKey = (name: string) => name.trim().toLocaleLowerCase("id-ID");
-const isNonMemberPayment = computed(
-  () => paymentForm.value.loanGroup === LoanGroup.NonMember,
-);
-// Anggota picks the member and Non Anggota the borrower; every running loan
-// of theirs gets its own pokok and bunga, so one deposit can pay several
-// loans in one Buku Kas row, as in the sheet ("Setoran <nama>").
-const runningLoans = computed(() =>
-  loans.filter(
-    (loan) =>
-      loan.loanGroup === paymentForm.value.loanGroup &&
-      loan.balance > 0 &&
-      (isNonMemberPayment.value || loan.memberId),
-  ),
-);
-const paymentBorrowerOptions = computed(() =>
-  [
-    ...runningLoans.value.reduce((groups, loan) => {
-      const key = borrowerKey(loan.memberName);
-      groups.set(key, [...(groups.get(key) ?? []), loan]);
-      return groups;
-    }, new Map<string, typeof loans>()),
-  ]
-    .map(([key, borrowerLoans]) => {
-      const [first] = borrowerLoans;
-      const balance = borrowerLoans.reduce(
-        (sum, loan) => sum + loan.balance,
-        0,
-      );
-      return {
-        value: key,
-        label: `${first.memberName.trim()} · ${
-          borrowerLoans.length > 1
-            ? `${borrowerLoans.length} pinjaman · sisa ${formatCurrency(balance)}`
-            : formatLoanLabel(first)
-        }`,
-      };
-    })
-    .sort((a, b) => a.label.localeCompare(b.label, "id-ID")),
-);
-// Every member: one without a running loan deposits only savings.
-const paymentMemberOptions = memberOptions;
-watch(
-  () => paymentForm.value.loanGroup,
-  () => {
-    if (
-      !paymentBorrowerOptions.value.some(
-        (option) => option.value === paymentForm.value.borrower,
-      )
-    )
-      paymentForm.value.borrower = "";
-    if (
-      !paymentMemberOptions.value.some(
-        (option) => option.value === paymentForm.value.memberId,
-      )
-    )
-      paymentForm.value.memberId = "";
-  },
-);
-// The loans this payment goes to: every running loan of the picked member or
-// Non Anggota borrower.
-const paymentLoans = computed(() =>
-  isNonMemberPayment.value
-    ? runningLoans.value.filter(
-        (loan) =>
-          !!paymentForm.value.borrower &&
-          borrowerKey(loan.memberName) === paymentForm.value.borrower,
-      )
-    : runningLoans.value.filter(
-        (loan) =>
-          paymentForm.value.memberId &&
-          loan.memberId === paymentForm.value.memberId,
-      ),
-);
-// Interest of the transaction month: this month's installment ("Kewajiban
-// setor tiap bulan") and what is still owed through it ("Kewajiban setor s/d"
-// on the Pinjaman page, less what was already paid that month).
-const { monthlyLedger } = useMonthlyLedger();
-const postingPeriod = computed(() => posting.value.businessDate.slice(0, 7));
-const interestOfMonth = computed(
-  () =>
-    new Map(
-      monthlyLedger.value.loans
-        .filter((row) => row.period === postingPeriod.value)
-        .map((row) => [
-          row.loanId,
-          { scheduled: row.scheduledInterest, due: row.arrearsInterest },
-        ]),
-    ),
-);
-function interestDueLines(loanIds: string[]) {
-  let scheduled = 0;
-  let due = 0;
-  for (const loanId of loanIds) {
-    const interest = interestOfMonth.value.get(loanId);
-    if (!interest) return [];
-    scheduled += interest.scheduled;
-    due += interest.due;
-  }
-  if (!loanIds.length) return [];
-  const dueText =
-    due < 0
-      ? `Lebih bayar bunga ${formatCurrency(-due)}`
-      : `Kewajiban bunga s/d ${formatPeriod(postingPeriod.value)} ${formatCurrency(due)}`;
-  return [`Bunga per bulan ${formatCurrency(scheduled)}`, dueText];
-}
-/** A payment that pays off the loan's principal but not exactly its interest
- * due leaves interest arrears on a paid-off loan; warn, but still allow it
- * (the interest may be waived). */
-function payoffInterestWarning(
-  loan: (typeof loans)[number],
-  principal: number,
-  interest: number,
-) {
-  const due = interestOfMonth.value.get(loan.id)?.due;
-  if (due === undefined || loan.balance <= 0 || principal !== loan.balance)
-    return "";
-  const gap = due - (interest || 0);
-  if (!gap) return "";
-  return gap > 0
-    ? `Pinjaman lunas, tapi bunga masih kurang ${formatCurrency(gap)}.`
-    : `Pinjaman lunas, tapi bunga lebih ${formatCurrency(-gap)}.`;
-}
-/** One month's installment, to start from: the outstanding balance helps
- * fill in the principal. */
-function installmentOf(loan: (typeof loans)[number]) {
-  return {
-    principal: Math.min(
-      Math.ceil(loan.plafond / loan.tenor / 1000) * 1000,
-      loan.balance,
-    ),
-    interest: roundUpInterest(
-      ((loan.interestType === InterestType.Flat ? loan.plafond : loan.balance) *
-        loan.rate) /
-        100 /
-        12,
-    ),
-  };
-}
-function paymentLine(loanId: string) {
-  paymentForm.value.lines ??= {};
-  return (paymentForm.value.lines[loanId] ??= { principal: 0, interest: 0 });
-}
-watch(
-  [
-    () => pageState.tabId.value,
-    () => paymentForm.value.memberId,
-    () => paymentForm.value.borrower,
-    () => paymentForm.value.loanGroup,
-  ],
-  ([tabId], [previousTabId]) => {
-    if (tabId !== previousTabId) return;
-    const installments = paymentLoans.value.map(
-      (loan) => [loan.id, installmentOf(loan)] as const,
-    );
-    paymentForm.value.lines = Object.fromEntries(installments);
-  },
-);
-const paymentSavingsAmounts = computed(() =>
-  (
-    [
-      [SavingsAccountType.Principal, paymentForm.value.pokok],
-      [SavingsAccountType.Mandatory, paymentForm.value.wajib],
-      [SavingsAccountType.Voluntary, paymentForm.value.voluntary],
-    ] as const
-  )
-    .map(([accountType, amount]) => ({ accountType, amount: amount || 0 }))
-    .filter((item) => item.amount > 0),
-);
-const paymentSavingsTotal = computed(() =>
-  paymentSavingsAmounts.value.reduce((sum, item) => sum + item.amount, 0),
-);
-/** An Anggota setoran with no pokok or bunga for any loan: only savings. */
-const isSavingsOnlyPayment = computed(
-  () =>
-    !isNonMemberPayment.value &&
-    paymentLoans.value.every(
-      (loan) =>
-        !(paymentLine(loan.id).principal || 0) &&
-        !(paymentLine(loan.id).interest || 0),
-    ),
-);
-const paymentTotal = computed(
-  () =>
-    paymentLoans.value.reduce(
-      (sum, loan) =>
-        sum +
-        (paymentLine(loan.id).principal || 0) +
-        (paymentLine(loan.id).interest || 0),
-      0,
-    ) + (isNonMemberPayment.value ? 0 : paymentSavingsTotal.value),
-);
-
-const topUpLoans = computed(() =>
-  loanForm.value.loanGroup === LoanGroup.Member && loanForm.value.memberId
-    ? loans.filter(
-        (loan) =>
-          loan.memberId === loanForm.value.memberId &&
-          loan.loanGroup === LoanGroup.Member &&
-          loan.balance > 0,
-      )
-    : [],
-);
-function loanPayoff(loanId: string) {
-  return (loanPayoffs.value[loanId] ??= { selected: false, interest: 0 });
-}
-watch(
-  [() => pageState.tabId.value, () => loanForm.value.memberId],
-  ([tabId], [previousTabId]) => {
-    if (tabId !== previousTabId) return;
-    loanPayoffs.value = Object.fromEntries(
-      topUpLoans.value.map((loan) => [
-        loan.id,
-        { selected: false, interest: installmentOf(loan).interest },
-      ]),
-    );
-  },
-);
-const selectedPayoffs = computed(() =>
-  topUpLoans.value
-    .filter((loan) => loanPayoff(loan.id).selected)
-    .map((loan) => ({
-      loanId: loan.id,
-      principal: loan.balance,
-      interest: loanPayoff(loan.id).interest || 0,
-    })),
-);
-const payoffTotal = computed(() =>
-  selectedPayoffs.value.reduce(
-    (sum, payoff) => sum + payoff.principal + payoff.interest,
-    0,
-  ),
-);
-const exceedsTopUpPlafond = computed(
-  () =>
-    selectedPayoffs.value.length > 0 &&
-    payoffTotal.value + loanProvision.value.amount > loanForm.value.plafond,
-);
-/** Batas sisa pinjaman: the borrower's remaining principal on running loans,
- * less what this suplesi pays off, plus the new plafond. Only a warning, since
- * the board can allow more (notes/rules-and-formulas.md 1.12). Non Anggota
- * loans are matched by borrower name. */
-const borrowerOutstanding = computed(() => {
-  const form = loanForm.value;
-  const name = borrowerKey(form.borrowerName);
-  return loans
-    .filter(
-      (loan) =>
-        loan.balance > 0 &&
-        loan.loanGroup === form.loanGroup &&
-        (form.loanGroup === LoanGroup.Member
-          ? !!form.memberId && loan.memberId === form.memberId
-          : !!name && borrowerKey(loan.memberName) === name),
-    )
-    .reduce((sum, loan) => sum + loan.balance, 0);
-});
-const outstandingAfterLoan = computed(
-  () =>
-    borrowerOutstanding.value -
-    selectedPayoffs.value.reduce((sum, payoff) => sum + payoff.principal, 0) +
-    (loanForm.value.plafond || 0),
-);
-const exceedsOutstandingLimit = computed(
-  () =>
-    financialParameters.maxLoanOutstanding > 0 &&
-    outstandingAfterLoan.value > financialParameters.maxLoanOutstanding,
-);
-const loanAnnualRate = computed({
-  get: () => loanForm.value.annualRate ?? financialParameters.annualRate,
-  set: (value: number) => {
-    loanForm.value.annualRate = Number.isFinite(value) ? value : null;
-  },
-});
-const annualRateValid = computed(
-  () => loanAnnualRate.value >= 0 && loanAnnualRate.value <= 100,
-);
-/** Provisi at the parameter rate. A suplesi charges it on the new money
- * only, as in the sheet: plafond minus what pays off the old loans. */
-function rateProvision(preview: LoanPreview | null) {
-  if (!payoffTotal.value) return preview?.provision ?? 0;
-  const base = Math.max(loanForm.value.plafond - payoffTotal.value, 0);
-  return Math.round((base * financialParameters.provisionRate) / 100);
-}
-watch(
-  [() => pageState.tabId.value, payoffTotal],
-  ([tabId], [previousTabId]) => {
-    if (tabId !== previousTabId) return;
-    loanProvision.value.edited = false;
-    loanProvision.value.amount = rateProvision(loanPreview.value);
-  },
-);
-
-watch(
-  loanForm,
-  async (_, __, onCleanup) => {
-    const target = loanPreview.forTab(pageState.tabId.value);
-    const provision = loanProvision.forTab(pageState.tabId.value);
-    let cancelled = false;
-    onCleanup(() => {
-      cancelled = true;
-    });
-    const { tenor } = loanForm.value;
-    if (!tenor || tenor <= 0) {
-      target.value = null;
-      return;
-    }
-    try {
-      const result = await previewLoan({ ...loanForm.value, tenor });
-      if (cancelled) return;
-      target.value = result;
-      if (!provision.value.edited)
-        provision.value.amount = rateProvision(result);
-    } catch {
-      if (!cancelled) target.value = null;
-    }
-  },
-  { deep: true, immediate: true },
-);
-
-watch(
-  () => loanForm.value.plafond,
-  () => {
-    loanProvision.value.edited = false;
-  },
-);
-
-function openModal() {
-  category.value = Category.Payment;
-  posting.value.businessDate = todayIso();
-  Object.assign(paymentForm.value, {
-    loanGroup: LoanGroup.Member,
-    memberId: "",
-    borrower: "",
-    pokok: 0,
-    wajib: 0,
-    voluntary: 0,
-  });
-  Object.assign(savingsForm.value, {
-    memberId: "",
-    principal: 0,
-    mandatory: 0,
-    voluntary: 0,
-  });
-  Object.assign(loanForm.value, {
-    loanGroup: LoanGroup.Member,
-    memberId: "",
-    borrowerName: "",
-    plafond: 10_000_000,
-    tenor: null,
-    interestType: InterestType.Declining,
-    loanType: LoanType.Monthly,
-    guarantee: Guarantee.Pg,
-    recommender: "",
-    annualRate: null,
-  });
-  Object.assign(loanProvision.value, { amount: 0, edited: false });
-  loanPayoffs.value = {};
-  Object.assign(otherForm.value, {
-    category: "",
-    description: "",
-    amount: 0,
-  });
-  Object.assign(typedDescription.value, { text: "", edited: false });
-  modalOpen.value = true;
-}
-const isSavings = computed(() => category.value === Category.SavingsWithdrawal);
-// Every amount starts empty: wajib is typed as paid, not prefilled.
-function setSavingsDefaults() {
-  Object.assign(savingsForm.value, {
-    principal: 0,
-    mandatory: 0,
-    voluntary: 0,
-  });
-}
-const savingsAmounts = computed(() =>
-  (
-    [
-      [SavingsAccountType.Principal, savingsForm.value.principal],
-      [SavingsAccountType.Mandatory, savingsForm.value.mandatory],
-      [SavingsAccountType.Voluntary, savingsForm.value.voluntary],
-    ] as const
-  )
-    .map(([accountType, amount]) => ({ accountType, amount: amount || 0 }))
-    .filter((item) => item.amount > 0),
-);
-const savingsTotal = computed(() =>
-  savingsAmounts.value.reduce((sum, item) => sum + item.amount, 0),
-);
-// Show what each account holds; "Ambil semua saldo" fills them all in.
-// It only withdraws: the member stays a member.
-const savingsMemberBalances = computed(() => {
-  const member = members.find((item) => item.id === savingsForm.value.memberId);
-  const balanceOf = (accountType: SavingsAccountType) =>
-    savingsBalances.find(
-      (item) =>
-        item.memberId === savingsForm.value.memberId &&
-        item.accountType === accountType,
-    )?.balance ?? 0;
-  return {
-    principal: member?.principalSavings ?? 0,
-    mandatory: balanceOf(SavingsAccountType.Mandatory),
-    voluntary: balanceOf(SavingsAccountType.Voluntary),
-  };
-});
-function withdrawAllSavings() {
-  Object.assign(savingsForm.value, savingsMemberBalances.value);
-}
-
-const memberName = (id: string) =>
-  members.find((member) => member.id === id)?.name ?? "";
-const savingsAccountWords = {
-  [SavingsAccountType.Principal]: "Pokok",
-  [SavingsAccountType.Mandatory]: "Wajib",
-  [SavingsAccountType.Voluntary]: "Manasuka",
-} satisfies Record<SavingsAccountType, string>;
-/** "Simpanan Wajib" or "Simpanan Pokok, Wajib & Manasuka", as the backend writes it. */
-function savingsAccountsText(amounts: { accountType: SavingsAccountType }[]) {
-  const words = amounts.map((item) => savingsAccountWords[item.accountType]);
-  if (!words.length) return "";
-  return words.length === 1
-    ? `Simpanan ${words[0]}`
-    : `Simpanan ${words.slice(0, -1).join(", ")} & ${words[words.length - 1]}`;
-}
-/** The Uraian the backend writes when none is typed; "" until it is known. */
-const generatedDescription = computed(() => {
-  if (category.value === Category.Payment) {
-    if (isSavingsOnlyPayment.value) {
-      const name = memberName(paymentForm.value.memberId);
-      const accounts = savingsAccountsText(paymentSavingsAmounts.value);
-      return name && accounts ? `Setoran ${accounts} ${name}` : "";
-    }
-    const loan = paymentLoans.value[0];
-    if (!loan) return "";
-    return `Setoran ${isNonMemberPayment.value ? loan.memberName : memberName(loan.memberId)}`;
-  }
-  if (isSavings.value) {
-    const name = memberName(savingsForm.value.memberId);
-    const accounts = savingsAccountsText(savingsAmounts.value);
-    return name && accounts ? `Pengambilan ${accounts} ${name}` : "";
-  }
-  if (category.value === Category.Loan) {
-    const name =
-      loanForm.value.loanGroup === LoanGroup.Member
-        ? memberName(loanForm.value.memberId)
-        : loanForm.value.borrowerName.trim();
-    if (!name) return "";
-    return selectedPayoffs.value.length
-      ? `Suplesi ${name} Jk ${loanForm.value.tenor ?? ""} bulan`
-      : `Realisasi Pinjaman ${name}`;
-  }
-  return "";
-});
 const descriptionInput = computed({
   get: () =>
     typedDescription.value.edited
@@ -690,13 +162,26 @@ const descriptionInput = computed({
     typedDescription.value = { text, edited: true };
   },
 });
+
 // Sent only when typed, so the backend's own text stays the source otherwise.
 const descriptionOverride = computed(() =>
   typedDescription.value.edited ? typedDescription.value.text.trim() : "",
 );
+
 watch(category, () => {
   typedDescription.value = { text: "", edited: false };
 });
+
+function openModal() {
+  category.value = Category.Payment;
+  posting.value.businessDate = todayIso();
+  payment.reset();
+  savings.reset();
+  loan.reset();
+  cash.reset();
+  Object.assign(typedDescription.value, { text: "", edited: false });
+  modalOpen.value = true;
+}
 
 const submitLabel = computed(
   () =>
@@ -714,95 +199,21 @@ const submitLabel = computed(
 async function submit() {
   const submittedModal = modalOpen.forTab(pageState.tabId.value);
   const options = { businessDate: posting.value.businessDate };
+  const description = descriptionOverride.value;
   submitting.value = true;
+
   try {
-    let saved = false;
-    if (category.value === Category.Payment) {
-      // Savings only (no pokok or bunga) is posted by the same command.
-      const loan = paymentLoans.value[0];
-      const nonMember = isNonMemberPayment.value;
-      if (nonMember ? !loan : !paymentForm.value.memberId) return;
-      if (paymentTotal.value <= 0) return;
-      saved = await postPayment(
-        {
-          memberId: nonMember ? "" : paymentForm.value.memberId,
-          principal: 0,
-          interest: 0,
-          loans: paymentLoans.value.map((item) => ({
-            loanId: item.id,
-            principal: paymentLine(item.id).principal || 0,
-            interest: paymentLine(item.id).interest || 0,
-          })),
-          pokok: nonMember ? 0 : paymentForm.value.pokok || 0,
-          wajib: nonMember ? 0 : paymentForm.value.wajib || 0,
-          voluntary: nonMember ? 0 : paymentForm.value.voluntary || 0,
-          description: descriptionOverride.value,
-          reference: "",
-        },
-        options,
-      );
-    } else if (isSavings.value) {
-      if (!savingsForm.value.memberId || savingsTotal.value <= 0) return;
-      saved = await postSavingsWithdrawal(
-        {
-          memberId: savingsForm.value.memberId,
-          amounts: savingsAmounts.value,
-          description: descriptionOverride.value,
-          reference: "",
-        },
-        options,
-      );
-    } else if (category.value === Category.Loan) {
-      const borrowerMissing =
-        loanForm.value.loanGroup === LoanGroup.Member
-          ? !loanForm.value.memberId
-          : !loanForm.value.borrowerName.trim();
-      const { tenor } = loanForm.value;
-      if (
-        borrowerMissing ||
-        loanForm.value.plafond <= 0 ||
-        !tenor ||
-        tenor <= 0 ||
-        !Number.isFinite(loanProvision.value.amount) ||
-        !annualRateValid.value ||
-        exceedsTopUpPlafond.value
-      )
-        return;
-      saved = await createLoan(
-        {
-          ...loanForm.value,
-          tenor,
-          provision: loanProvision.value.amount,
-          memberId:
-            loanForm.value.loanGroup === LoanGroup.Member
-              ? loanForm.value.memberId
-              : "",
-          borrowerName: loanForm.value.borrowerName.trim(),
-          payoffs: selectedPayoffs.value,
-          description: descriptionOverride.value,
-        },
-        options,
-      );
-    } else {
-      if (otherForm.value.amount <= 0) return;
-      if (!otherForm.value.description.trim()) return;
-      const savingsBook = isSavingsBook.value;
-      saved = await postCashEntry(
-        {
-          direction: cashDirection.value,
-          category: savingsBook
-            ? ""
-            : (otherForm.value.category as CashCategory | ""),
-          description: otherForm.value.description.trim(),
-          amount: otherForm.value.amount,
-          reference: "",
-        },
-        {
-          ...options,
-          channel: savingsBook ? Channel.SavingsBook : Channel.Cash,
-        },
-      );
-    }
+    const saved = await (
+      {
+        [Category.Payment]: () => payment.submit(options, description),
+        [Category.Loan]: () => loan.submit(options, description),
+        [Category.SavingsWithdrawal]: () =>
+          savings.submit(options, description),
+        [Category.CashIn]: () => cash.submit(options),
+        [Category.CashOut]: () => cash.submit(options),
+      } satisfies Record<Category, () => Promise<boolean>>
+    )[category.value]();
+
     if (saved) submittedModal.value = false;
   } finally {
     submitting.value = false;

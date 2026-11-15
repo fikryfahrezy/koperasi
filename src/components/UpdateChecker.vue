@@ -32,8 +32,10 @@ onMounted(async () => {
 async function checkForUpdate(silent = false) {
   phase.value = "checking";
   errorMessage.value = "";
+
   try {
     const result = await check();
+
     if (result) {
       update.value = markRaw(result);
       phase.value = "available";
@@ -61,6 +63,7 @@ async function installUpdate() {
   progress.value = 0;
   let total = 0;
   let downloaded = 0;
+
   try {
     await update.value.downloadAndInstall((event) => {
       switch (event.event) {
@@ -69,16 +72,19 @@ async function installUpdate() {
           break;
         case "Progress":
           downloaded += event.data.chunkLength;
+
           progress.value =
             total > 0
               ? Math.min(100, Math.round((downloaded / total) * 100))
               : 0;
+
           break;
         case "Finished":
           progress.value = 100;
           break;
       }
     });
+
     phase.value = "installed";
     await relaunch();
   } catch (error) {

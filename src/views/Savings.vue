@@ -1,24 +1,40 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, ref } from "vue";
 import { CalendarX2, Percent, Search } from "lucide-vue-next";
 import { useDebouncedRef } from "../composables/useDebouncedRef";
+import { usePeriodFilter } from "../composables/usePeriodFilter";
+import { useVirtualSheetGrid } from "../composables/useVirtualSheetGrid";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
-import { useVirtualSheetColumns } from "../composables/useVirtualSheetColumns";
-import { useVirtualSheet } from "../composables/useVirtualSheet";
 import ExportButton from "../components/ExportButton.vue";
 import IncentiveRatesDialog from "../components/IncentiveRatesDialog.vue";
 import PageHeader from "../components/PageHeader.vue";
 import UiSelect from "../components/UiSelect.vue";
+
 import {
   formatPeriod,
   formatPreviousPeriod,
+  formatRate,
   formatSheetDate,
   formatSheetNumber,
   matchesMember,
-  type SavingsMonth,
   useKoperasiStore,
   useMonthlyLedger,
 } from "../store/koperasi";
+
+import {
+  closingKeys,
+  closingTotal,
+  incentiveKeys,
+  incentivesAt,
+  leadingColumnWidths,
+  movementKeysForPeriod,
+  openingKeys,
+  openingTotal,
+  type SavingsSheetRow,
+  savingsRowsForPeriod,
+  sumSavingsRows,
+} from "../savings-sheet";
+
 import {
   savingsLeadingLetters,
   savingsMonthLetters,
@@ -27,36 +43,23 @@ import {
 } from "../sheet-columns";
 
 const pageState = useWorkspacePageState("/savings");
-const formatRate = (rate: number) =>
-  `${(rate * 100).toLocaleString("id-ID", { maximumFractionDigits: 2 })}%`;
 const ratesOpen = ref(false);
 
 const { members, selectedYear, refresh } = useKoperasiStore();
 const { monthlyLedger, monthlyLedgerLoading } = useMonthlyLedger();
 
-const period = pageState.field("period", () => "");
+const { period, periodOptions, visiblePeriods } = usePeriodFilter(
+  pageState,
+  () => monthlyLedger.value.periods,
+);
+
 const query = pageState.field("query", () => "");
 const debouncedQuery = useDebouncedRef(query, pageState.tabId);
-const periodOptions = computed(() => [
-  { value: "", label: "Semua" },
-  ...[...monthlyLedger.value.periods]
-    .reverse()
-    .map((value) => ({ value, label: formatPeriod(value) })),
-]);
-const visiblePeriods = computed(() =>
-  period.value ? [period.value] : [...monthlyLedger.value.periods].sort(),
-);
-watch(
-  () => monthlyLedger.value.periods,
-  (periods) => {
-    if (period.value && !periods.includes(period.value)) period.value = "";
-  },
-  { immediate: true },
-);
 
 const memberById = computed(
   () => new Map(members.map((member) => [member.id, member])),
 );
+
 // The export holds the month and the members the page shows.
 const exportFilter = computed(() => ({
   period: period.value,
@@ -65,6 +68,7 @@ const exportFilter = computed(() => ({
         ...new Set(monthlyLedger.value.savings.map((row) => row.memberId)),
       ].filter((memberId) => {
         const member = memberById.value.get(memberId);
+
         return matchesMember(
           debouncedQuery.value,
           member?.name ?? memberId,
@@ -74,139 +78,59 @@ const exportFilter = computed(() => ({
     : undefined,
 }));
 
-// Spreadsheet rows follow member numbers (M001, M002, ...).
-const rowsForPeriod = (selectedPeriod: string) =>
-  monthlyLedger.value.savings
-    .filter((row) => row.period === selectedPeriod)
-    .sort((a, b) => a.memberId.localeCompare(b.memberId))
-    .map((row, index) => ({
-      ...row,
-      no: index + 1,
-      name: memberById.value.get(row.memberId)?.name ?? row.memberId,
-    }))
-    .filter((row) =>
-      matchesMember(
-        debouncedQuery.value,
-        row.name,
-        memberById.value.get(row.memberId)?.memberNumber,
-      ),
-    );
-type NumericKey = {
-  [K in keyof SavingsMonth]: SavingsMonth[K] extends number ? K : never;
-}[keyof SavingsMonth];
-const numericKeys: NumericKey[] = [
-  "principalOpening",
-  "mandatoryOpening",
-  "voluntaryOpening",
-  "principalIn",
-  "principalOut",
-  "mandatoryIn",
-  "mandatoryOut",
-  "voluntaryIn",
-  "voluntaryOut",
-  "shu",
-  "principalClosing",
-  "mandatoryClosing",
-  "voluntaryClosing",
-];
-const totalsForRows = (monthRows: ReturnType<typeof rowsForPeriod>) => {
-  const sum = Object.fromEntries(numericKeys.map((key) => [key, 0])) as Record<
-    NumericKey,
-    number
-  >;
-  for (const row of monthRows) {
-    for (const key of numericKeys) sum[key] += row[key];
-  }
-  return sum;
-};
-const openingTotal = (row: Record<NumericKey, number>) =>
-  row.principalOpening + row.mandatoryOpening + row.voluntaryOpening;
-const closingTotal = (row: Record<NumericKey, number>) =>
-  row.principalClosing + row.mandatoryClosing + row.voluntaryClosing;
-
-const openingKeys = [
-  "principalOpening",
-  "mandatoryOpening",
-  "voluntaryOpening",
-] as const;
-// Debit = outflow, Credit = inflow, as in the spreadsheet. The profit-sharing column appears only
-// in the January block (profit sharing for the previous fiscal year).
-const movementKeysForPeriod = (hasShu: boolean) =>
-  (
-    [
-      "principalOut",
-      "principalIn",
-      "mandatoryOut",
-      "mandatoryIn",
-      "voluntaryOut",
-      "voluntaryIn",
-      "shu",
-    ] as const
-  ).filter((key) => key !== "shu" || hasShu);
-const closingKeys = [
-  "principalClosing",
-  "mandatoryClosing",
-  "voluntaryClosing",
-] as const;
 const periodTables = computed(() =>
   visiblePeriods.value.map((period) => {
-    const monthRows = rowsForPeriod(period);
+    const monthRows = savingsRowsForPeriod(
+      monthlyLedger.value.savings,
+      memberById.value,
+      period,
+      debouncedQuery.value,
+    );
+
     const hasShu = period.endsWith("-01");
+
     return {
       period,
       monthRows,
       rowsById: new Map(monthRows.map((row) => [row.memberId, row])),
-      totals: totalsForRows(monthRows),
+      totals: sumSavingsRows(monthRows),
       hasShu,
       movementKeys: movementKeysForPeriod(hasShu),
     };
   }),
 );
-// Ratas Simpanan (kolom DA) and Insentif Simpanan 3,65% (DC, DD) as of the last
-// month shown, computed by the backend (rules 2.3a).
+
+// Ratas Simpanan and Insentif Simpanan as of the last month shown.
 const lastPeriod = computed(
   () => visiblePeriods.value[visiblePeriods.value.length - 1] ?? "",
 );
-const incentiveById = computed(
-  () =>
-    new Map(
-      monthlyLedger.value.savings
-        .filter((row) => row.period === lastPeriod.value)
-        .map((row) => [
-          row.memberId,
-          {
-            average: row.savingsAverage,
-            incentiveRaw: row.savingsIncentiveRaw,
-            incentive: row.savingsIncentive,
-          },
-        ]),
-    ),
+
+const incentiveById = computed(() =>
+  incentivesAt(monthlyLedger.value.savings, lastPeriod.value),
 );
-const incentiveKeys = ["average", "incentiveRaw", "incentive"] as const;
+
 // Saldo before the first month shown once (as SALDO BULAN DESEMBER in the
 // sheet), the month groups, then Ratas and Insentif Simpanan once at the end.
 const firstPeriod = computed(() => visiblePeriods.value[0] ?? "");
-const columnGroups = computed(() => [
-  ...(periodTables.value.length
+
+const columnGroups = computed(() => {
+  const first = periodTables.value[0];
+  const last = periodTables.value[periodTables.value.length - 1];
+
+  const months = periodTables.value.map((table) => ({
+    ...table,
+    kind: "month" as "opening" | "month" | "tail",
+  }));
+
+  return first && last
     ? [
-        {
-          ...periodTables.value[0]!,
-          kind: "opening" as "opening" | "month" | "tail",
-          period: "opening",
-        },
+        { ...first, kind: "opening" as const, period: "opening" },
+        ...months,
+        { ...last, kind: "tail" as const, period: "tail" },
       ]
-    : []),
-  ...periodTables.value.map((table) => ({ ...table, kind: "month" as const })),
-  ...(periodTables.value.length
-    ? [
-        {
-          ...periodTables.value[periodTables.value.length - 1]!,
-          kind: "tail" as const,
-          period: "tail",
-        },
-      ]
-    : []),
-]);
+    : months;
+});
+
 const groupColumns = (group: (typeof columnGroups.value)[number]) =>
   group.kind === "tail"
     ? incentiveKeys.length
@@ -216,66 +140,59 @@ const groupColumns = (group: (typeof columnGroups.value)[number]) =>
         ? 12
         : 11;
 
+// Every member of any month shown, numbered once.
 const monthRows = computed(() => {
-  const rowsById = new Map<string, ReturnType<typeof rowsForPeriod>[number]>();
+  const rowsById = new Map<string, SavingsSheetRow>();
+
   for (const table of periodTables.value) {
     for (const row of table.monthRows) rowsById.set(row.memberId, row);
   }
+
   return [...rowsById.values()]
     .sort((a, b) => a.memberId.localeCompare(b.memberId))
     .map((row, index) => ({ ...row, no: index + 1 }));
 });
+
 const totalColumnCount = computed(
   () =>
-    2 +
+    leadingColumnWidths.length +
     columnGroups.value.reduce((count, group) => count + groupColumns(group), 0),
 );
+
 const incentiveTotals = computed(() => {
   const sum = { average: 0, incentiveRaw: 0, incentive: 0 };
+
   for (const row of monthRows.value) {
     const value = incentiveById.value.get(row.memberId);
     if (!value) continue;
     for (const key of incentiveKeys) sum[key] += value[key];
   }
+
   return sum;
 });
+
 const {
   scroller,
   table,
   renderedRows,
   paddingTop,
   paddingBottom,
-  navigation: rowNavigation,
-} = useVirtualSheet(
-  monthRows,
-  (row) => row.memberId,
-  pageState.tabId,
-  pageState.active,
-  () => Array(totalColumnCount.value).fill(1),
-);
-const {
   renderedGroups: renderedPeriodTables,
   leftColumns,
   rightColumns,
-  widths: columnWidths,
+  columnWidths,
   totalWidth,
-  scrollToColumn,
-} = useVirtualSheetColumns(
-  columnGroups,
+  renderedColumnCount,
+  navigation,
+} = useVirtualSheetGrid({
+  pageState,
+  rows: monthRows,
+  rowKey: (row) => row.memberId,
+  columnSpans: () => Array(totalColumnCount.value).fill(1),
+  groups: columnGroups,
   groupColumns,
-  [56, 240],
-  scroller,
-  pageState.active,
-);
-const renderedColumnCount = computed(() => columnWidths.value.length);
-const navigation = computed(() => ({
-  ...rowNavigation.value,
-  async scrollToRow(index: number, column = 0) {
-    scrollToColumn(column);
-    await rowNavigation.value.scrollToRow(index);
-    await nextTick();
-  },
-}));
+  leadingWidths: leadingColumnWidths,
+});
 </script>
 <template>
   <div class="page-stack page-stack--sheet">

@@ -14,9 +14,11 @@ export function useProgressiveRows(
 ) {
   const renderedRowCount = ref(0);
   const totalRowCount = computed(() => rows().length);
+
   const renderingRows = computed(
     () => renderedRowCount.value < totalRowCount.value,
   );
+
   let active = true;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -28,17 +30,21 @@ export function useProgressiveRows(
   function schedule() {
     cancel();
     if (!active || !renderingRows.value) return;
+
     // A timer gives the page header/loading state a chance to paint first.
     timer = setTimeout(() => {
       timer = undefined;
+
       const batchSize = Math.max(
         1,
         Math.min(25, Math.floor(800 / Math.max(1, columns()))),
       );
+
       renderedRowCount.value = Math.min(
         totalRowCount.value,
         renderedRowCount.value + batchSize,
       );
+
       schedule();
     }, 16);
   }
@@ -56,10 +62,12 @@ export function useProgressiveRows(
     active = false;
     cancel();
   });
+
   onActivated(() => {
     active = true;
     schedule();
   });
+
   onScopeDispose(cancel);
 
   return { renderedRowCount, totalRowCount, renderingRows };

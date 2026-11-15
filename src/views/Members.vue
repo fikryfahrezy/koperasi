@@ -12,10 +12,13 @@ const pageState = useWorkspacePageState("/members");
 
 const { members, totals, refresh } = useKoperasiStore();
 const route = useRoute();
+
 const query = pageState.field("query", () =>
   route.path === "/members" ? String(route.query.q ?? "") : "",
 );
+
 const debouncedQuery = useDebouncedRef(query, pageState.tabId);
+
 watch(
   () => route.query.q,
   (value) => {
@@ -23,24 +26,30 @@ watch(
       query.value = String(value);
   },
 );
+
 const open = pageState.field("open", () => false);
+
 const filteredMembers = computed(() =>
   members.filter((member) =>
     matchesMember(debouncedQuery.value, member.name, member.memberNumber),
   ),
 );
+
 const joinedAtFormatter = new Intl.DateTimeFormat("id-ID", {
   day: "2-digit",
   month: "short",
   year: "numeric",
   timeZone: "UTC",
 });
+
 function formatJoinedAt(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) return "—";
+
   const date = new Date(
     Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])),
   );
+
   return Number.isNaN(date.getTime()) ? "—" : joinedAtFormatter.format(date);
 }
 </script>

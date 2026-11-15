@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import UiModal from "./UiModal.vue";
+
 import {
   type IncentiveKind,
   useKoperasiStore,
@@ -21,10 +22,13 @@ const label = computed(() =>
     ? "Insentif pinjaman (% dari bunga + provisi)"
     : "Insentif simpanan (% dari Ratas Simpanan)",
 );
+
 // Fractions to percent, without floating-point noise (0.101 -> 10.1).
 const toPercent = (rate: number) => Math.round(rate * 100_000) / 1000;
+
 watch(open, (isOpen) => {
   if (!isOpen) return;
+
   percent.value = toPercent(
     props.kind === "loan"
       ? monthlyLedger.value.loanIncentiveRate
@@ -34,6 +38,7 @@ watch(open, (isOpen) => {
 
 async function save() {
   saving.value = true;
+
   try {
     if (await setIncentiveRate(props.kind, selectedYear.value, percent.value))
       open.value = false;

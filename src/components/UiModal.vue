@@ -11,6 +11,7 @@ defineProps<{
   /** App dialogs cover the whole window; page dialogs leave tabs usable. */
   scope?: "page" | "app";
 }>();
+
 const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
 // Cached pages stay mounted while another tab shows, but teleported content

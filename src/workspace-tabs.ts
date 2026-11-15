@@ -14,6 +14,7 @@ const sectionOf = (fullPath: string) =>
 
 let tabSequence = 0;
 const makeId = () => `tab-${Date.now()}-${tabSequence++}`;
+
 const blankTab = (): WorkspaceTab => ({
   id: makeId(),
   fullPath: "/new-tab",
@@ -46,6 +47,7 @@ export function workspaceSectionPath(section: string) {
 
 export function navigateActiveWorkspaceTab(path: string, router: Router) {
   const resolved = router.resolve(path);
+
   syncActiveWorkspaceTab(
     resolved.fullPath,
     String(resolved.meta.titleKey ?? "common.page"),

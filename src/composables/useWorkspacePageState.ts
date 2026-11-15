@@ -1,4 +1,5 @@
 import { computed, ref, watch, type Ref } from "vue";
+
 import {
   activeWorkspaceTab,
   activeWorkspaceTabId,
@@ -9,6 +10,7 @@ import {
 export function useWorkspacePageState(path: string) {
   const tabId = ref(activeWorkspaceTabId.value);
   const entries = new Map<string, Map<string, Ref>>();
+
   watch(
     () => [activeWorkspaceTabId.value, activeWorkspaceTab()?.fullPath],
     () => {
@@ -18,6 +20,7 @@ export function useWorkspacePageState(path: string) {
     },
     { immediate: true, flush: "sync" },
   );
+
   watch(
     () => workspaceTabs.value.map((tab) => tab.id),
     (ids) => {
@@ -33,6 +36,7 @@ export function useWorkspacePageState(path: string) {
       if (!entry.has(key)) entry.set(key, ref(initial()));
       return entry.get(key)! as Ref<T>;
     };
+
     return Object.assign(
       computed({
         get: () => forTab(tabId.value).value,
@@ -43,10 +47,15 @@ export function useWorkspacePageState(path: string) {
       { forTab },
     );
   }
+
   const active = computed(
     () =>
       activeWorkspaceTabId.value === tabId.value &&
       activeWorkspaceTab()?.fullPath.split(/[?#]/)[0] === path,
   );
+
   return { tabId, field, active };
 }
+
+/** The per-tab UI state of a workspace page. */
+export type WorkspacePageState = ReturnType<typeof useWorkspacePageState>;

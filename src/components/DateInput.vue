@@ -10,6 +10,7 @@ const props = withDefaults(
   }>(),
   { required: false, disabled: false, ariaLabel: "Tanggal" },
 );
+
 const model = defineModel<string>({ required: true });
 const day = ref<SelectValue>("");
 const month = ref<SelectValue>("");
@@ -17,16 +18,21 @@ const year = ref<SelectValue>("");
 
 const daysInMonth = computed(() => {
   const selectedYear = Number(year.value) || 2000;
+
   const leapYear =
     selectedYear % 4 === 0 &&
     (selectedYear % 100 !== 0 || selectedYear % 400 === 0);
+
   const days = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   return days[Number(month.value) - 1] ?? 31;
 });
+
 const dayOptions = computed(() => numberOptions(1, daysInMonth.value));
 const monthOptions = numberOptions(1, 12);
+
 const yearOptions = computed(() => {
   const currentYear = new Date().getFullYear();
+
   // Keep historical dates already in the model available as well.
   return numberOptions(
     Math.min(1900, Number(year.value) || 1900),

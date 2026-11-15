@@ -7,6 +7,7 @@ import {
   watch,
   type Ref,
 } from "vue";
+
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import type { VirtualTableNavigation } from "../directives/tableNavigation";
 
@@ -24,6 +25,7 @@ export function useVirtualSheet<T>(
   const table = ref<HTMLTableElement | null>(null);
   const headerHeight = ref(100);
   const footerHeight = ref(SHEET_ROW_HEIGHT);
+
   const virtualizer = useVirtualizer<HTMLElement, HTMLTableRowElement>(
     computed(() => ({
       count: rows.value.length,
@@ -39,18 +41,22 @@ export function useVirtualSheet<T>(
       useScrollendEvent: false,
     })),
   );
+
   let observer: ResizeObserver | undefined;
+
   const measureChrome = () => {
     if (!active.value || !table.value) return;
     headerHeight.value = table.value.tHead?.offsetHeight ?? 0;
     footerHeight.value = table.value.tFoot?.offsetHeight ?? SHEET_ROW_HEIGHT;
   };
+
   watch(
     table,
     async () => {
       observer?.disconnect();
       await nextTick();
       measureChrome();
+
       if (typeof ResizeObserver !== "undefined" && table.value) {
         observer = new ResizeObserver(measureChrome);
         if (table.value.tHead) observer.observe(table.value.tHead);
@@ -59,21 +65,27 @@ export function useVirtualSheet<T>(
     },
     { flush: "post" },
   );
+
   watch(active, async () => {
     await nextTick();
     measureChrome();
   });
+
   onActivated(async () => {
     await nextTick();
     measureChrome();
   });
+
   onScopeDispose(() => observer?.disconnect());
+
   // Filters can shrink a report while the viewport is near the bottom.
   watch(rows, async (_, previous) => {
     const tab = context.value;
     await nextTick();
+
     if (context.value !== tab || !active.value || !scroller.value || !previous)
       return;
+
     const maxOffset = Math.max(
       0,
       headerHeight.value +
@@ -81,22 +93,27 @@ export function useVirtualSheet<T>(
         footerHeight.value -
         scroller.value.clientHeight,
     );
+
     if (scroller.value.scrollTop > maxOffset)
       scroller.value.scrollTop = maxOffset;
   });
+
   const items = computed(() => virtualizer.value.getVirtualItems());
+
   const renderedRows = computed(() =>
     items.value.map((item) => ({
       index: item.index,
       row: rows.value[item.index]!,
     })),
   );
+
   const paddingTop = computed(() =>
     Math.max(
       0,
       (items.value[0]?.start ?? headerHeight.value) - headerHeight.value,
     ),
   );
+
   const paddingBottom = computed(() =>
     Math.max(
       0,
@@ -105,6 +122,7 @@ export function useVirtualSheet<T>(
           headerHeight.value),
     ),
   );
+
   const navigation = computed<VirtualTableNavigation>(() => ({
     count: rows.value.length + 1, // Include the always-mounted grand total row.
     context: context.value,
@@ -121,10 +139,12 @@ export function useVirtualSheet<T>(
           headerHeight.value + virtualizer.value.getTotalSize(),
           { behavior: "auto" },
         );
+
       scroller.value?.dispatchEvent(new Event("scroll"));
       await nextTick();
     },
   }));
+
   return {
     scroller,
     table,

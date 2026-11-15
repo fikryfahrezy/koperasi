@@ -39,13 +39,16 @@ const emit = defineEmits<{
 const ungrouped = computed(() =>
   props.options.filter((option) => !option.group),
 );
+
 // Groups in the order their first option appears.
 const groups = computed(() => {
   const result = new Map<string, SelectOption[]>();
+
   for (const option of props.options) {
     if (!option.group) continue;
     result.set(option.group, [...(result.get(option.group) ?? []), option]);
   }
+
   return [...result].map(([label, options]) => ({ label, options }));
 });
 

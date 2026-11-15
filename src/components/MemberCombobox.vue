@@ -43,17 +43,22 @@ const popupStyle = ref<Record<string, string>>({});
 const hasCodes = computed(() =>
   props.options.some((option) => option.code !== undefined),
 );
+
 const selected = computed(() =>
   props.options.find((option) => option.value === props.modelValue),
 );
+
 const optionText = (option: ComboboxOption) =>
   option.code ? `${option.code} · ${option.label}` : option.label;
+
 const inputValue = computed(() =>
   open.value ? query.value : selected.value ? optionText(selected.value) : "",
 );
+
 const filtered = computed(() => {
   const search = query.value.trim().toLocaleLowerCase("id-ID");
   if (!search) return props.options;
+
   return props.options.filter(
     (option) =>
       option.label.toLocaleLowerCase("id-ID").includes(search) ||
@@ -71,7 +76,9 @@ const virtualizer = useVirtualizer(
     useScrollendEvent: false,
   })),
 );
+
 const virtualOptions = computed(() => virtualizer.value.getVirtualItems());
+
 const listHeight = computed(() =>
   Math.min(LIST_MAX_HEIGHT, Math.max(1, filtered.value.length) * OPTION_HEIGHT),
 );
@@ -81,6 +88,7 @@ function placePopup() {
   if (!rect) return;
   const below = window.innerHeight - rect.bottom - 8;
   const openUp = below < listHeight.value + 8 && rect.top > below;
+
   popupStyle.value = {
     left: `${rect.left}px`,
     width: `${rect.width}px`,
@@ -99,9 +107,11 @@ async function openList() {
   if (open.value) return;
   query.value = "";
   open.value = true;
+
   activeIndex.value = filtered.value.findIndex(
     (option) => option.value === props.modelValue,
   );
+
   placePopup();
   window.addEventListener("resize", placePopup);
   window.addEventListener("scroll", placePopup, true);
@@ -127,6 +137,7 @@ function onInput(event: Event) {
   if (!open.value) void openList();
   query.value = (event.target as HTMLInputElement).value;
   activeIndex.value = filtered.value.length ? 0 : -1;
+
   void nextTick(() => {
     list.value?.scrollTo({ top: 0 });
     placePopup();
@@ -138,14 +149,17 @@ function move(step: number) {
     void openList();
     return;
   }
+
   const count = filtered.value.length;
   if (!count) return;
+
   activeIndex.value =
     activeIndex.value < 0
       ? step > 0
         ? 0
         : count - 1
       : Math.min(count - 1, Math.max(0, activeIndex.value + step));
+
   scrollToActive();
 }
 
@@ -185,6 +199,7 @@ function onKeydown(event: KeyboardEvent) {
       if (open.value && query.value.trim() && activeIndex.value >= 0)
         choose(filtered.value[activeIndex.value]);
       else closeList();
+
       break;
   }
 }

@@ -1,26 +1,47 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, ref } from "vue";
 import { CalendarX2, Percent, Search } from "lucide-vue-next";
 import { useDebouncedRef } from "../composables/useDebouncedRef";
+import { usePeriodFilter } from "../composables/usePeriodFilter";
+import { useVirtualSheetGrid } from "../composables/useVirtualSheetGrid";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
-import { useVirtualSheetColumns } from "../composables/useVirtualSheetColumns";
-import { useVirtualSheet } from "../composables/useVirtualSheet";
 import ExportButton from "../components/ExportButton.vue";
 import IncentiveRatesDialog from "../components/IncentiveRatesDialog.vue";
 import PageHeader from "../components/PageHeader.vue";
 import UiSelect from "../components/UiSelect.vue";
+
 import {
   formatPeriod,
   formatPreviousPeriod,
+  formatRate,
   formatSheetDate,
   formatSheetNumber,
-  type Loan,
   LoanGroup,
   matchesMember,
-  roundUpInterest,
   useKoperasiStore,
   useMonthlyLedger,
 } from "../store/koperasi";
+
+import {
+  afterMutation,
+  beforeMutation,
+  incomeKeys,
+  leadingColumnWidths,
+  loanRowsForPeriod,
+  loanSections,
+  type LoanSection,
+  monthColumnCount,
+  monthlyRate,
+  mutation,
+  nextDueKeys,
+  nextPeriod,
+  openingColumnCount,
+  openingKeys,
+  quarterLabels,
+  sumLoanRows,
+  tailColumnCount,
+} from "../loan-sheet";
+
 import {
   loanTailLetters,
   loanLeadingLetters,
@@ -29,43 +50,32 @@ import {
 } from "../sheet-columns";
 
 const pageState = useWorkspacePageState("/loans");
-const formatRate = (rate: number) =>
-  `${(rate * 100).toLocaleString("id-ID", { maximumFractionDigits: 2 })}%`;
 const ratesOpen = ref(false);
 
 const { loans, members, selectedYear, refresh } = useKoperasiStore();
 const { monthlyLedger, monthlyLedgerLoading } = useMonthlyLedger();
 
-const period = pageState.field("period", () => "");
+const { period, periodOptions, visiblePeriods } = usePeriodFilter(
+  pageState,
+  () => monthlyLedger.value.periods,
+);
+
 const query = pageState.field("query", () => "");
 const debouncedQuery = useDebouncedRef(query, pageState.tabId);
 const groupFilter = pageState.field<LoanGroup | "">("groupFilter", () => "");
+
 const groupOptions = [
   { value: "", label: "Semua" },
   { value: LoanGroup.Member, label: "Anggota PP BRI" },
   { value: LoanGroup.NonMember, label: "Non Anggota PP BRI" },
 ];
-const periodOptions = computed(() => [
-  { value: "", label: "Semua" },
-  ...[...monthlyLedger.value.periods]
-    .reverse()
-    .map((value) => ({ value, label: formatPeriod(value) })),
-]);
-const visiblePeriods = computed(() =>
-  period.value ? [period.value] : [...monthlyLedger.value.periods].sort(),
-);
-watch(
-  () => monthlyLedger.value.periods,
-  (periods) => {
-    if (period.value && !periods.includes(period.value)) period.value = "";
-  },
-  { immediate: true },
-);
 
 const loanById = computed(() => new Map(loans.map((loan) => [loan.id, loan])));
+
 const memberNumbers = computed(
   () => new Map(members.map((member) => [member.id, member.memberNumber])),
 );
+
 // The export holds the month, the section and the loans the page shows.
 const exportFilter = computed(() => ({
   period: period.value,
@@ -83,210 +93,26 @@ const exportFilter = computed(() => ({
     : undefined,
 }));
 
-// Spreadsheet rows follow loan numbers (L001, L002, ...). Derived columns:
-// opening arrears = closing arrears - this month's payment obligation + amount paid;
-// payment obligation through this month = opening arrears + this month's payment obligation.
-// Kewajiban setor tiap bulan is the loan's fixed installment (kolom L–N), as
-// the export writes it: ROUNDUP(plafond/jangka waktu,-3) and ROUNDUP(plafond*bunga/12,0).
-const fixedInstallment = (loan: Loan) => {
-  const principal =
-    loan.tenor > 0 ? Math.ceil(loan.plafond / loan.tenor / 1000) * 1000 : 0;
-  const interest = roundUpInterest((loan.plafond * loan.rate) / 100 / 12);
-  return { principal, interest };
-};
-const monthRowsForPeriod = (selectedPeriod: string) =>
-  monthlyLedger.value.loans
-    .filter((row) => row.period === selectedPeriod)
-    .map((row) => ({ ...row, loan: loanById.value.get(row.loanId) }))
-    .filter((row): row is typeof row & { loan: Loan } => Boolean(row.loan))
-    .sort((a, b) => a.loanId.localeCompare(b.loanId))
-    .map((row) => {
-      const { priorArrearsPrincipal, priorArrearsInterest } = row;
-      const installment = fixedInstallment(row.loan);
-      return {
-        ...row,
-        plafond: row.loan.plafond,
-        installmentPrincipal: installment.principal,
-        installmentInterest: installment.interest,
-        installmentTotal: installment.principal + installment.interest,
-        priorArrearsPrincipal,
-        priorArrearsInterest,
-        priorArrearsTotal: priorArrearsPrincipal + priorArrearsInterest,
-        duePrincipal: priorArrearsPrincipal + row.scheduledPrincipal,
-        dueInterest: priorArrearsInterest + row.scheduledInterest,
-        dueTotal:
-          priorArrearsPrincipal +
-          row.scheduledPrincipal +
-          priorArrearsInterest +
-          row.scheduledInterest,
-        // As in the sheet: Pokok + Bunga paid; a disbursement without a
-        // payment shows its Provisi.
-        cashIn: row.principalPaid + row.interestPaid || row.provision,
-        arrearsTotal: row.arrearsPrincipal + row.arrearsInterest,
-      };
-    });
+const sectionsOf = (rows: Parameters<typeof loanSections>[0]) =>
+  loanSections(rows, {
+    group: groupFilter.value,
+    query: debouncedQuery.value,
+    memberNumbers: memberNumbers.value,
+  });
 
-// Jumlah pemasukan per triwulan and Insentif Pinjaman (kolom EJ–EW) come from
-// the backend: as in the working sheet every loan keeps its own income, and a
-// paid-off loan stays listed to the end of the year (rules 1.10). Total
-// pemasukan tahun, between them, adds up the four quarters: the base of the
-// insentif.
-const quarterLabels = [
-  "Jan s/d Mar",
-  "Apr s/d Jun",
-  "Jul s/d Sep",
-  "Okt s/d Des",
-] as const;
-const incomeKeys = [
-  ...quarterLabels.flatMap(
-    (_, quarter) =>
-      [
-        `q${quarter + 1}Interest`,
-        `q${quarter + 1}Provision`,
-        `q${quarter + 1}Total`,
-      ] as const,
-  ),
-  "incomeInterestTotal",
-  "incomeProvisionTotal",
-  "incomeTotal",
-  "incentiveRaw",
-  "incentive",
-] as const;
-type IncomeKey = (typeof incomeKeys)[number];
-// Kewajiban s/d bulan depan (kolom EE–EG after September): arrears plus next
-// month's installment.
-const nextDueKeys = [
-  "nextDuePrincipal",
-  "nextDueInterest",
-  "nextDueTotal",
-] as const;
-// Kewajiban s/d bulan depan, Rekomendasi, then the Pemasukan columns.
-const tailColumnCount = nextDueKeys.length + 1 + incomeKeys.length;
-const nextPeriod = (period: string) => {
-  const [year, month] = period.split("-").map(Number);
-  return month === 12
-    ? `${year + 1}-01`
-    : `${year}-${String(month + 1).padStart(2, "0")}`;
-};
-
-const rowsForPeriod = (selectedPeriod: string) =>
-  monthRowsForPeriod(selectedPeriod)
-    .filter((row) => row.shown)
-    .map((row) => {
-      const income = {} as Record<IncomeKey, number>;
-      row.incomeInterest.forEach((amount, quarter) => {
-        const provision = row.incomeProvision[quarter] ?? 0;
-        income[`q${quarter + 1}Interest` as IncomeKey] = amount;
-        income[`q${quarter + 1}Provision` as IncomeKey] = provision;
-        income[`q${quarter + 1}Total` as IncomeKey] = amount + provision;
-      });
-      income.incomeInterestTotal = row.incomeInterest.reduce(
-        (sum, amount) => sum + amount,
-        0,
-      );
-      income.incomeProvisionTotal = row.incomeProvision.reduce(
-        (sum, amount) => sum + amount,
-        0,
-      );
-      income.incomeTotal =
-        income.incomeInterestTotal + income.incomeProvisionTotal;
-      income.incentiveRaw = row.incentiveRaw;
-      income.incentive = row.incentive;
-      return {
-        ...row,
-        ...income,
-        nextDueTotal: row.nextDuePrincipal + row.nextDueInterest,
-      };
-    });
-type MonthRow = ReturnType<typeof rowsForPeriod>[number];
-
-// Numeric columns after the loan term, in spreadsheet order. Saldo Posisi,
-// Kewajiban setor tiap bulan and Tunggakan before the first month shown appear
-// once (kolom K–Q), as in the sheet; each month then starts at Kewajiban s/d.
-const openingKeys = [
-  "openingBalance",
-  "installmentPrincipal",
-  "installmentInterest",
-  "installmentTotal",
-  "priorArrearsPrincipal",
-  "priorArrearsInterest",
-  "priorArrearsTotal",
-] as const;
-const beforeMutation = ["duePrincipal", "dueInterest", "dueTotal"] as const;
-const mutation = [
-  "cashIn",
-  "disbursed",
-  "principalPaid",
-  "interestPaid",
-  "provision",
-] as const;
-const afterMutation = [
-  "closingBalance",
-  "arrearsPrincipal",
-  "arrearsInterest",
-  "arrearsTotal",
-] as const;
-type TotalKey =
-  | "plafond"
-  | (typeof openingKeys)[number]
-  | (typeof beforeMutation)[number]
-  | (typeof mutation)[number]
-  | (typeof afterMutation)[number]
-  | IncomeKey
-  | (typeof nextDueKeys)[number];
-function sumRows(rows: MonthRow[]) {
-  const keys: TotalKey[] = [
-    "plafond",
-    ...openingKeys,
-    ...beforeMutation,
-    ...mutation,
-    ...afterMutation,
-    ...incomeKeys,
-    ...nextDueKeys,
-  ];
-  const sum = Object.fromEntries(keys.map((key) => [key, 0])) as Record<
-    TotalKey,
-    number
-  >;
-  for (const row of rows) {
-    for (const key of keys) sum[key] += row[key];
-  }
-  return sum;
-}
-// Sections of PINJAMAN BULANAN; numbering restarts in each section, as in the sheet.
-const sectionsForRows = (monthRows: MonthRow[]) =>
-  [
-    { group: LoanGroup.Member, title: "PINJAMAN ANGGOTA PP BRI" },
-    { group: LoanGroup.NonMember, title: "PINJAMAN NON ANGGOTA PP BRI" },
-  ]
-    .filter(
-      (section) => !groupFilter.value || section.group === groupFilter.value,
-    )
-    .map((section) => {
-      const rows = monthRows
-        .filter((row) => row.loan.loanGroup === section.group)
-        .map((row, index) => ({ ...row, no: index + 1 }))
-        .filter((row) =>
-          matchesMember(
-            debouncedQuery.value,
-            row.loan.memberName,
-            memberNumbers.value.get(row.loan.memberId),
-          ),
-        );
-      return { ...section, rows, totals: sumRows(rows) };
-    });
 const periodTables = computed(() =>
   visiblePeriods.value.map((period) => {
-    const sections = sectionsForRows(rowsForPeriod(period));
+    const sections = sectionsOf(
+      loanRowsForPeriod(monthlyLedger.value.loans, loanById.value, period),
+    );
+
+    const rows = sections.flatMap((section) => section.rows);
+
     return {
       period,
       sections,
-      rowsById: new Map(
-        sections
-          .flatMap((section) => section.rows)
-          .map((row) => [row.loanId, row]),
-      ),
-      totals: sumRows(sections.flatMap((section) => section.rows)),
+      rowsById: new Map(rows.map((row) => [row.loanId, row])),
+      totals: sumLoanRows(rows),
     };
   }),
 );
@@ -295,7 +121,8 @@ const periodTables = computed(() =>
 // that month. Each month's totals still count every loan of that month.
 const sections = computed(() => {
   const last = periodTables.value[periodTables.value.length - 1];
-  return sectionsForRows(
+
+  return sectionsOf(
     last
       ? [...last.rowsById.values()].sort((a, b) =>
           a.loanId.localeCompare(b.loanId),
@@ -303,9 +130,11 @@ const sections = computed(() => {
       : [],
   );
 });
+
 const plafondTotal = computed(() =>
   sections.value.reduce((sum, section) => sum + section.totals.plafond, 0),
 );
+
 // The opening columns of the first month shown, the month groups, then one
 // "Pemasukan" group as of the last month shown (JUMLAH PEMASUKAN per triwulan
 // and Insentif Pinjaman in the sheet).
@@ -314,8 +143,10 @@ const columnGroups = computed(() => {
     ...table,
     kind: "month" as "opening" | "month" | "tail",
   }));
+
   const first = periodTables.value[0];
   const last = periodTables.value[periodTables.value.length - 1];
+
   return first && last
     ? [
         { ...first, kind: "opening" as const, period: "opening" },
@@ -324,40 +155,37 @@ const columnGroups = computed(() => {
       ]
     : months;
 });
+
 const firstPeriod = computed(() => periodTables.value[0]?.period ?? "");
+
 const incomePeriod = computed(
   () => periodTables.value[periodTables.value.length - 1]?.period ?? "",
 );
+
 const sectionTotals = (
   table: (typeof columnGroups.value)[number],
   group: LoanGroup,
 ) => table.sections.find((section) => section.group === group)!.totals;
 
-const monthlyRate = (loan: Loan) =>
-  `${(loan.rate / 12).toLocaleString("id-ID", { maximumFractionDigits: 2 })}%`;
-// No, Nama, Plafond, Bunga (2), PG/TN, Jenis, Realisasi, Jatuh Tempo, Jangka Waktu,
-// the numeric blocks and the mutation date.
-const monthColumnCount =
-  beforeMutation.length + 1 + mutation.length + afterMutation.length;
-const openingColumnCount = openingKeys.length;
 const totalColumnCount = computed(
   () =>
-    10 +
+    leadingColumnWidths.length +
     monthColumnCount * periodTables.value.length +
     (periodTables.value.length ? openingColumnCount + tailColumnCount : 0),
 );
+
 const totalColumns = (key: string) =>
   key === "openingBalance" || key === "closingBalance";
 
-type Section = (typeof sections.value)[number];
 type SheetRow =
-  | { kind: "heading" | "subtotal"; section: Section; key: string }
+  | { kind: "heading" | "subtotal"; section: LoanSection; key: string }
   | {
       kind: "loan";
-      section: Section;
-      row: Section["rows"][number];
+      section: LoanSection;
+      row: LoanSection["rows"][number];
       key: string;
     };
+
 const sheetRows = computed<SheetRow[]>(() =>
   sections.value.flatMap((section) => [
     { kind: "heading" as const, section, key: `${section.group}:heading` },
@@ -370,53 +198,39 @@ const sheetRows = computed<SheetRow[]>(() =>
     { kind: "subtotal" as const, section, key: `${section.group}:subtotal` },
   ]),
 );
+
 const {
   scroller,
   table,
   renderedRows,
   paddingTop,
   paddingBottom,
-  navigation: rowNavigation,
-} = useVirtualSheet(
-  sheetRows,
-  (row) => row.key,
-  pageState.tabId,
-  pageState.active,
-  (index) =>
+  renderedGroups: renderedPeriodTables,
+  leftColumns,
+  rightColumns,
+  columnWidths,
+  totalWidth,
+  renderedColumnCount,
+  navigation,
+} = useVirtualSheetGrid({
+  pageState,
+  rows: sheetRows,
+  rowKey: (row) => row.key,
+  columnSpans: (index) =>
     sheetRows.value[index]?.kind === "heading"
       ? [1, 1, totalColumnCount.value - 2]
       : sheetRows.value[index]?.kind === "loan"
         ? Array(totalColumnCount.value).fill(1)
         : [1, 1, 1, 7, ...Array(totalColumnCount.value - 10).fill(1)],
-);
-const {
-  renderedGroups: renderedPeriodTables,
-  leftColumns,
-  rightColumns,
-  widths: columnWidths,
-  totalWidth,
-  scrollToColumn,
-} = useVirtualSheetColumns(
-  columnGroups,
-  (group) =>
+  groups: columnGroups,
+  groupColumns: (group) =>
     group.kind === "month"
       ? monthColumnCount
       : group.kind === "opening"
         ? openingColumnCount
         : tailColumnCount,
-  [56, 240, 120, 80, 80, 80, 100, 120, 120, 90],
-  scroller,
-  pageState.active,
-);
-const renderedColumnCount = computed(() => columnWidths.value.length);
-const navigation = computed(() => ({
-  ...rowNavigation.value,
-  async scrollToRow(index: number, column = 0) {
-    scrollToColumn(column);
-    await rowNavigation.value.scrollToRow(index);
-    await nextTick();
-  },
-}));
+  leadingWidths: leadingColumnWidths,
+});
 </script>
 
 <template>

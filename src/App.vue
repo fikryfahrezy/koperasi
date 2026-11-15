@@ -31,15 +31,18 @@ const companyOptions = computed(() =>
     label: company.name,
   })),
 );
+
 const reportYearOptions = computed(() =>
   yearOptions.value.map((year) => ({ value: year, label: String(year) })),
 );
+
 const route = useRoute();
 const router = useRouter();
 // Menu clicks switch the tab's page before the router settles, so follow the
 // tab. Apply it post-flush: cached pages save scroll before the layout changes
 // and restore it after.
 const fitViewport = ref(false);
+
 watch(
   () =>
     Boolean(

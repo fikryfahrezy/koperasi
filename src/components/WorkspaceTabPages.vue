@@ -8,18 +8,22 @@ import {
   ref,
   watch,
 } from "vue";
+
 import {
   RouterView,
   routeLocationKey,
   routerViewLocationKey,
   useRouter,
 } from "vue-router";
+
 import CachedWorkspacePage from "./CachedWorkspacePage";
+
 import {
   activeWorkspaceTab,
   activeWorkspaceTabId,
   workspaceTabs,
 } from "../workspace-tabs";
+
 import NewTab from "../views/NewTab.vue";
 import Dashboard from "../views/Dashboard.vue";
 import BalanceSheet from "../views/BalanceSheet.vue";
@@ -29,9 +33,11 @@ import Loans from "../views/Loans.vue";
 import CashLedger from "../views/CashLedger.vue";
 
 const router = useRouter();
+
 const tabRoute = computed(() =>
   router.resolve(activeWorkspaceTab()?.fullPath ?? "/new-tab"),
 );
+
 // Hidden pages must observe their own tab's route, including member searches.
 provide(
   routeLocationKey,
@@ -47,6 +53,7 @@ provide(
     redirectedFrom: computed(() => tabRoute.value.redirectedFrom),
   }),
 );
+
 provide(routerViewLocationKey, tabRoute);
 
 const pages = [
@@ -58,26 +65,32 @@ const pages = [
   { path: "/cash-ledger", component: CashLedger },
   { path: "/balance-sheet", component: BalanceSheet },
 ];
+
 const warming = ref(true);
+
 const isDetail = computed(
   () => !pages.some((page) => page.path === tabRoute.value.path),
 );
+
 // Detail pages share one cached instance, so keep their scroll per tab here.
 const root = ref<HTMLElement>();
 const detailScroll = new Map<string, { path: string; top: number }>();
 const content = () => root.value?.closest<HTMLElement>(".app-content");
 let revision = 0;
+
 watch(
   () =>
     [isDetail.value, tabRoute.value.path, activeWorkspaceTabId.value] as const,
   async ([detail, path, tabId], [wasDetail, previousPath, previousTabId]) => {
     const currentRevision = ++revision;
     const element = content();
+
     if (wasDetail && element)
       detailScroll.set(previousTabId, {
         path: previousPath,
         top: element.scrollTop,
       });
+
     if (!detail) return;
     await nextTick();
     if (revision !== currentRevision) return;
@@ -87,6 +100,7 @@ watch(
   },
   { flush: "pre" },
 );
+
 watch(
   () => workspaceTabs.value.map((tab) => tab.id),
   (ids) => {
@@ -94,6 +108,7 @@ watch(
       if (!ids.includes(id)) detailScroll.delete(id);
   },
 );
+
 onMounted(async () => {
   // Mount every main page once, then retain its rendered DOM in KeepAlive.
   await nextTick();
