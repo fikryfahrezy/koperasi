@@ -16,7 +16,7 @@ const props = defineProps<{
 }>();
 const pageState = props.pageState;
 
-const { addMember, memberNumberOwner, financialParameters } =
+const { addMember, memberNumberOwner, nextMemberNumber, financialParameters } =
   useKoperasiStore();
 // Simpanan pokok: the parameter is both the starting amount and the minimum.
 const minimumPrincipal = computed(
@@ -33,8 +33,12 @@ const form = pageState.field("form", () => ({
 watch(
   () => open.value,
   (isOpen) => {
-    if (isOpen && !form.value.principalSavings)
+    if (!isOpen) return;
+    if (!form.value.principalSavings)
       form.value.principalSavings = minimumPrincipal.value;
+    // Suggest the next ID Anggota; the user can still change it.
+    if (!form.value.memberNumber.trim())
+      form.value.memberNumber = nextMemberNumber();
   },
   { immediate: true },
 );

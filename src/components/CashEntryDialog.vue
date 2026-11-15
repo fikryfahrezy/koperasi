@@ -29,7 +29,6 @@ import {
   type LoanPreview,
   roundUpInterest,
   SavingsAccountType,
-  SavingsMovement,
   todayIso,
   TransactionDirection,
   useKoperasiStore,
@@ -51,7 +50,7 @@ const {
   createLoan,
   postCashEntry,
   postPayment,
-  postSavingsTransaction,
+  postSavingsWithdrawal,
   previewLoan,
 } = useKoperasiStore();
 
@@ -104,6 +103,7 @@ const loanForm = pageState.field("loanForm", () => ({
   interestType: InterestType.Declining as InterestType,
   loanType: LoanType.Monthly as LoanType,
   guarantee: Guarantee.Pg as Guarantee,
+  recommender: "",
   // Bunga per tahun (%); null follows the Bunga parameter until typed.
   annualRate: null as number | null,
 }));
@@ -171,7 +171,11 @@ const cashDirection = computed(() =>
     : TransactionDirection.Out,
 );
 // Tambahan Kas is only cash in and Transfer ke Tabungan only cash out.
-// Alphabetical after "Tanpa kategori", with Lainnya last.
+// Alphabetical after "Tanpa kategori", with Lainnya last. Grouped: first the
+// expense columns of Buku Kas TAHUN 2026 (L–W), then the app's own categories.
+const sheetCategories = new Set<string>(
+  cashCategories.slice(3).map((option) => option.value),
+);
 const cashCategoryOptions = computed(() => [
   { value: "", label: "Tanpa kategori" },
   ...[
@@ -185,12 +189,22 @@ const cashCategoryOptions = computed(() => [
           ? "Tambahan Kas Tabungan"
           : "Pengeluaran Kas Tabungan",
     },
-  ].sort(
-    (a, b) =>
-      Number(a.value === CashCategory.Other) -
-        Number(b.value === CashCategory.Other) ||
-      a.label.localeCompare(b.label, "id-ID", { sensitivity: "base" }),
-  ),
+  ]
+    .sort(
+      (a, b) =>
+        Number(a.value === CashCategory.Other) -
+          Number(b.value === CashCategory.Other) ||
+        a.label.localeCompare(b.label, "id-ID", { sensitivity: "base" }),
+    )
+    .map((option) => ({
+      ...option,
+      group: sheetCategories.has(option.value) ? "Biaya" : "Kas & tabungan",
+    }))
+    .sort(
+      (a, b) =>
+        Number(a.group === "Kas & tabungan") -
+        Number(b.group === "Kas & tabungan"),
+    ),
 ]);
 const cashCategoryDescriptions: string[] = cashCategories.flatMap((option) =>
   option.description ? [option.description] : [],
@@ -567,6 +581,7 @@ function openModal() {
     interestType: InterestType.Declining,
     loanType: LoanType.Monthly,
     guarantee: Guarantee.Pg,
+    recommender: "",
     annualRate: null,
   });
   Object.assign(loanProvision.value, { amount: 0, edited: false });
@@ -702,26 +717,15 @@ async function submit() {
   submitting.value = true;
   try {
     let saved = false;
-    if (category.value === Category.Payment && isSavingsOnlyPayment.value) {
-      // Savings only: posted as before as a Setoran simpanan.
-      if (!paymentForm.value.memberId || paymentTotal.value <= 0) return;
-      saved = await postSavingsTransaction(
-        {
-          memberId: paymentForm.value.memberId,
-          amounts: paymentSavingsAmounts.value,
-          movement: SavingsMovement.Deposit,
-          description: descriptionOverride.value,
-          reference: "",
-        },
-        options,
-      );
-    } else if (category.value === Category.Payment) {
+    if (category.value === Category.Payment) {
+      // Savings only (no pokok or bunga) is posted by the same command.
       const loan = paymentLoans.value[0];
-      if (!loan || paymentTotal.value <= 0) return;
       const nonMember = isNonMemberPayment.value;
+      if (nonMember ? !loan : !paymentForm.value.memberId) return;
+      if (paymentTotal.value <= 0) return;
       saved = await postPayment(
         {
-          memberId: nonMember ? "" : loan.memberId,
+          memberId: nonMember ? "" : paymentForm.value.memberId,
           principal: 0,
           interest: 0,
           loans: paymentLoans.value.map((item) => ({
@@ -739,14 +743,10 @@ async function submit() {
       );
     } else if (isSavings.value) {
       if (!savingsForm.value.memberId || savingsTotal.value <= 0) return;
-      saved = await postSavingsTransaction(
+      saved = await postSavingsWithdrawal(
         {
           memberId: savingsForm.value.memberId,
           amounts: savingsAmounts.value,
-          movement:
-            category.value === Category.SavingsWithdrawal
-              ? SavingsMovement.Withdrawal
-              : SavingsMovement.Deposit,
           description: descriptionOverride.value,
           reference: "",
         },
@@ -1145,6 +1145,13 @@ defineExpose({ open: openModal });
         <label v-if="loanForm.loanGroup !== LoanGroup.Member" class="field">
           <span>Nama peminjam</span>
           <input v-model="loanForm.borrowerName" required />
+        </label>
+        <label class="field">
+          <span>Rekomendasi</span>
+          <input
+            v-model="loanForm.recommender"
+            placeholder="Nama yang merekomendasikan (boleh kosong)"
+          />
         </label>
         <div class="field-row">
           <label class="field">

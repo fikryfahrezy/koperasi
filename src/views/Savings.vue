@@ -57,6 +57,22 @@ watch(
 const memberById = computed(
   () => new Map(members.map((member) => [member.id, member])),
 );
+// The export holds the month and the members the page shows.
+const exportFilter = computed(() => ({
+  period: period.value,
+  ids: debouncedQuery.value.trim()
+    ? [
+        ...new Set(monthlyLedger.value.savings.map((row) => row.memberId)),
+      ].filter((memberId) => {
+        const member = memberById.value.get(memberId);
+        return matchesMember(
+          debouncedQuery.value,
+          member?.name ?? memberId,
+          member?.memberNumber,
+        );
+      })
+    : undefined,
+}));
 
 // Spreadsheet rows follow member numbers (M001, M002, ...).
 const rowsForPeriod = (selectedPeriod: string) =>
@@ -297,7 +313,11 @@ const navigation = computed(() => ({
         </button>
       </template>
       <template #actions>
-        <ExportButton v-if="monthlyLedger.periods.length" kind="savings" />
+        <ExportButton
+          v-if="monthlyLedger.periods.length"
+          kind="savings"
+          :filter="exportFilter"
+        />
       </template>
     </PageHeader>
     <section

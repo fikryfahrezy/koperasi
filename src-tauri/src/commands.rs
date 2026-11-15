@@ -10,11 +10,10 @@ use tauri_plugin_dialog::DialogExt;
 use crate::{
     application,
     contracts::{
-        AddMemberInput, AppSnapshot, BalanceSheetDetailDto, CashBookDto, CashEntryInput,
-        CompanyDto, CreateLoanInput, FinancialParametersDto, LoanPreview, MonthlyLedgerDto,
-        PaymentInput, PreviewLoanInput, ReverseTransactionInput, SavingsTransactionInput,
-        SetBalanceSheetDetailsInput, SetBalanceSheetItemsInput, SetIncentiveRatesInput,
-        TransactionGroupDto, UpdateMemberInput,
+        AddMemberInput, AppSnapshot, BalanceSheetDto, CashBookDto, CashEntryInput, CompanyDto,
+        CreateLoanInput, FinancialParametersDto, LoanPreview, MonthlyLedgerDto, PaymentInput,
+        PreviewLoanInput, ReverseTransactionInput, SavingsTransactionInput, SetBalanceSheetInput,
+        SetIncentiveRatesInput, TransactionGroupDto, UpdateMemberInput,
     },
     database,
     state::AppState,
@@ -99,12 +98,12 @@ pub(crate) async fn create_loan(
 }
 
 #[tauri::command]
-pub(crate) async fn post_savings_transaction(
+pub(crate) async fn post_savings_withdrawal(
     input: SavingsTransactionInput,
     company_id: String,
     state: State<'_, AppState>,
 ) -> Result<AppSnapshot, String> {
-    application::post_savings_transaction(input, &company_id, &state.db).await
+    application::post_savings_withdrawal(input, &company_id, &state.db).await
 }
 
 #[tauri::command]
@@ -143,39 +142,21 @@ pub(crate) async fn get_financial_parameters(
 }
 
 #[tauri::command]
-pub(crate) async fn get_balance_sheet_items(
+pub(crate) async fn get_balance_sheet(
     company_id: String,
     year: i32,
     state: State<'_, AppState>,
-) -> Result<std::collections::BTreeMap<String, i64>, String> {
-    application::get_balance_sheet_items(&company_id, year, &state.db).await
+) -> Result<BalanceSheetDto, String> {
+    application::get_balance_sheet(&company_id, year, &state.db).await
 }
 
 #[tauri::command]
-pub(crate) async fn set_balance_sheet_items(
-    input: SetBalanceSheetItemsInput,
+pub(crate) async fn set_balance_sheet(
+    input: SetBalanceSheetInput,
     company_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    application::set_balance_sheet_items(input, &company_id, &state.db).await
-}
-
-#[tauri::command]
-pub(crate) async fn get_balance_sheet_details(
-    company_id: String,
-    year: i32,
-    state: State<'_, AppState>,
-) -> Result<std::collections::BTreeMap<String, Vec<BalanceSheetDetailDto>>, String> {
-    application::get_balance_sheet_details(&company_id, year, &state.db).await
-}
-
-#[tauri::command]
-pub(crate) async fn set_balance_sheet_details(
-    input: SetBalanceSheetDetailsInput,
-    company_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    application::set_balance_sheet_details(input, &company_id, &state.db).await
+    application::set_balance_sheet(input, &company_id, &state.db).await
 }
 
 #[tauri::command]
@@ -189,16 +170,28 @@ pub(crate) async fn set_incentive_rates(
 
 /// Exports a page (`cash-book`, `savings` or `loans`) of the year as .xlsx to a
 /// file the user picks. Returns the saved path, or nothing when cancelled.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub(crate) async fn export_xlsx(
     kind: String,
     company_id: String,
     year: i32,
     through: Option<String>,
+    period: Option<String>,
+    ids: Option<Vec<String>>,
+    loan_group: Option<String>,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Option<String>, String> {
     let kind = application::ExportKind::parse(&kind)?;
+    let filter = application::ExportFilter {
+        period: period.filter(|value| !value.is_empty()),
+        ids: ids.map(|ids| ids.into_iter().collect()),
+        loan_group: loan_group
+            .filter(|value| !value.is_empty())
+            .map(|value| crate::domain::LoanGroup::try_from(value.as_str()))
+            .transpose()?,
+    };
     let file_name = kind.file_name(year);
     let picked = tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
@@ -215,9 +208,15 @@ pub(crate) async fn export_xlsx(
     // Written exactly where the dialog confirmed (it already adds .xlsx from
     // the filter); renaming here could overwrite a file nobody confirmed.
     let path = picked.into_path().map_err(|error| error.to_string())?;
-    let bytes =
-        application::export_workbook(&kind, &company_id, year, through.as_deref(), &state.db)
-            .await?;
+    let bytes = application::export_workbook(
+        &kind,
+        &company_id,
+        year,
+        through.as_deref(),
+        &filter,
+        &state.db,
+    )
+    .await?;
     std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
     Ok(Some(path.display().to_string()))
 }

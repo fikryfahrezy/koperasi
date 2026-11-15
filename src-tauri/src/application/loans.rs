@@ -222,8 +222,8 @@ pub(crate) async fn create_loan(
     let due_date = add_months(&disbursement.business_date, input.tenor)?;
 
     let id = timestamp_id("LOAN");
-    sqlx::query("INSERT INTO loans (id, company_id, loan_group, member_id, member_name, plafond, rate_annual, tenor, interest_type, loan_type, guarantee, realization_date, due_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .bind(&id).bind(company_id).bind(loan_group.as_str()).bind(member_id).bind(&borrower_name).bind(input.plafond).bind(rate_percent).bind(input.tenor).bind(interest_type.as_str()).bind(loan_type.as_str()).bind(guarantee).bind(&disbursement.business_date).bind(&due_date).execute(&mut *db).await.map_err(|error| error.to_string())?;
+    sqlx::query("INSERT INTO loans (id, company_id, loan_group, member_id, member_name, plafond, rate_annual, tenor, interest_type, loan_type, guarantee, recommender, realization_date, due_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(&id).bind(company_id).bind(loan_group.as_str()).bind(member_id).bind(&borrower_name).bind(input.plafond).bind(rate_percent).bind(input.tenor).bind(interest_type.as_str()).bind(loan_type.as_str()).bind(guarantee).bind(input.recommender.trim()).bind(&disbursement.business_date).bind(&due_date).execute(&mut *db).await.map_err(|error| error.to_string())?;
 
     let disbursement_id = timestamp_id("DISB");
     append(

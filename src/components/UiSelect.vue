@@ -8,6 +8,8 @@ export interface SelectOption {
   value: SelectValue;
   label: string;
   disabled?: boolean;
+  /** Shown under this heading (an <optgroup>), after the ungrouped options. */
+  group?: string;
 }
 
 const props = withDefaults(
@@ -33,6 +35,19 @@ const props = withDefaults(
 const emit = defineEmits<{
   "update:modelValue": [value: SelectValue];
 }>();
+
+const ungrouped = computed(() =>
+  props.options.filter((option) => !option.group),
+);
+// Groups in the order their first option appears.
+const groups = computed(() => {
+  const result = new Map<string, SelectOption[]>();
+  for (const option of props.options) {
+    if (!option.group) continue;
+    result.set(option.group, [...(result.get(option.group) ?? []), option]);
+  }
+  return [...result].map(([label, options]) => ({ label, options }));
+});
 
 const selectedLabel = computed(
   () =>
@@ -66,13 +81,23 @@ function updateValue(event: Event) {
     >
       <option v-if="placeholder" value="" disabled>{{ placeholder }}</option>
       <option
-        v-for="option in options"
+        v-for="option in ungrouped"
         :key="option.value"
         :value="option.value"
         :disabled="option.disabled"
       >
         {{ option.label }}
       </option>
+      <optgroup v-for="group in groups" :key="group.label" :label="group.label">
+        <option
+          v-for="option in group.options"
+          :key="option.value"
+          :value="option.value"
+          :disabled="option.disabled"
+        >
+          {{ option.label }}
+        </option>
+      </optgroup>
     </select>
   </div>
 </template>

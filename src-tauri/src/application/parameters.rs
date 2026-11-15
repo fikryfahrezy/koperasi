@@ -148,6 +148,7 @@ mod tests {
     fn incentive_rates_follow_the_book_year() {
         tauri::async_runtime::block_on(async {
             let pool = crate::database::memory_pool().await;
+            let before = get_financial_parameters("default", &pool).await.unwrap();
             set_incentive_rates(
                 SetIncentiveRatesInput {
                     year: 2025,
@@ -183,10 +184,12 @@ mod tests {
                 incentive_rates("default", 2027, &pool).await.unwrap(),
                 (0.12, 0.0365)
             );
-            // The operational parameters are unaffected.
+            // The operational parameters are unaffected. (Batas pinjaman came from
+            // a data script, not from the migrations, so it is compared with its
+            // value before the rates were set instead of a fixed amount.)
             let parameters = get_financial_parameters("default", &pool).await.unwrap();
             assert_eq!(parameters.mandatory_savings, 50_000);
-            assert_eq!(parameters.max_loan_outstanding, 25_000_000);
+            assert_eq!(parameters.max_loan_outstanding, before.max_loan_outstanding);
         });
     }
 }
