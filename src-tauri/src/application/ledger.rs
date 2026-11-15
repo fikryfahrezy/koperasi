@@ -647,7 +647,11 @@ mod tests {
             sqlx::query("INSERT INTO loans (id, company_id, loan_group, member_name, plafond, rate_annual, tenor, interest_type, loan_type, realization_date, due_date) VALUES ('early', 'default', 'Anggota PP BRI', 'Peminjam A', 1000000, 24, 10, 'Menurun', 'Bulanan', '2026-01-01', '2026-11-01')")
                 .execute(&pool).await.unwrap();
             for (id, date, components) in [
-                ("open", "2026-01-01", vec![(ComponentType::LoanDisbursement.as_str(), 1_000_000)]),
+                (
+                    "open",
+                    "2026-01-01",
+                    vec![(ComponentType::LoanDisbursement.as_str(), 1_000_000)],
+                ),
                 (
                     "pay",
                     "2026-02-01",
@@ -657,7 +661,11 @@ mod tests {
                     ],
                 ),
                 // The rest paid off early, ahead of the schedule.
-                ("payoff", "2026-02-19", vec![(ComponentType::LoanPrincipal.as_str(), 900_000)]),
+                (
+                    "payoff",
+                    "2026-02-19",
+                    vec![(ComponentType::LoanPrincipal.as_str(), 900_000)],
+                ),
             ] {
                 let amount: i64 = components.iter().map(|(_, amount)| amount).sum();
                 sqlx::query("INSERT INTO transactions (id, company_id, business_date, display_date, display_time, member_name, channel, description, reference, direction, amount, actor) VALUES (?, 'default', ?, ?, '00:00', 'Peminjam A', ?, 'Test', ?, ?, ?, 'Test')")

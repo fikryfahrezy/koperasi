@@ -66,6 +66,22 @@ const loanById = computed(() => new Map(loans.map((loan) => [loan.id, loan])));
 const memberNumbers = computed(
   () => new Map(members.map((member) => [member.id, member.memberNumber])),
 );
+// The export holds the month, the section and the loans the page shows.
+const exportFilter = computed(() => ({
+  period: period.value,
+  loanGroup: groupFilter.value,
+  ids: debouncedQuery.value.trim()
+    ? loans
+        .filter((loan) =>
+          matchesMember(
+            debouncedQuery.value,
+            loan.memberName,
+            memberNumbers.value.get(loan.memberId),
+          ),
+        )
+        .map((loan) => loan.id)
+    : undefined,
+}));
 
 // Spreadsheet rows follow loan numbers (L001, L002, ...). Derived columns:
 // opening arrears = closing arrears - this month's payment obligation + amount paid;
@@ -103,15 +119,17 @@ const monthRowsForPeriod = (selectedPeriod: string) =>
           row.scheduledPrincipal +
           priorArrearsInterest +
           row.scheduledInterest,
-        cashIn: row.principalPaid + row.interestPaid + row.provision,
+        // As in the sheet: Pokok + Bunga paid; a disbursement without a
+        // payment shows its Provisi.
+        cashIn: row.principalPaid + row.interestPaid || row.provision,
         arrearsTotal: row.arrearsPrincipal + row.arrearsInterest,
       };
     });
 
 // Jumlah pemasukan per triwulan and Insentif Pinjaman (kolom EJ–EW) come from
 // the backend, which also hides paid-off loans whose borrower has another loan
-// running and moves their income to that loan (rules 1.10). Jumlah pemasukan
-// total, between them, adds up the four quarters: the base of the insentif.
+// running and moves their income to that loan (rules 1.10). Total pemasukan
+// tahun, between them, adds up the four quarters: the base of the insentif.
 const quarterLabels = [
   "Jan s/d Mar",
   "Apr s/d Jun",
@@ -127,6 +145,8 @@ const incomeKeys = [
         `q${quarter + 1}Total`,
       ] as const,
   ),
+  "incomeInterestTotal",
+  "incomeProvisionTotal",
   "incomeTotal",
   "incentiveRaw",
   "incentive",
@@ -159,9 +179,16 @@ const rowsForPeriod = (selectedPeriod: string) =>
         income[`q${quarter + 1}Provision` as IncomeKey] = provision;
         income[`q${quarter + 1}Total` as IncomeKey] = amount + provision;
       });
+      income.incomeInterestTotal = row.incomeInterest.reduce(
+        (sum, amount) => sum + amount,
+        0,
+      );
+      income.incomeProvisionTotal = row.incomeProvision.reduce(
+        (sum, amount) => sum + amount,
+        0,
+      );
       income.incomeTotal =
-        row.incomeInterest.reduce((sum, amount) => sum + amount, 0) +
-        row.incomeProvision.reduce((sum, amount) => sum + amount, 0);
+        income.incomeInterestTotal + income.incomeProvisionTotal;
       income.incentiveRaw = row.incentiveRaw;
       income.incentive = row.incentive;
       return {
@@ -263,13 +290,18 @@ const periodTables = computed(() =>
   }),
 );
 
+// The rows are those of the last month shown: a loan paid off in an earlier
+// month is hidden there (its income moves to a loan still shown), so it stays
+// hidden when several months are shown. Each month's totals still count every
+// loan of that month.
 const sections = computed(() => {
-  const rowsById = new Map<string, MonthRow>();
-  for (const table of periodTables.value) {
-    for (const row of table.rowsById.values()) rowsById.set(row.loanId, row);
-  }
+  const last = periodTables.value[periodTables.value.length - 1];
   return sectionsForRows(
-    [...rowsById.values()].sort((a, b) => a.loanId.localeCompare(b.loanId)),
+    last
+      ? [...last.rowsById.values()].sort((a, b) =>
+          a.loanId.localeCompare(b.loanId),
+        )
+      : [],
   );
 });
 const plafondTotal = computed(() =>
@@ -432,7 +464,11 @@ const navigation = computed(() => ({
         </button>
       </template>
       <template #actions>
-        <ExportButton v-if="monthlyLedger.periods.length" kind="loans" />
+        <ExportButton
+          v-if="monthlyLedger.periods.length"
+          kind="loans"
+          :filter="exportFilter"
+        />
       </template>
     </PageHeader>
     <section
@@ -580,8 +616,8 @@ const navigation = computed(() => ({
                   >
                     Jumlah pemasukan {{ label }}
                   </th>
-                  <th rowspan="3" class="sheet-total">
-                    Jumlah pemasukan<br />total
+                  <th colspan="3" rowspan="2" class="sheet-group">
+                    Total pemasukan tahun {{ selectedYear }}
                   </th>
                   <th colspan="2" rowspan="2" class="sheet-group">
                     Insentif Pinjaman
@@ -631,6 +667,9 @@ const navigation = computed(() => ({
                     <th>Provisi</th>
                     <th>Jumlah</th>
                   </template>
+                  <th>Bunga</th>
+                  <th>Provisi</th>
+                  <th class="sheet-total">Jumlah</th>
                   <th>
                     {{ formatRate(monthlyLedger.loanIncentiveRate) }}
                   </th>

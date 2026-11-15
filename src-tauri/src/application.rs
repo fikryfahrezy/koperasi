@@ -13,17 +13,16 @@ mod savings;
 mod transaction_groups;
 mod transactions;
 
-pub(crate) use balance_sheet::{
-    get_balance_sheet_details, get_balance_sheet_items, set_balance_sheet_details,
-    set_balance_sheet_items,
-};
-pub(crate) use export::{export_workbook, ExportKind};
+pub(crate) use balance_sheet::{get_balance_sheet, set_balance_sheet};
+pub(crate) use export::{export_workbook, ExportFilter, ExportKind};
 pub(crate) use ledger::get_monthly_ledger;
 pub(crate) use loans::{create_loan, preview_loan};
 pub(crate) use members::{add_member, update_member};
 pub(crate) use parameters::{get_financial_parameters, set_incentive_rates};
 pub(crate) use read_model::{get_app_snapshot, get_cash_book};
-pub(crate) use savings::{post_payment, post_savings_transaction};
+#[cfg(test)]
+pub(crate) use savings::post_savings_transaction;
+pub(crate) use savings::{post_payment, post_savings_withdrawal};
 pub(crate) use transaction_groups::get_transaction_group;
 pub(crate) use transactions::{post_cash_entry, reverse_transaction};
 
@@ -361,6 +360,7 @@ mod tests {
                     annual_rate: None,
                     loan_type: LoanType::Temporary.as_str().into(),
                     guarantee: String::new(),
+                    recommender: String::new(),
                     provision: None,
                     payoffs: Vec::new(),
                     description: String::new(),
@@ -420,6 +420,7 @@ mod tests {
                 annual_rate: None,
                 loan_type: LoanType::Monthly.as_str().into(),
                 guarantee: String::new(),
+                recommender: String::new(),
                 provision: None,
                 payoffs: Vec::new(),
                 description: String::new(),
@@ -601,6 +602,70 @@ mod tests {
                         "Pengambilan Simpanan Pokok, Wajib & Manasuka Saver",
                         125_000
                     ),
+                ]
+            );
+        });
+    }
+
+    #[test]
+    fn savings_are_deposited_through_the_payment_and_withdrawn_on_their_own() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+            add_member(member_input("Saver"), "default", &pool)
+                .await
+                .unwrap();
+            // A Setoran with savings only (no installment) is one Setoran
+            // simpanan row, as the Buku Kas writes it.
+            let deposit = PaymentInput {
+                member_id: "default-M001".into(),
+                principal: 0,
+                interest: 0,
+                wajib: 50_000,
+                voluntary: 25_000,
+                reference: String::new(),
+                channel: Channel::Cash.as_str().into(),
+                ..payment(0, "", Channel::Cash.as_str())
+            };
+            let snapshot = post_payment(deposit, "default", &pool).await.unwrap();
+            assert_eq!(snapshot.totals.savings, 50_000 + 75_000);
+            // The withdrawal command always takes savings out, whatever
+            // movement it is sent.
+            let withdrawal = SavingsTransactionInput {
+                member_id: "default-M001".into(),
+                account_type: SavingsAccountType::Voluntary.as_str().into(),
+                movement: SavingsMovement::Deposit.as_str().into(),
+                amount: 20_000,
+                amounts: Vec::new(),
+                description: String::new(),
+                reference: String::new(),
+                channel: Channel::Cash.as_str().into(),
+                business_date: DATE.into(),
+                display_date: "13 Sep 2026".into(),
+                display_time: "11:00".into(),
+            };
+            let snapshot = post_savings_withdrawal(withdrawal, "default", &pool)
+                .await
+                .unwrap();
+            assert_eq!(snapshot.totals.savings, 125_000 - 20_000);
+
+            let book = get_cash_book("default", 2026, Channel::Cash.as_str(), &pool)
+                .await
+                .unwrap();
+            let rows: Vec<(&str, &str, i64)> = book.rows[book.rows.len() - 2..]
+                .iter()
+                .map(|row| {
+                    (
+                        row.transaction.id.split('-').next().unwrap_or_default(),
+                        row.transaction.description.as_str(),
+                        row.transaction.amount,
+                    )
+                })
+                .collect();
+            assert_eq!(
+                rows,
+                [
+                    ("SAV", "Setoran Simpanan Wajib & Manasuka Saver", 75_000),
+                    ("SAV", "Pengambilan Manasuka Saver", 20_000),
                 ]
             );
         });
@@ -855,6 +920,7 @@ mod tests {
                     annual_rate: None,
                     loan_type: LoanType::Monthly.as_str().into(),
                     guarantee: String::new(),
+                    recommender: String::new(),
                     provision: None,
                     payoffs: Vec::new(),
                     description: String::new(),
@@ -913,6 +979,7 @@ mod tests {
                 annual_rate: None,
                 loan_type: LoanType::Monthly.as_str().into(),
                 guarantee: String::new(),
+                recommender: String::new(),
                 provision: None,
                 payoffs,
                 description: String::new(),
@@ -1240,6 +1307,7 @@ mod tests {
                     annual_rate: None,
                     loan_type: LoanType::Monthly.as_str().into(),
                     guarantee: String::new(),
+                    recommender: String::new(),
                     provision: None,
                     payoffs: Vec::new(),
                     description: String::new(),

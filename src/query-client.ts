@@ -24,8 +24,6 @@ export const queryKeys = {
     ["company", companyId, "monthly-ledger", year, through] as const,
   cashBook: (companyId: string, year: number, channel: string) =>
     ["company", companyId, "cash-book", year, channel] as const,
-  balanceSheetItems: (companyId: string, year: number) =>
-    ["company", companyId, "balance-sheet-items", year] as const,
-  balanceSheetDetails: (companyId: string, year: number) =>
-    ["company", companyId, "balance-sheet-details", year] as const,
+  balanceSheet: (companyId: string, year: number) =>
+    ["company", companyId, "balance-sheet", year] as const,
 };

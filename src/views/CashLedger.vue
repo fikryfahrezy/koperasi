@@ -142,6 +142,12 @@ const filteredRows = computed(() => {
 // deletion first. The reversal row carries when it was deleted; its reference
 // extends the original's.
 const showDeleted = pageState.field("showDeleted", () => false);
+// The export holds the rows the search leaves.
+const exportFilter = computed(() =>
+  debouncedQuery.value.trim()
+    ? { ids: filteredRows.value.map((row) => row.id) }
+    : {},
+);
 const deletedRows = computed(() => {
   const reversals = rows.value.filter((row) => row.isReversal);
   return rows.value
@@ -255,7 +261,11 @@ async function refreshPage() {
             deletedRows.length
           }}</span>
         </button>
-        <ExportButton kind="cash-book" />
+        <ExportButton
+          v-if="!showDeleted"
+          kind="cash-book"
+          :filter="exportFilter"
+        />
         <button
           class="button button--primary"
           type="button"

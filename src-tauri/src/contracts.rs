@@ -170,6 +170,9 @@ pub(crate) struct CreateLoanInput {
     /// PG/TN; empty leaves the column blank, as for most Non Anggota loans.
     #[serde(default)]
     pub(crate) guarantee: String,
+    /// Rekomendasi: who recommended the loan; empty when nobody.
+    #[serde(default)]
+    pub(crate) recommender: String,
     /// Bunga per tahun in percent typed by the user; empty uses the parameter.
     #[serde(default)]
     pub(crate) annual_rate: Option<f64>,
@@ -282,14 +285,6 @@ pub(crate) struct ReverseTransactionInput {
     pub(crate) display_time: String,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct SetBalanceSheetItemsInput {
-    pub(crate) year: i32,
-    /// Typed Neraca lines by key (see `BALANCE_SHEET_ITEMS`), in rupiah.
-    pub(crate) items: std::collections::BTreeMap<String, i64>,
-}
-
 /// One row of the rincian of a typed Neraca line (Piutang Lainnya: a Bon
 /// Sementara and the date it was borrowed).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -304,13 +299,27 @@ pub(crate) struct BalanceSheetDetailDto {
     pub(crate) note: String,
 }
 
+/// Typed Neraca lines of a book year and their rincian.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BalanceSheetDto {
+    /// Typed lines by key (see `BALANCE_SHEET_ITEMS`), in rupiah.
+    pub(crate) items: std::collections::BTreeMap<String, i64>,
+    /// Rincian by line key, in their saved order.
+    pub(crate) details: std::collections::BTreeMap<String, Vec<BalanceSheetDetailDto>>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct SetBalanceSheetDetailsInput {
+pub(crate) struct SetBalanceSheetInput {
     pub(crate) year: i32,
-    pub(crate) item_key: String,
-    /// Replaces the whole rincian of the line, in this order.
-    pub(crate) details: Vec<BalanceSheetDetailDto>,
+    /// Typed lines by key, in rupiah; lines left out keep their value.
+    #[serde(default)]
+    pub(crate) items: std::collections::BTreeMap<String, i64>,
+    /// Replaces the whole rincian of each line given, in this order; the line
+    /// becomes the total of its rincian.
+    #[serde(default)]
+    pub(crate) details: std::collections::BTreeMap<String, Vec<BalanceSheetDetailDto>>,
 }
 
 #[derive(Deserialize)]

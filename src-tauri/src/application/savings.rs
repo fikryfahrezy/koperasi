@@ -8,7 +8,7 @@ use super::posting::{
 };
 use super::read_model::get_app_snapshot;
 use crate::{
-    contracts::{AppSnapshot, PaymentInput, SavingsTransactionInput},
+    contracts::{AppSnapshot, PaymentInput, SavingsAmountInput, SavingsTransactionInput},
     domain::{
         timestamp_id, validate_business_date, AuditAction, AuditEntityType, Channel, ComponentType,
         LoanGroup, SavingsAccountType, SavingsMovement, TransactionDirection,
@@ -195,8 +195,24 @@ pub(crate) async fn post_savings_transaction(
     get_app_snapshot(company_id, pool).await
 }
 
+/// Pengambilan simpanan: the only way savings leave the koperasi. Deposits go
+/// through `post_payment`, with or without a loan installment.
+pub(crate) async fn post_savings_withdrawal(
+    input: SavingsTransactionInput,
+    company_id: &str,
+    pool: &SqlitePool,
+) -> Result<AppSnapshot, String> {
+    let input = SavingsTransactionInput {
+        movement: SavingsMovement::Withdrawal.as_str().into(),
+        ..input
+    };
+    post_savings_transaction(input, company_id, pool).await
+}
+
 /// Monthly member payment: principal installment + interest and principal/mandatory/voluntary
-/// savings in a single transaction.
+/// savings in a single transaction. A payment of savings only is posted as a
+/// Setoran simpanan (e.g. "Setoran Simpanan Wajib & Manasuka <nama>"), as the
+/// Buku Kas writes it.
 pub(crate) async fn post_payment(
     input: PaymentInput,
     company_id: &str,
@@ -221,6 +237,41 @@ pub(crate) async fn post_payment(
     let loan_id = input.loan_id.trim();
     if (!loan_id.is_empty() || !input.loans.is_empty()) && input.member_id.trim().is_empty() {
         return post_loan_payment(input, channel, company_id, pool).await;
+    }
+    let pays_loan = !loan_id.is_empty()
+        || input
+            .loans
+            .iter()
+            .any(|line| line.principal != 0 || line.interest != 0)
+        || input.principal != 0
+        || input.interest != 0;
+    if !pays_loan {
+        let amounts = [
+            (SavingsAccountType::Principal, input.pokok),
+            (SavingsAccountType::Mandatory, input.wajib),
+            (SavingsAccountType::Voluntary, input.voluntary),
+        ]
+        .into_iter()
+        .filter(|(_, amount)| *amount > 0)
+        .map(|(account_type, amount)| SavingsAmountInput {
+            account_type: account_type.as_str().into(),
+            amount,
+        })
+        .collect();
+        let deposit = SavingsTransactionInput {
+            member_id: input.member_id,
+            account_type: String::new(),
+            movement: SavingsMovement::Deposit.as_str().into(),
+            amount: 0,
+            amounts,
+            description: input.description,
+            reference: input.reference,
+            channel: input.channel,
+            business_date: input.business_date,
+            display_date: input.display_date,
+            display_time: input.display_time,
+        };
+        return post_savings_transaction(deposit, company_id, pool).await;
     }
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
     let member_name = member_name(&mut db, company_id, &input.member_id).await?;

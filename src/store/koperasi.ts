@@ -93,7 +93,8 @@ export const CashCategory = {
 export type CashCategory = (typeof CashCategory)[keyof typeof CashCategory];
 
 // Buku Kas categories: the cash transfers (each for one direction, with the
-// sheet's Uraian text), then the expense columns of Buku Kas TAHUN 2026 in sheet order.
+// sheet's Uraian text), then the expense columns of Buku Kas TAHUN 2026 in sheet order,
+// which on the sheet are only ever cash out (Debet).
 export const cashCategories: readonly {
   value: CashCategory;
   label: string;
@@ -118,18 +119,66 @@ export const cashCategories: readonly {
     direction: TransactionDirection.Out,
     description: "Transfer ke Tabungan",
   },
-  { value: CashCategory.BoardExpense, label: "Biaya Pengurus" },
-  { value: CashCategory.StationeryExpense, label: "Biaya ATK" },
-  { value: CashCategory.Transport, label: "Transfortasi" },
-  { value: CashCategory.InterestExpense, label: "Biaya Bunga" },
-  { value: CashCategory.PublicRelations, label: "Humas" },
-  { value: CashCategory.AssetMaintenance, label: "Pemeliharaan AT" },
-  { value: CashCategory.AnnualMeetingExpense, label: "Biaya RAT" },
-  { value: CashCategory.OfficeRent, label: "Sewa Kantor" },
-  { value: CashCategory.SocialFund, label: "Dansos" },
-  { value: CashCategory.Other, label: "Lainnya" },
-  { value: CashCategory.Dekopinda, label: "Dekopinda" },
-  { value: CashCategory.Parcel, label: "Parcel" },
+  {
+    value: CashCategory.BoardExpense,
+    label: "Biaya Pengurus",
+    direction: TransactionDirection.Out,
+  },
+  {
+    value: CashCategory.StationeryExpense,
+    label: "Biaya ATK",
+    direction: TransactionDirection.Out,
+  },
+  {
+    value: CashCategory.Transport,
+    label: "Transfortasi",
+    direction: TransactionDirection.Out,
+  },
+  {
+    value: CashCategory.InterestExpense,
+    label: "Biaya Bunga",
+    direction: TransactionDirection.Out,
+  },
+  {
+    value: CashCategory.PublicRelations,
+    label: "Humas",
+    direction: TransactionDirection.Out,
+  },
+  {
+    value: CashCategory.AssetMaintenance,
+    label: "Pemeliharaan AT",
+    direction: TransactionDirection.Out,
+  },
+  {
+    value: CashCategory.AnnualMeetingExpense,
+    label: "Biaya RAT",
+    direction: TransactionDirection.Out,
+  },
+  {
+    value: CashCategory.OfficeRent,
+    label: "Sewa Kantor",
+    direction: TransactionDirection.Out,
+  },
+  {
+    value: CashCategory.SocialFund,
+    label: "Dansos",
+    direction: TransactionDirection.Out,
+  },
+  {
+    value: CashCategory.Other,
+    label: "Lainnya",
+    direction: TransactionDirection.Out,
+  },
+  {
+    value: CashCategory.Dekopinda,
+    label: "Dekopinda",
+    direction: TransactionDirection.Out,
+  },
+  {
+    value: CashCategory.Parcel,
+    label: "Parcel",
+    direction: TransactionDirection.Out,
+  },
 ];
 
 export interface Company {
@@ -347,6 +396,8 @@ interface CreateLoanInput {
   interestType: InterestType;
   loanType: LoanType;
   guarantee: Guarantee;
+  /** Rekomendasi: who recommended the loan; empty when nobody. */
+  recommender: string;
   /** Typed Bunga per tahun in percent; null uses the Bunga parameter. */
   annualRate?: number | null;
   /** Typed provision fee; omitted uses the Provisi parameter rate. */
@@ -448,16 +499,14 @@ const command = {
   updateMember: "update_member",
   previewLoan: "preview_loan",
   createLoan: "create_loan",
-  postSavingsTransaction: "post_savings_transaction",
+  postSavingsWithdrawal: "post_savings_withdrawal",
   postPayment: "post_payment",
   reverseTransaction: "reverse_transaction",
   getTransactionGroup: "get_transaction_group",
   getFinancialParameters: "get_financial_parameters",
   setIncentiveRates: "set_incentive_rates",
-  getBalanceSheetItems: "get_balance_sheet_items",
-  setBalanceSheetItems: "set_balance_sheet_items",
-  getBalanceSheetDetails: "get_balance_sheet_details",
-  setBalanceSheetDetails: "set_balance_sheet_details",
+  getBalanceSheet: "get_balance_sheet",
+  setBalanceSheet: "set_balance_sheet",
   exportXlsx: "export_xlsx",
   databaseLocation: "database_location",
   exportDatabase: "export_database",
@@ -467,17 +516,35 @@ const command = {
 /** Pages that can be exported to .xlsx, in the layout of their workbook. */
 export type ExportKind = "cash-book" | "savings" | "loans";
 
+/** The page's filters, so the exported file holds what the page shows. */
+export interface ExportFilter {
+  /** Bulan (`YYYY-MM`); empty exports every month of the year. */
+  period?: string;
+  /** Search results: transaction, member or loan ids; absent keeps every row. */
+  ids?: string[];
+  /** Kelompok on Pinjaman; empty keeps both sections. */
+  loanGroup?: LoanGroup | "";
+}
+
 const backend = {
   databaseLocation: () => invoke<string>(command.databaseLocation),
   exportDatabase: () => invoke<string | null>(command.exportDatabase),
   // Restarts the app once the picked file replaces the database.
   importDatabase: () => invoke<void>(command.importDatabase),
-  exportXlsx: (kind: ExportKind, year: number, through?: string) =>
+  exportXlsx: (
+    kind: ExportKind,
+    year: number,
+    through?: string,
+    filter: ExportFilter = {},
+  ) =>
     invoke<string | null>(command.exportXlsx, {
       kind,
       companyId: selectedCompanyId.value,
       year,
       through: through || null,
+      period: filter.period || null,
+      ids: filter.ids ?? null,
+      loanGroup: filter.loanGroup || null,
     }),
   listCompanies: () => invoke<Company[]>(command.listCompanies),
   getAppSnapshot: (companyId = selectedCompanyId.value) =>
@@ -540,10 +607,10 @@ const backend = {
       input,
       companyId: selectedCompanyId.value,
     }),
-  postSavingsTransaction: (
+  postSavingsWithdrawal: (
     input: SavingsTransactionInput & ChannelInput & OperationalTimestamp,
   ) =>
-    invoke<AppSnapshot>(command.postSavingsTransaction, {
+    invoke<AppSnapshot>(command.postSavingsWithdrawal, {
       input,
       companyId: selectedCompanyId.value,
     }),
@@ -575,30 +642,14 @@ const backend = {
       input,
       companyId: selectedCompanyId.value,
     }),
-  getBalanceSheetItems: (year: number, companyId = selectedCompanyId.value) =>
-    invoke<Record<string, number>>(command.getBalanceSheetItems, {
-      companyId,
-      year,
-    }),
-  setBalanceSheetItems: (input: {
+  getBalanceSheet: (year: number, companyId = selectedCompanyId.value) =>
+    invoke<BalanceSheetData>(command.getBalanceSheet, { companyId, year }),
+  setBalanceSheet: (input: {
     year: number;
     items: Record<string, number>;
+    details: Record<string, BalanceSheetDetail[]>;
   }) =>
-    invoke<void>(command.setBalanceSheetItems, {
-      input,
-      companyId: selectedCompanyId.value,
-    }),
-  getBalanceSheetDetails: (year: number, companyId = selectedCompanyId.value) =>
-    invoke<Record<string, BalanceSheetDetail[]>>(
-      command.getBalanceSheetDetails,
-      { companyId, year },
-    ),
-  setBalanceSheetDetails: (input: {
-    year: number;
-    itemKey: string;
-    details: BalanceSheetDetail[];
-  }) =>
-    invoke<void>(command.setBalanceSheetDetails, {
+    invoke<void>(command.setBalanceSheet, {
       input,
       companyId: selectedCompanyId.value,
     }),
@@ -622,12 +673,13 @@ function errorMessage(error: unknown) {
 }
 
 /** Saves the year's page as .xlsx where the user picks; false when it failed. */
-async function exportXlsx(kind: ExportKind) {
+async function exportXlsx(kind: ExportKind, filter: ExportFilter = {}) {
   try {
     const path = await backend.exportXlsx(
       kind,
       selectedYear.value,
       currentPeriod(),
+      filter,
     );
     if (path)
       notify(translate("notifications.exported"), path, "success", path);
@@ -878,6 +930,19 @@ async function addMember(input: AddMemberInput, options: PostingOptions = {}) {
 }
 
 /** The member already using an ID Anggota (case-insensitive), other than `exceptId`. */
+/**
+ * The ID Anggota suggested for a new member: the highest "A" + digits number
+ * plus one, padded to four digits (A0144 → A0145). Other formats are ignored.
+ */
+function nextMemberNumber() {
+  let highest = 0;
+  for (const member of members) {
+    const match = /^A(\d+)$/i.exec(member.memberNumber.trim());
+    if (match) highest = Math.max(highest, Number(match[1]));
+  }
+  return `A${String(highest + 1).padStart(4, "0")}`;
+}
+
 function memberNumberOwner(memberNumber: string, exceptId = "") {
   const value = memberNumber.trim().toLocaleLowerCase(DEFAULT_LOCALE);
   if (!value) return undefined;
@@ -1006,14 +1071,16 @@ function operationalTimestamp(businessDate = todayIso()) {
   };
 }
 
-async function postSavingsTransaction(
-  input: SavingsTransactionInput,
+/** Pengambilan simpanan; setoran simpanan goes through postPayment. */
+async function postSavingsWithdrawal(
+  savings: Omit<SavingsTransactionInput, "movement">,
   options: PostingOptions = {},
 ) {
+  const input = { ...savings, movement: SavingsMovement.Withdrawal };
   const companyId = selectedCompanyId.value;
   try {
     applyMutationSnapshot(
-      await backend.postSavingsTransaction({
+      await backend.postSavingsWithdrawal({
         ...input,
         channel: options.channel ?? Channel.Cash,
         ...operationalTimestamp(options.businessDate),
@@ -1217,16 +1284,22 @@ export function useMonthlyLedger(yearOffset = 0) {
   };
 }
 
-/** Neraca lines typed for the selected book year (or the one `yearOffset`
- * from it), by key. */
-export function useBalanceSheetItems(yearOffset = 0) {
+/** Typed Neraca lines of a book year and the rincian behind them, by key. */
+interface BalanceSheetData {
+  items: Record<string, number>;
+  details: Record<string, BalanceSheetDetail[]>;
+}
+
+/** The typed Neraca of the selected book year (or the one `yearOffset` from
+ * it): lines and rincian come from one query. */
+function useBalanceSheet(yearOffset: number) {
   const query = useQuery(
     computed(() => {
       const companyId = selectedCompanyId.value;
       const year = selectedYear.value + yearOffset;
       return {
-        queryKey: queryKeys.balanceSheetItems(companyId, year),
-        queryFn: () => backend.getBalanceSheetItems(year, companyId),
+        queryKey: queryKeys.balanceSheet(companyId, year),
+        queryFn: () => backend.getBalanceSheet(year, companyId),
       };
     }),
   );
@@ -1234,8 +1307,15 @@ export function useBalanceSheetItems(yearOffset = 0) {
     if (error)
       notify("Pos neraca gagal dimuat", errorMessage(error), "warning");
   });
+  return query;
+}
+
+/** Neraca lines typed for the selected book year (or the one `yearOffset`
+ * from it), by key. */
+export function useBalanceSheetItems(yearOffset = 0) {
+  const query = useBalanceSheet(yearOffset);
   return {
-    balanceSheetItems: computed(() => query.data.value ?? {}),
+    balanceSheetItems: computed(() => query.data.value?.items ?? {}),
   };
 }
 
@@ -1252,22 +1332,9 @@ export interface BalanceSheetDetail {
 
 /** Rincian of the typed Neraca lines of the selected book year, by key. */
 export function useBalanceSheetDetails(yearOffset = 0) {
-  const query = useQuery(
-    computed(() => {
-      const companyId = selectedCompanyId.value;
-      const year = selectedYear.value + yearOffset;
-      return {
-        queryKey: queryKeys.balanceSheetDetails(companyId, year),
-        queryFn: () => backend.getBalanceSheetDetails(year, companyId),
-      };
-    }),
-  );
-  watch(query.error, (error) => {
-    if (error)
-      notify("Rincian neraca gagal dimuat", errorMessage(error), "warning");
-  });
+  const query = useBalanceSheet(yearOffset);
   return {
-    balanceSheetDetails: computed(() => query.data.value ?? {}),
+    balanceSheetDetails: computed(() => query.data.value?.details ?? {}),
   };
 }
 
@@ -1280,17 +1347,11 @@ async function setBalanceSheetItems(
 ) {
   const companyId = selectedCompanyId.value;
   try {
-    await backend.setBalanceSheetItems({ year, items });
-    for (const [itemKey, rows] of Object.entries(details))
-      await backend.setBalanceSheetDetails({ year, itemKey, details: rows });
-    await Promise.all([
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.balanceSheetItems(companyId, year),
-      }),
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.balanceSheetDetails(companyId, year),
-      }),
-    ]);
+    // One save: the lines and their rincian are stored together or not at all.
+    await backend.setBalanceSheet({ year, items, details });
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.balanceSheet(companyId, year),
+    });
     notify("Pos neraca disimpan", `Tahun buku ${year}.`);
     return true;
   } catch (error) {
@@ -1463,9 +1524,10 @@ export const useKoperasiStore = () => ({
   setIncentiveRate,
   setBalanceSheetItems,
   memberNumberOwner,
+  nextMemberNumber,
   previewLoan,
   createLoan,
-  postSavingsTransaction,
+  postSavingsWithdrawal,
   postPayment,
   reverseTransaction,
   getTransactionGroup,

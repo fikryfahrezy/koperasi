@@ -8,6 +8,9 @@
   --soft: #6d7874;
   --line: #dde4e0;
   --line-strong: #cbd6d1;
+  /* Cell grid of the sheet-like tables (Buku Kas, Simpanan, Pinjaman). */
+  --sheet-grid: #a9b5af;
+  --sheet-grid-strong: #6f7d76;
   --surface: #ffffff;
   --surface-soft: #f8faf8;
   --green: #01529c;
@@ -419,6 +422,7 @@ strong {
   min-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
+  border-left: 1px solid var(--sheet-grid);
   font-size: 12px;
 }
 .sheet-table--virtual {
@@ -459,9 +463,12 @@ strong {
 .sheet-table th,
 .sheet-table td {
   padding: 7px 10px;
-  border-right: 1px solid #edf1ef;
-  border-bottom: 1px solid #edf1ef;
+  border-right: 1px solid var(--sheet-grid);
+  border-bottom: 1px solid var(--sheet-grid);
   white-space: nowrap;
+}
+.sheet-table thead tr:first-child th {
+  border-top: 1px solid var(--sheet-grid);
 }
 .sheet-table thead th,
 .data-table thead th {
@@ -522,7 +529,7 @@ strong {
   overflow: hidden;
   text-overflow: ellipsis;
   text-align: left;
-  border-right: 1px solid var(--line-strong);
+  border-right: 2px solid var(--sheet-grid-strong);
 }
 .sheet-table .sheet-total {
   background: #f8faf8;
@@ -543,7 +550,7 @@ strong {
   z-index: 1;
   color: #000;
   background: #f3f6f5;
-  border-top: 1px solid var(--line-strong);
+  border-top: 2px solid var(--sheet-grid-strong);
   font-weight: 700;
 }
 .sheet-table tfoot td.sheet-sticky {

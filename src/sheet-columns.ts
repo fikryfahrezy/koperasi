@@ -26,9 +26,9 @@ export const loanLeadingLetters = letters(range(1, 10));
 // Saldo Posisi Desember (K), Kewajiban setor tiap bulan (L–N) and Tunggakan
 // s/d Desember (O–Q) come once, before January. Each month is then Kewajiban
 // s/d (3), Mutasi (6), Saldo (1), Tunggakan (3), starting at R for January;
-// the last column is ET (Kewajiban s/d November), after which the income
-// columns begin.
-const LOAN_LAST_COLUMN = 150;
+// the last month column is FQ (Tunggakan s/d Desember), after which come
+// Kewajiban s/d Januari (FR–FT) and the income columns.
+const LOAN_LAST_COLUMN = 173;
 
 /** Saldo Posisi, Kewajiban setor tiap bulan and Tunggakan before the first month. */
 export const loanOpeningLetters = letters(range(11, 7));
@@ -41,22 +41,25 @@ export function loanMonthLetters(period: string) {
   );
 }
 
-/** After the last month: Kewajiban s/d bulan depan, Rekomendasi (EV),
- * Jumlah pemasukan per triwulan (Okt s/d Des is not in the sheet yet) and
- * Insentif Pinjaman. */
+/** After the last month: Kewajiban s/d bulan depan, Rekomendasi (FU),
+ * Jumlah pemasukan per triwulan (FW–GK), Total pemasukan tahun (GM–GO) and
+ * Insentif Pinjaman with Pembulatan (GQ, GR). */
 export function loanTailLetters(nextPeriod: string) {
+  const nextDue =
+    monthOf(nextPeriod) === 1
+      ? letters(range(LOAN_LAST_COLUMN + 1, 3)) // FR–FT Kewajiban s/d Januari
+      : loanMonthLetters(nextPeriod).slice(0, 3);
   return [
-    ...loanMonthLetters(nextPeriod).slice(0, 3), // Kewajiban s/d bulan depan
+    ...nextDue,
     ...letters([
-      152, // EV Rekomendasi
-      ...range(154, 3), // EX–EZ
-      ...range(158, 3), // FB–FD
-      ...range(162, 3), // FF–FH
-      0,
-      0,
-      0,
-      166, // FJ
-      167, // FK
+      177, // FU Rekomendasi
+      ...range(179, 3), // FW–FY Jan s/d Mar
+      ...range(183, 3), // GA–GC Apr s/d Jun
+      ...range(187, 3), // GE–GG Jul s/d Sep
+      ...range(191, 3), // GI–GK Okt s/d Des
+      ...range(195, 3), // GM–GO Total pemasukan tahun
+      199, // GQ Insentif
+      200, // GR Pembulatan
     ]),
   ];
 }

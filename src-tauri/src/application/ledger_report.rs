@@ -22,9 +22,11 @@ fn quarter_of(period: &str) -> usize {
     (month.clamp(1, 12) - 1) / 3
 }
 
-/// Paid off in an earlier month; the payoff month itself is still shown.
+/// Paid off by the end of the month (or not disbursed yet). In the app a loan
+/// is hidden from its payoff month on, not only from the month after it
+/// (decided 15-11-2026, notes/rules-and-formulas.md 1.10).
 fn is_closed(row: &LoanMonthDto) -> bool {
-    row.opening_balance <= 0 && row.closing_balance <= 0 && row.disbursed == 0
+    row.closing_balance <= 0
 }
 
 /// Fills `shown`, the quarterly income and Insentif Pinjaman (`incentive_rate`
@@ -143,6 +145,26 @@ pub(crate) fn apply_loan_report(
     }
 }
 
+/// The working sheet (DATA PINJAMAN TAHUN ..., used by the export) keeps one
+/// row per loan, each with its own income: nothing is hidden and nothing moves
+/// to another loan; that happens only in the RAT workbook (see
+/// notes/rules-and-formulas.md 1.10). Every loan is its own borrower here.
+pub(crate) fn apply_loan_report_per_loan(loans: &mut [LoanMonthDto], incentive_rate: f64) {
+    apply_loan_report(
+        loans,
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashSet::new(),
+        incentive_rate,
+    );
+}
+
+/// Whether the loan runs at some point of that month: disbursed, or not yet
+/// paid off before it (its payoff month counts).
+pub(crate) fn is_running(row: &LoanMonthDto) -> bool {
+    row.opening_balance > 0 || row.closing_balance > 0 || row.disbursed != 0
+}
+
 /// Fills Ratas Simpanan and Insentif Simpanan of every savings month: the
 /// average Total Simpanan from January up to that month (months before a member
 /// joined count as 0; at year end this divides by 12), and Insentif Simpanan
@@ -222,9 +244,11 @@ mod tests {
         ]);
         apply_loan_report(&mut loans, &borrowers, &realized, &HashSet::new(), 0.101);
 
-        // January: both rows shown, each with its own income.
-        assert!(loans[0].shown && loans[1].shown);
-        assert_eq!(loans[0].income_interest, [500_000, 0, 0, 0]);
+        // January, the payoff month: the old loan is already hidden and the
+        // new loan carries its interest.
+        assert!(!loans[0].shown && loans[1].shown);
+        assert_eq!(loans[0].income_interest, [0; 4]);
+        assert_eq!(loans[1].income_interest, [500_000, 0, 0, 0]);
         // September: only the new loan, carrying the old loan's interest.
         assert!(!loans[2].shown);
         assert_eq!(loans[3].income_interest, [500_000, 0, 0, 0]);
