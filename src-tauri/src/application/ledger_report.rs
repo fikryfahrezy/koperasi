@@ -145,10 +145,11 @@ pub(crate) fn apply_loan_report(
     }
 }
 
-/// The working sheet (DATA PINJAMAN TAHUN ..., used by the export) keeps one
-/// row per loan, each with its own income: nothing is hidden and nothing moves
-/// to another loan; that happens only in the RAT workbook (see
-/// notes/rules-and-formulas.md 1.10). Every loan is its own borrower here.
+/// As the working sheet (DATA PINJAMAN TAHUN ...): one row per loan, each with
+/// its own income; nothing moves to another loan (that happens only in the RAT
+/// workbook, see notes/rules-and-formulas.md 1.10). Used by the Pinjaman page
+/// (decided 15-11-2026) and the export. A loan is shown from the first month
+/// it runs, and a paid-off loan stays shown up to the end of the year.
 pub(crate) fn apply_loan_report_per_loan(loans: &mut [LoanMonthDto], incentive_rate: f64) {
     apply_loan_report(
         loans,
@@ -157,6 +158,20 @@ pub(crate) fn apply_loan_report_per_loan(loans: &mut [LoanMonthDto], incentive_r
         &HashSet::new(),
         incentive_rate,
     );
+    let mut first_running: HashMap<String, String> = HashMap::new();
+    for row in loans.iter().filter(|row| is_running(row)) {
+        let first = first_running
+            .entry(row.loan_id.clone())
+            .or_insert_with(|| row.period.clone());
+        if row.period < *first {
+            first.clone_from(&row.period);
+        }
+    }
+    for row in loans.iter_mut() {
+        row.shown = first_running
+            .get(&row.loan_id)
+            .is_some_and(|first| row.period >= *first);
+    }
 }
 
 /// Whether the loan runs at some point of that month: disbursed, or not yet
@@ -216,6 +231,41 @@ mod tests {
             closing_balance: closing,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn per_loan_keeps_paid_off_loans_with_their_own_income() {
+        // The old loan is paid off in January with 500.000 interest; the new
+        // one is disbursed in March. Each keeps its own income, the paid-off
+        // loan stays shown up to December and the new one only from March.
+        let mut old_jan = loan("old", "2026-01", 5_000_000, 0);
+        old_jan.interest_paid = 500_000;
+        let mut new_mar = loan("new", "2026-03", 0, 10_000_000);
+        new_mar.disbursed = 10_000_000;
+        new_mar.provision = 100_000;
+        let mut loans = vec![
+            old_jan,
+            loan("new", "2026-01", 0, 0),
+            loan("old", "2026-03", 0, 0),
+            new_mar,
+            loan("old", "2026-12", 0, 0),
+            loan("new", "2026-12", 10_000_000, 9_000_000),
+        ];
+        apply_loan_report_per_loan(&mut loans, 0.1);
+        let row = |id: &str, period: &str| {
+            loans
+                .iter()
+                .find(|row| row.loan_id == id && row.period == period)
+                .unwrap()
+        };
+        assert!(row("old", "2026-01").shown);
+        assert!(!row("new", "2026-01").shown);
+        assert!(row("old", "2026-12").shown);
+        assert_eq!(row("old", "2026-12").income_interest, [500_000, 0, 0, 0]);
+        assert_eq!(row("old", "2026-12").incentive, 50_000);
+        assert!(row("new", "2026-03").shown);
+        assert_eq!(row("new", "2026-12").income_provision, [100_000, 0, 0, 0]);
+        assert_eq!(row("new", "2026-12").income_interest, [0; 4]);
     }
 
     #[test]

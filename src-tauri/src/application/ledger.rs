@@ -9,7 +9,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use sqlx::{Row, SqlitePool};
 
-use super::ledger_report::{apply_loan_report, apply_savings_report};
+use super::ledger_report::{apply_loan_report_per_loan, apply_savings_report};
 use super::parameters::incentive_rates;
 use crate::contracts::{LoanMonthDto, MonthlyLedgerDto, SavingsMonthDto};
 use crate::domain::{round_up_amount, ComponentType, InterestType, LoanType, SavingsAccountType};
@@ -327,11 +327,8 @@ pub(crate) async fn get_monthly_ledger(
     }
 
     let mut loans = Vec::new();
-    let mut borrowers = HashMap::new();
-    let mut realized = HashMap::new();
-    let mut temporary = HashSet::new();
     for row in sqlx::query(
-        "SELECT id, COALESCE(NULLIF(member_id, ''), 'name:' || member_name) borrower, plafond, rate_annual, tenor, interest_type, loan_type, realization_date, due_date FROM loans WHERE company_id = ?",
+        "SELECT id, plafond, rate_annual, tenor, interest_type, loan_type, due_date FROM loans WHERE company_id = ?",
     )
     .bind(company_id)
     .fetch_all(pool)
@@ -339,11 +336,6 @@ pub(crate) async fn get_monthly_ledger(
     .map_err(|error| error.to_string())?
     {
         let loan_id: String = col!(row, "id");
-        borrowers.insert(loan_id.clone(), col!(row, "borrower"));
-        let realization_date: String = col!(row, "realization_date");
-        if let Some(date) = iso_date(&realization_date) {
-            realized.insert(loan_id.clone(), date);
-        }
         let plafond: i64 = col!(row, "plafond");
         let rate: f64 = col!(row, "rate_annual");
         let tenor: i64 = col!(row, "tenor");
@@ -353,9 +345,6 @@ pub(crate) async fn get_monthly_ledger(
         let loan_type = loan_type
             .map(|value| LoanType::try_from(value.as_str()))
             .transpose()?;
-        if loan_type == Some(LoanType::Temporary) {
-            temporary.insert(loan_id.clone());
-        }
         let due_date: String = col!(row, "due_date");
         let due_period = date_period(&due_date);
         let Some(first_period) = loan_first_period.get(&loan_id) else {
@@ -487,13 +476,7 @@ pub(crate) async fn get_monthly_ledger(
     );
     let (loan_incentive_rate, savings_incentive_rate) =
         incentive_rates(company_id, year, pool).await?;
-    apply_loan_report(
-        &mut loans,
-        &borrowers,
-        &realized,
-        &temporary,
-        loan_incentive_rate,
-    );
+    apply_loan_report_per_loan(&mut loans, loan_incentive_rate);
     apply_savings_report(&mut savings, &periods, savings_incentive_rate);
     Ok(MonthlyLedgerDto {
         loan_incentive_rate,
