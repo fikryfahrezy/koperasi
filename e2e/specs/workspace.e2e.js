@@ -27,7 +27,10 @@ describe("Workspace tabs and reporting year", () => {
     await $(".search-field input").setValue("E2E-TAB-B");
     await expect($("a.member-name-link=E2E Tab Beta")).toBeDisplayed();
     await $("button=Tambah anggota").click();
-    await expect(modal.$('input[aria-label="ID anggota"]')).toHaveValue("");
+    // A fresh draft gets the suggested next ID, not the other tab's draft.
+    await expect(modal.$('input[aria-label="ID anggota"]')).toHaveValue(
+      expect.stringMatching(/^A\d{4,}$/),
+    );
     await clickWhenReady(modal.$("button=Batal"));
     const tabs = await $$('[role="tab"]');
     await tabs[0].click();
