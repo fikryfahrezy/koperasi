@@ -299,19 +299,20 @@ export interface Transaction {
   id: string;
   /** The transaction's date, "2026-08-06". */
   businessDate: string;
-  date: string;
-  time: string;
+  /** When the row was saved, UTC ("2026-08-06 03:15:00"). */
+  createdAt: string;
   memberName: string;
   /** Current ID Anggota of the transaction's member, if any. */
   memberNumber: string;
   channel: Channel;
   description: string;
-  reference: string;
   direction: TransactionDirection;
   amount: number;
   status: TransactionStatus;
   /** The row that cancels another row (Dibalik). */
   isReversal: boolean;
+  /** For a reversal, the id of the row it cancels; empty otherwise. */
+  reversedTransactionId: string;
   /** Imported month this row belongs to; Hapus may cancel more of it. */
   groupId: string;
   components: {
@@ -323,7 +324,6 @@ export interface Transaction {
     /** The savings type this item moves; empty otherwise. */
     accountType: SavingsAccountType | "";
   }[];
-  actor: string;
 }
 
 /** What Hapus of a transaction cancels: the transaction, or for an imported row
@@ -365,7 +365,6 @@ export interface CashEntryInput {
   category: CashCategory | "";
   description: string;
   amount: number;
-  reference: string;
 }
 
 export interface LoanPreview {
@@ -427,7 +426,6 @@ interface SavingsTransactionInput {
   amounts: { accountType: SavingsAccountType; amount: number }[];
   /** Uraian typed by the user; empty uses the generated text. */
   description?: string;
-  reference: string;
 }
 
 interface PaymentInput {
@@ -444,7 +442,6 @@ interface PaymentInput {
   voluntary: number;
   /** Uraian typed by the user; empty uses the generated text. */
   description?: string;
-  reference: string;
 }
 
 type OperationalTimestamp = ReturnType<typeof operationalTimestamp>;
@@ -1124,15 +1121,17 @@ export function formatDate(businessDate: string) {
   return month ? `${match[3]} ${month} ${match[1]}` : businessDate;
 }
 
-function operationalTimestamp(businessDate = todayIso()) {
-  const now = new Date();
+/** "2026-08-06 03:15:00" (UTC, as SQLite saves it) -> "06 Agu 2026 10.15" in local time. */
+export function formatSavedAt(createdAt: string) {
+  const saved = new Date(`${createdAt.replace(" ", "T")}Z`);
+  if (Number.isNaN(saved.getTime())) return createdAt;
   const pad = (value: number) => String(value).padStart(2, "0");
+  const date = `${saved.getFullYear()}-${pad(saved.getMonth() + 1)}-${pad(saved.getDate())}`;
+  return `${formatDate(date)} ${pad(saved.getHours())}.${pad(saved.getMinutes())}`;
+}
 
-  return {
-    businessDate,
-    displayDate: formatDate(businessDate),
-    displayTime: `${pad(now.getHours())}.${pad(now.getMinutes())}`,
-  };
+function operationalTimestamp(businessDate = todayIso()) {
+  return { businessDate };
 }
 
 /** Pengambilan simpanan; setoran simpanan goes through postPayment. */
@@ -1514,32 +1513,11 @@ export function formatPreviousPeriod(period: string) {
     : `${monthNames[month - 2]} ${year}`;
 }
 
-const shortMonthNames = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
-
-/** "Pinjaman Bulanan Menurun · Januari 2026 · Rp 25.000.000". Realization
- * dates are "28-Jan-2026" (imported) or "2026-01-28" (entered in the app). */
+/** "Pinjaman Bulanan Menurun · Januari 2026 · Rp 25.000.000". */
 export function formatLoanLabel(loan: Loan) {
-  const iso = loan.realizationDate.match(/^(\d{4})-(\d{2})/);
-  const sheet = loan.realizationDate.match(/^\d{1,2}-([A-Za-z]{3})-(\d{4})$/);
-
-  const month = iso
-    ? formatPeriod(`${iso[1]}-${iso[2]}`)
-    : sheet && shortMonthNames.includes(sheet[1])
-      ? formatPeriod(`${sheet[2]}-${shortMonthNames.indexOf(sheet[1]) + 1}`)
-      : loan.realizationDate;
+  const month = /^\d{4}-\d{2}/.test(loan.realizationDate)
+    ? formatPeriod(loan.realizationDate.slice(0, 7))
+    : loan.realizationDate;
 
   const kind = ["Pinjaman", loan.loanType, loan.interestType]
     .filter(Boolean)

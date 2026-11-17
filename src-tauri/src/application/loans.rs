@@ -2,7 +2,7 @@
 
 use sqlx::{SqliteConnection, SqlitePool};
 
-use super::posting::{append, audit, loan_balance, Component, Entry, APP_ACTOR};
+use super::posting::{append, audit, loan_balance, Component, Entry};
 use super::read_model::get_app_snapshot;
 use super::savings::{member_name, trimmed_or};
 
@@ -300,8 +300,6 @@ pub(crate) async fn create_loan(
         Entry {
             id: disbursement_id.clone(),
             business_date: &disbursement.business_date,
-            display_date: &disbursement.display_date,
-            display_time: &disbursement.display_time,
             member_id,
             member_name: &borrower_name,
             channel,
@@ -313,9 +311,7 @@ pub(crate) async fn create_loan(
                     format!("Realisasi Pinjaman {borrower_name}")
                 },
             ),
-            reference: &format!("KBS/DISB/{id}/{disbursement_id}"),
             direction: TransactionDirection::Out,
-            actor: APP_ACTOR,
             reversed_transaction_id: None,
             components: vec![Component::new(
                 ComponentType::LoanDisbursement,
@@ -336,8 +332,6 @@ pub(crate) async fn create_loan(
             Entry {
                 id: provision_id.clone(),
                 business_date: &disbursement.business_date,
-                display_date: &disbursement.display_date,
-                display_time: &disbursement.display_time,
                 member_id,
                 member_name: &borrower_name,
                 channel,
@@ -350,9 +344,7 @@ pub(crate) async fn create_loan(
                 } else {
                     format!("Provisi pinjaman Rp. {}", format_thousands(input.plafond))
                 },
-                reference: &format!("KBS/PROV/{id}/{provision_id}"),
                 direction: TransactionDirection::In,
-                actor: APP_ACTOR,
                 reversed_transaction_id: None,
                 components: vec![Component::new(
                     ComponentType::LoanProvision,
@@ -374,15 +366,11 @@ pub(crate) async fn create_loan(
             Entry {
                 id: payoff_id.clone(),
                 business_date: &disbursement.business_date,
-                display_date: &disbursement.display_date,
-                display_time: &disbursement.display_time,
                 member_id,
                 member_name: &borrower_name,
                 channel,
                 description: &format!("Pelunasan Pinjaman Lama {borrower_name}"),
-                reference: &format!("KBS/RCPT/{id}/{payoff_id}"),
                 direction: TransactionDirection::In,
-                actor: APP_ACTOR,
                 reversed_transaction_id: None,
                 components: payoff_components,
             },

@@ -1,8 +1,9 @@
 //! Financial parameters needed by operational forms.
 
+use super::posting::audit_change;
 use crate::{
     contracts::{FinancialParametersDto, SetIncentiveRatesInput},
-    domain::ParameterKey,
+    domain::{AuditAction, AuditEntityType, ParameterKey},
 };
 
 use sqlx::{Row, SqlitePool};
@@ -12,85 +13,59 @@ pub(crate) async fn get_financial_parameters(
     company_id: &str,
     pool: &SqlitePool,
 ) -> Result<FinancialParametersDto, String> {
-    // The yearly incentive rates have their own dates; see `incentive_rates`.
-    // The loan limit was added later with its own date, so it is read alone.
-    let parameter_rows = sqlx::query(
-        "SELECT parameter_key, value, effective_date
-         FROM parameters
-         WHERE company_id = ?
-           AND parameter_key NOT IN (?, ?, ?)
-           AND effective_date = (
-               SELECT MAX(effective_date)
-               FROM parameters
-               WHERE company_id = ?
-                 AND parameter_key NOT IN (?, ?, ?)
-                 AND effective_date <= '2026-09-13'
-           )",
-    )
-    .bind(company_id)
-    .bind(ParameterKey::LoanIncentiveRate.as_str())
-    .bind(ParameterKey::SavingsIncentiveRate.as_str())
-    .bind(ParameterKey::LoanMaxOutstanding.as_str())
-    .bind(company_id)
-    .bind(ParameterKey::LoanIncentiveRate.as_str())
-    .bind(ParameterKey::SavingsIncentiveRate.as_str())
-    .bind(ParameterKey::LoanMaxOutstanding.as_str())
-    .fetch_all(pool)
-    .await
-    .map_err(|error| error.to_string())?;
-
+    // Each key is versioned on its own: the value in force today is its latest
+    // row dated on or before today. The yearly incentive rates are read per
+    // book year instead; see `incentive_rates`.
     let mut values = HashMap::new();
     let mut effective_date = String::new();
 
-    for row in parameter_rows {
+    for key in [
+        ParameterKey::PrincipalSavings,
+        ParameterKey::MandatorySavings,
+        ParameterKey::LoanProvisionRate,
+        ParameterKey::LoanAnnualRate,
+        ParameterKey::LoanMaxOutstanding,
+    ] {
+        let row = sqlx::query(
+            "SELECT value, effective_date
+             FROM parameters
+             WHERE company_id = ?
+               AND parameter_key = ?
+               AND effective_date <= date('now', 'localtime')
+             ORDER BY effective_date DESC
+             LIMIT 1",
+        )
+        .bind(company_id)
+        .bind(key.as_str())
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| error.to_string())?;
+
+        let Some(row) = row else { continue };
+        let date: String = row
+            .try_get("effective_date")
+            .map_err(|error| error.to_string())?;
+
+        // The newest change among the keys is when the current set took effect.
+        if date > effective_date {
+            effective_date = date;
+        }
+
         values.insert(
-            ParameterKey::try_from(
-                row.try_get::<String, _>("parameter_key")
-                    .map_err(|error| error.to_string())?
-                    .as_str(),
-            )?,
+            key,
             row.try_get::<f64, _>("value")
                 .map_err(|error| error.to_string())?,
         );
-
-        effective_date = row
-            .try_get("effective_date")
-            .map_err(|error| error.to_string())?;
     }
 
-    let max_loan_outstanding: Option<f64> = sqlx::query_scalar(
-        "SELECT value
-         FROM parameters
-         WHERE company_id = ? AND parameter_key = ?
-         ORDER BY effective_date DESC
-         LIMIT 1",
-    )
-    .bind(company_id)
-    .bind(ParameterKey::LoanMaxOutstanding.as_str())
-    .fetch_optional(pool)
-    .await
-    .map_err(|error| error.to_string())?;
+    let value = |key| values.get(&key).copied().unwrap_or(0.0);
 
     Ok(FinancialParametersDto {
-        principal_savings: values
-            .get(&ParameterKey::PrincipalSavings)
-            .copied()
-            .unwrap_or(0.0) as i64,
-        mandatory_savings: values
-            .get(&ParameterKey::MandatorySavings)
-            .copied()
-            .unwrap_or(0.0) as i64,
-        provision_rate: values
-            .get(&ParameterKey::LoanProvisionRate)
-            .copied()
-            .unwrap_or(0.0)
-            * 100.0,
-        annual_rate: values
-            .get(&ParameterKey::LoanAnnualRate)
-            .copied()
-            .unwrap_or(0.0)
-            * 100.0,
-        max_loan_outstanding: max_loan_outstanding.unwrap_or(0.0) as i64,
+        principal_savings: value(ParameterKey::PrincipalSavings) as i64,
+        mandatory_savings: value(ParameterKey::MandatorySavings) as i64,
+        provision_rate: value(ParameterKey::LoanProvisionRate) * 100.0,
+        annual_rate: value(ParameterKey::LoanAnnualRate) * 100.0,
+        max_loan_outstanding: value(ParameterKey::LoanMaxOutstanding) as i64,
         effective_date,
     })
 }
@@ -155,9 +130,27 @@ pub(crate) async fn set_incentive_rates(
 
     let effective_date = format!("{:04}-01-01", input.year);
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
+    let mut before = serde_json::Map::new();
+    let mut after = serde_json::Map::new();
 
     for (key, value) in rates {
         let Some(value) = value else { continue };
+
+        // A rate saved again for the same year overwrites the row; keep the old one.
+        let previous: Option<f64> = sqlx::query_scalar(
+            "SELECT value
+             FROM parameters
+             WHERE company_id = ? AND parameter_key = ? AND effective_date = ?",
+        )
+        .bind(company_id)
+        .bind(key.as_str())
+        .bind(&effective_date)
+        .fetch_optional(&mut *db)
+        .await
+        .map_err(|error| error.to_string())?;
+
+        before.insert(key.as_str().into(), previous.into());
+        after.insert(key.as_str().into(), value.into());
 
         sqlx::query(
             "INSERT INTO parameters (company_id, parameter_key, value, effective_date, created_by)
@@ -172,6 +165,19 @@ pub(crate) async fn set_incentive_rates(
         .execute(&mut *db)
         .await
         .map_err(|error| error.to_string())?;
+    }
+
+    if !after.is_empty() {
+        audit_change(
+            &mut db,
+            company_id,
+            AuditEntityType::Parameter,
+            &effective_date,
+            AuditAction::Updated,
+            Some(before.into()),
+            after.into(),
+        )
+        .await?;
     }
 
     db.commit().await.map_err(|error| error.to_string())
@@ -227,12 +233,73 @@ mod tests {
                 (0.12, 0.0365)
             );
 
+            // Saving a year again keeps the replaced rate in the audit.
+            set_incentive_rates(
+                SetIncentiveRatesInput {
+                    year: 2027,
+                    loan_incentive_rate: Some(0.13),
+                    savings_incentive_rate: None,
+                },
+                "default",
+                &pool,
+            )
+            .await
+            .unwrap();
+
+            let (replaced, saved): (String, String) = sqlx::query_as(
+                "SELECT before_json, after_json
+                 FROM audit_events
+                 WHERE entity_type = 'PARAMETER' AND entity_id = '2027-01-01'
+                 ORDER BY id DESC
+                 LIMIT 1",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+            assert_eq!(replaced, r#"{"LOAN_INCENTIVE_RATE":0.12}"#);
+            assert_eq!(saved, r#"{"LOAN_INCENTIVE_RATE":0.13}"#);
+
             // The operational parameters are unaffected. (Batas pinjaman came from
             // a data script, not from the migrations, so it is compared with its
             // value before the rates were set instead of a fixed amount.)
             let parameters = get_financial_parameters("default", &pool).await.unwrap();
             assert_eq!(parameters.mandatory_savings, 50_000);
             assert_eq!(parameters.max_loan_outstanding, before.max_loan_outstanding);
+        });
+    }
+
+    #[test]
+    fn each_parameter_uses_its_own_latest_date() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+
+            for (key, value, date) in [
+                // A new rate for one key keeps the other keys' values.
+                (ParameterKey::LoanAnnualRate, 0.18, "2026-06-01"),
+                // A rate that has not started yet is not used.
+                (ParameterKey::MandatorySavings, 75_000.0, "2999-01-01"),
+            ] {
+                sqlx::query(
+                    "INSERT INTO parameters (
+                         company_id, parameter_key, value, effective_date, created_by
+                     )
+                     VALUES ('default', ?, ?, ?, 'Test')",
+                )
+                .bind(key.as_str())
+                .bind(value)
+                .bind(date)
+                .execute(&pool)
+                .await
+                .unwrap();
+            }
+
+            let parameters = get_financial_parameters("default", &pool).await.unwrap();
+            assert_eq!(parameters.annual_rate, 18.0);
+            assert_eq!(parameters.provision_rate, 1.0);
+            assert_eq!(parameters.principal_savings, 50_000);
+            assert_eq!(parameters.mandatory_savings, 50_000);
+            assert_eq!(parameters.effective_date, "2026-06-01");
         });
     }
 }

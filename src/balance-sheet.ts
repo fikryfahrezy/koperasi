@@ -388,8 +388,18 @@ export function balanceSheetAt(
         label: "Piutang Non Anggota",
         amount: loanBalance(LoanGroup.NonMember),
       },
-      // The total of its list, edited under Catatan.
-      typed(BalanceSheetItem.OtherLoans, undefined, false),
+      // The total of its list (Bon Sementara), edited under Catatan.
+      {
+        id: BalanceSheetItem.OtherLoans,
+        label: balanceSheetItems.find(
+          (entry) => entry.key === BalanceSheetItem.OtherLoans,
+        )!.label,
+        amount: sum(
+          (details[BalanceSheetItem.OtherLoans] ?? []).map(
+            (detail) => detail.amount,
+          ),
+        ),
+      },
       typed(BalanceSheetItem.UnclaimedReceivables),
       typed(BalanceSheetItem.AccruedExpenses),
     ]),

@@ -123,7 +123,6 @@ export function useCashForm(
         category: savingsBook ? "" : (form.category as CashCategory | ""),
         description: form.description.trim(),
         amount: form.amount,
-        reference: "",
       },
       {
         ...options,

@@ -3,7 +3,7 @@
 import {
   type CashBookRow,
   formatCurrency,
-  formatDate,
+  formatSavedAt,
   formatSheetNumber,
   type Loan,
   type Transaction,
@@ -42,7 +42,7 @@ export function plainWords(transaction: Transaction, loans: readonly Loan[]) {
       : `${itemWords[item.componentType] ?? item.label} ${formatSheetNumber(item.amount)}`,
   );
 
-  const imported = transaction.reference.includes("-MIG");
+  const imported = transaction.id.includes("-MIG");
 
   if (items.some((item) => item.loanId)) {
     const disbursed = items.some(
@@ -89,16 +89,15 @@ export function matchesSearch(row: CashBookRow, query: string) {
 }
 
 /** Riwayat hapus: every deleted row of the year, newest deletion first. The
- * reversal row carries when it was deleted; its reference extends the
- * original's. */
+ * reversal row carries when it was saved (the deletion) and the id of the row it cancels. */
 export function deletedRowsOf(rows: readonly CashBookRow[]) {
   const reversals = rows.filter((row) => row.isReversal);
 
   return rows
     .filter((row) => row.status === TransactionStatus.Reversed)
     .map((row) => {
-      const reversal = reversals.find((candidate) =>
-        candidate.reference.startsWith(`${row.reference}/REV/`),
+      const reversal = reversals.find(
+        (candidate) => candidate.reversedTransactionId === row.id,
       );
 
       return {
@@ -116,12 +115,8 @@ export function deletedRowsOf(rows: readonly CashBookRow[]) {
         ]
           .filter(Boolean)
           .join(" · "),
-        deletedAt: reversal
-          ? [formatDate(reversal.businessDate), reversal.time]
-              .filter(Boolean)
-              .join(" ")
-          : "",
-        deletedOrder: reversal ? `${reversal.businessDate} ${reversal.id}` : "",
+        deletedAt: reversal ? formatSavedAt(reversal.createdAt) : "",
+        deletedOrder: reversal ? `${reversal.createdAt} ${reversal.id}` : "",
       };
     })
     .sort((a, b) => b.deletedOrder.localeCompare(a.deletedOrder));

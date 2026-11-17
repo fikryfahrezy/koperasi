@@ -6,7 +6,7 @@ import { useDebouncedRef } from "../composables/useDebouncedRef";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import PageHeader from "../components/PageHeader.vue";
 import AddMemberDialog from "../components/AddMemberDialog.vue";
-import { matchesMember, useKoperasiStore } from "../store/koperasi";
+import { formatDate, matchesMember, useKoperasiStore } from "../store/koperasi";
 
 const pageState = useWorkspacePageState("/members");
 
@@ -35,23 +35,8 @@ const filteredMembers = computed(() =>
   ),
 );
 
-const joinedAtFormatter = new Intl.DateTimeFormat("id-ID", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-  timeZone: "UTC",
-});
-
-function formatJoinedAt(value: string) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return "—";
-
-  const date = new Date(
-    Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])),
-  );
-
-  return Number.isNaN(date.getTime()) ? "—" : joinedAtFormatter.format(date);
-}
+// Empty when the join date is not known (imported members).
+const formatJoinedAt = (value: string) => (value ? formatDate(value) : "—");
 </script>
 
 <template>

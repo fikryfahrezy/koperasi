@@ -23,8 +23,7 @@ macro_rules! try_column {
 
 const TRANSACTION_COLUMNS: &str = "t.id,
     t.business_date,
-    t.display_date,
-    t.display_time,
+    t.created_at,
     t.member_name,
     COALESCE(
         (SELECT m.member_number FROM members m WHERE m.id = t.member_id),
@@ -32,10 +31,9 @@ const TRANSACTION_COLUMNS: &str = "t.id,
     ) AS member_number,
     t.channel,
     t.description,
-    t.reference,
+    COALESCE(t.reversed_transaction_id, '') AS reversed_transaction_id,
     t.direction,
     t.amount,
-    t.actor,
     t.reversed_transaction_id IS NOT NULL AS is_reversal,
     (
         t.reversed_transaction_id IS NOT NULL
@@ -71,13 +69,12 @@ fn transaction_dto(
         components: components.remove(&id).unwrap_or_default(),
         id,
         business_date: try_column!(row, "business_date"),
-        date: try_column!(row, "display_date"),
-        time: try_column!(row, "display_time"),
+        created_at: try_column!(row, "created_at"),
         member_name: try_column!(row, "member_name"),
         member_number: try_column!(row, "member_number"),
         channel: Channel::try_from(try_column!(row, "channel", String).as_str())?,
         description: try_column!(row, "description"),
-        reference: try_column!(row, "reference"),
+        reversed_transaction_id: try_column!(row, "reversed_transaction_id"),
         direction: TransactionDirection::try_from(try_column!(row, "direction", String).as_str())?,
         amount: try_column!(row, "amount"),
         status: if reversed {
@@ -87,7 +84,6 @@ fn transaction_dto(
         },
         is_reversal: try_column!(row, "is_reversal"),
         group_id: try_column!(row, "group_id"),
-        actor: try_column!(row, "actor"),
     })
 }
 
@@ -562,12 +558,12 @@ mod tests {
 
             sqlx::query(
                 "INSERT INTO transactions (
-                     id, company_id, business_date, display_date, display_time, member_name,
-                     channel, description, reference, direction, amount, actor
+                     id, company_id, business_date, member_name,
+                     channel, description, direction, amount
                  )
                  VALUES (
-                     'opening', 'default', '2026-01-01', '01-Jan-2026', '00:00', '-', ?,
-                     'Saldo awal', 'opening', ?, 10000, 'Test'
+                     'opening', 'default', '2026-01-01', '-', ?,
+                     'Saldo awal', ?, 10000
                  )",
             )
             .bind(Channel::NonCash.as_str())
@@ -613,17 +609,15 @@ mod tests {
             ] {
                 sqlx::query(
                     "INSERT INTO transactions (
-                         id, company_id, business_date, display_date, display_time, member_name,
-                         channel, description, reference, direction, amount, actor
+                         id, company_id, business_date, member_name,
+                         channel, description, direction, amount
                      )
                      VALUES (
-                         ?, 'default', '2026-02-01', '01-Feb-2026', '00:00', '-', ?, ?, ?, ?, 500,
-                         'Test'
+                         ?, 'default', '2026-02-01', '-', ?, ?, ?, 500
                      )",
                 )
                 .bind(id)
                 .bind(Channel::Cash.as_str())
-                .bind(id)
                 .bind(id)
                 .bind(direction)
                 .execute(&pool)
@@ -691,17 +685,16 @@ mod tests {
             ] {
                 sqlx::query(
                     "INSERT INTO transactions (
-                         id, company_id, business_date, display_date, display_time, member_name,
-                         channel, description, reference, direction, amount, actor
+                         id, company_id, business_date, member_name,
+                         channel, description, direction, amount
                      )
                      VALUES (
-                         ?, 'default', '2026-09-01', '01 Sep 2026', '00:00', '-', ?,
-                         'Existing import', ?, ?, 1000, 'Import Excel 2026'
+                         ?, 'default', '2026-09-01', '-', ?,
+                         'Existing import', ?, 1000
                      )",
                 )
                 .bind(id)
                 .bind(channel)
-                .bind(id)
                 .bind(TransactionDirection::In.as_str())
                 .execute(&pool)
                 .await

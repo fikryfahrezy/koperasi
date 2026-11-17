@@ -44,40 +44,13 @@ impl Component {
 pub(crate) struct Entry<'a> {
     pub(crate) id: String,
     pub(crate) business_date: &'a str,
-    pub(crate) display_date: &'a str,
-    pub(crate) display_time: &'a str,
     pub(crate) member_id: Option<&'a str>,
     pub(crate) member_name: &'a str,
     pub(crate) channel: Channel,
     pub(crate) description: &'a str,
-    pub(crate) reference: &'a str,
     pub(crate) direction: TransactionDirection,
-    pub(crate) actor: &'a str,
     pub(crate) reversed_transaction_id: Option<&'a str>,
     pub(crate) components: Vec<Component>,
-}
-
-pub(crate) async fn ensure_reference_unused(
-    db: &mut SqliteConnection,
-    company_id: &str,
-    reference: &str,
-) -> Result<(), String> {
-    let duplicate: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*)
-         FROM transactions
-         WHERE company_id = ? AND reference = ?",
-    )
-    .bind(company_id)
-    .bind(reference)
-    .fetch_one(&mut *db)
-    .await
-    .map_err(|error| error.to_string())?;
-
-    if duplicate > 0 {
-        return Err("Nomor referensi sudah pernah diposting.".into());
-    }
-
-    Ok(())
 }
 
 pub(crate) async fn savings_balance(
@@ -146,25 +119,21 @@ pub(crate) async fn append(
 
     sqlx::query(
         "INSERT INTO transactions (
-             id, company_id, business_date, display_date, display_time, member_id, member_name,
-             channel, description, reference, direction, amount, reversed_transaction_id, actor
+             id, company_id, business_date, member_id, member_name,
+             channel, description, direction, amount, reversed_transaction_id
          )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&entry.id)
     .bind(company_id)
     .bind(entry.business_date)
-    .bind(entry.display_date)
-    .bind(entry.display_time)
     .bind(entry.member_id)
     .bind(entry.member_name)
     .bind(entry.channel.as_str())
     .bind(entry.description)
-    .bind(entry.reference)
     .bind(entry.direction.as_str())
     .bind(amount)
     .bind(entry.reversed_transaction_id)
-    .bind(entry.actor)
     .execute(&mut *db)
     .await
     .map_err(|error| error.to_string())?;
@@ -200,14 +169,31 @@ pub(crate) async fn audit(
     action: AuditAction,
     after: serde_json::Value,
 ) -> Result<(), String> {
+    audit_change(db, company_id, entity_type, entity_id, action, None, after).await
+}
+
+/// An audit event that also keeps the values replaced, for data edited in
+/// place (Neraca lines, incentive rates) rather than appended to the ledger.
+pub(crate) async fn audit_change(
+    db: &mut SqliteConnection,
+    company_id: &str,
+    entity_type: AuditEntityType,
+    entity_id: &str,
+    action: AuditAction,
+    before: Option<serde_json::Value>,
+    after: serde_json::Value,
+) -> Result<(), String> {
     sqlx::query(
-        "INSERT INTO audit_events (company_id, entity_type, entity_id, action, after_json, actor)
-         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO audit_events (
+             company_id, entity_type, entity_id, action, before_json, after_json, actor
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(company_id)
     .bind(entity_type.as_str())
     .bind(entity_id)
     .bind(action.as_str())
+    .bind(before.map(|before| serde_json::to_string(&before).unwrap_or_default()))
     .bind(serde_json::to_string(&after).unwrap_or_default())
     .bind(APP_ACTOR)
     .execute(&mut *db)

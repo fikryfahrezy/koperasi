@@ -79,30 +79,11 @@ fn period_range(first: &str, last: &str) -> Vec<String> {
     periods
 }
 
-/// `YYYY-MM` of a stored date: `2026-04-05` or `05-Apr-2026` (as in the sheet).
+/// `YYYY-MM` of a stored `YYYY-MM-DD` date.
 fn date_period(value: &str) -> Option<String> {
-    iso_date(value).map(|date| date[..7].to_string())
-}
-
-/// `YYYY-MM-DD` for a date stored as `YYYY-MM-DD` or `DD-Mon-YYYY`.
-fn iso_date(value: &str) -> Option<String> {
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-
     let bytes = value.as_bytes();
 
-    if value.len() == 10 && bytes[4] == b'-' && bytes[7] == b'-' {
-        return Some(value.to_string());
-    }
-
-    let mut parts = value.split('-');
-    let (day, month, year) = (parts.next()?, parts.next()?, parts.next()?);
-    let day: u32 = day.parse().ok()?;
-    let month = MONTHS.iter().position(|name| *name == month)? + 1;
-
-    (year.len() == 4 && year.chars().all(|ch| ch.is_ascii_digit()))
-        .then(|| format!("{year}-{month:02}-{day:02}"))
+    (value.len() == 10 && bytes[4] == b'-' && bytes[7] == b'-').then(|| value[..7].to_string())
 }
 
 /// Scheduled principal and interest installments for a month with an `opening` balance,
@@ -553,10 +534,8 @@ mod tests {
 
     #[test]
     fn schedules_installments_like_the_loan_sheet() {
-        assert_eq!(date_period("05-Apr-2026").as_deref(), Some("2026-04"));
         assert_eq!(date_period("2026-04-05").as_deref(), Some("2026-04"));
         assert_eq!(date_period("-"), None);
-        assert_eq!(iso_date("5-Apr-2026").as_deref(), Some("2026-04-05"));
 
         let monthly = |period, opening| {
             scheduled_installment(
@@ -653,19 +632,16 @@ mod tests {
 
                 sqlx::query(
                     "INSERT INTO transactions (
-                         id, company_id, business_date, display_date, display_time, member_name,
-                         channel, description, reference, direction, amount, actor
+                         id, company_id, business_date, member_name,
+                         channel, description, direction, amount
                      )
                      VALUES (
-                         ?, 'default', ?, ?, '00:00', 'Imported member', ?, 'Imported', ?, ?, ?,
-                         'Import'
+                         ?, 'default', ?, 'Imported member', ?, 'Imported', ?, ?
                      )",
                 )
                 .bind(id)
                 .bind(date)
-                .bind(date)
                 .bind(Channel::NonCash.as_str())
-                .bind(id)
                 .bind(TransactionDirection::In.as_str())
                 .bind(amount)
                 .execute(&pool)
@@ -788,18 +764,16 @@ mod tests {
 
                 sqlx::query(
                     "INSERT INTO transactions (
-                         id, company_id, business_date, display_date, display_time, member_name,
-                         channel, description, reference, direction, amount, actor
+                         id, company_id, business_date, member_name,
+                         channel, description, direction, amount
                      )
                      VALUES (
-                         ?, 'default', ?, ?, '00:00', 'Peminjam A', ?, 'Test', ?, ?, ?, 'Test'
+                         ?, 'default', ?, 'Peminjam A', ?, 'Test', ?, ?
                      )",
                 )
                 .bind(id)
                 .bind(date)
-                .bind(date)
                 .bind(Channel::NonCash.as_str())
-                .bind(id)
                 .bind(TransactionDirection::In.as_str())
                 .bind(amount)
                 .execute(&pool)

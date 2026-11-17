@@ -121,7 +121,6 @@ test("cached reports, company isolation, mutations, and manual refresh", async (
       category: "",
       description: "Test",
       amount: 1,
-      reference: "",
     });
     await settle();
     assert.equal(

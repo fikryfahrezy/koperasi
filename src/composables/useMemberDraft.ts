@@ -8,7 +8,7 @@ export function useMemberDraft(member: Ref<Member | undefined>) {
   const saving = ref(false);
   const draft = reactive({ name: "", memberNumber: "", joinedAt: "" });
 
-  // Imported members carry a placeholder such as "Migrasi 2026" instead of a date.
+  // Empty when the join date is not known (imported members).
   const storedJoinedAt = computed(() => {
     const value = member.value?.joinedAt ?? "";
     return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";

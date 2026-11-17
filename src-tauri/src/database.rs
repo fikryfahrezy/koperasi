@@ -7,7 +7,7 @@ use std::{
 
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
-    Executor, SqlitePool,
+    Connection, Executor, SqliteConnection, SqlitePool,
 };
 
 /// Cooperative database file used during development.
@@ -190,37 +190,83 @@ async fn run_once(pool: &SqlitePool, table: &str, scripts: &[(&str, &str)]) -> R
     .map_err(|error| error.to_string())?;
 
     for (name, sql) in scripts {
-        let mut db = pool.begin().await.map_err(|error| error.to_string())?;
-
-        let applied: bool = sqlx::query_scalar(&format!(
-            "SELECT EXISTS (SELECT 1 FROM {table} WHERE name = ?)"
-        ))
-        .bind(name)
-        .fetch_one(&mut *db)
-        .await
-        .map_err(|error| error.to_string())?;
-
-        if applied {
-            continue;
-        }
-
-        // `Executor::execute` returns a boxed `Send` future; `RawSql::execute`
-        // is an `async fn` whose future rustc cannot prove `Send` here.
-        (&mut *db)
-            .execute(sqlx::raw_sql(sql))
-            .await
-            .map_err(|error| format!("{name} gagal dijalankan: {error}"))?;
-
-        sqlx::query(&format!("INSERT INTO {table} (name) VALUES (?)"))
-            .bind(name)
-            .execute(&mut *db)
+        // Foreign keys are off while a script runs so it can rebuild a table
+        // that others reference (SQLite cannot drop a column in a UNIQUE
+        // constraint); `PRAGMA foreign_key_check` stands in for them before
+        // commit. The pragma has no effect inside a transaction, so it is set
+        // on the connection first and always set back.
+        let mut connection = pool.acquire().await.map_err(|error| error.to_string())?;
+        sqlx::query("PRAGMA foreign_keys = OFF")
+            .execute(&mut *connection)
             .await
             .map_err(|error| error.to_string())?;
-
-        db.commit().await.map_err(|error| error.to_string())?;
+        let result = run_script(&mut connection, table, name, sql).await;
+        let restored = sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&mut *connection)
+            .await
+            .map_err(|error| error.to_string());
+        if restored.is_err() {
+            // Never hand a connection without foreign keys back to the pool.
+            connection.detach();
+        }
+        result?;
+        restored?;
     }
 
     Ok(())
+}
+
+async fn run_script(
+    connection: &mut SqliteConnection,
+    table: &str,
+    name: &str,
+    sql: &str,
+) -> Result<(), String> {
+    let mut db = connection
+        .begin()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    let applied: bool = sqlx::query_scalar(&format!(
+        "SELECT EXISTS (SELECT 1 FROM {table} WHERE name = ?)"
+    ))
+    .bind(name)
+    .fetch_one(&mut *db)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    if applied {
+        return Ok(());
+    }
+
+    // `Executor::execute` returns a boxed `Send` future; `RawSql::execute`
+    // is an `async fn` whose future rustc cannot prove `Send` here.
+    (&mut *db)
+        .execute(sqlx::raw_sql(sql))
+        .await
+        .map_err(|error| format!("{name} gagal dijalankan: {error}"))?;
+
+    let violations: Vec<String> =
+        sqlx::query_scalar("SELECT \"table\" FROM pragma_foreign_key_check")
+            .fetch_all(&mut *db)
+            .await
+            .map_err(|error| error.to_string())?;
+
+    if !violations.is_empty() {
+        return Err(format!(
+            "{name} gagal dijalankan: {} baris melanggar foreign key ({}).",
+            violations.len(),
+            violations.first().cloned().unwrap_or_default()
+        ));
+    }
+
+    sqlx::query(&format!("INSERT INTO {table} (name) VALUES (?)"))
+        .bind(name)
+        .execute(&mut *db)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    db.commit().await.map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
