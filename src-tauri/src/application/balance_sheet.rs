@@ -2,7 +2,9 @@
 //! the monthly ledger and the cash book on the page. See
 //! notes/rules-and-formulas.md (Neraca).
 
+use super::posting::audit_change;
 use crate::contracts::{BalanceSheetDetailDto, BalanceSheetDto, SetBalanceSheetInput};
+use crate::domain::{AuditAction, AuditEntityType};
 use sqlx::{Row, SqliteConnection, SqlitePool};
 use std::collections::BTreeMap;
 
@@ -14,8 +16,6 @@ pub(crate) const BALANCE_SHEET_ITEMS: &[&str] = &[
     "OTHER_LOANS",
     "UNCLAIMED_RECEIVABLES",
     "ACCRUED_EXPENSES",
-    "FIXED_ASSETS_DESK",
-    "FIXED_ASSETS_CHAIR",
     "FIXED_ASSETS",
     // Hutang lancar
     "DEBT_PPBRI",
@@ -31,6 +31,17 @@ pub(crate) const BALANCE_SHEET_ITEMS: &[&str] = &[
     "LOAN_WRITE_OFF_RESERVE",
     "RETAINED_EARNINGS",
     // Pos added by hand to a group (a list each)
+    "EXTRA_CURRENT_ASSETS",
+    "EXTRA_CURRENT_LIABILITIES",
+    "EXTRA_LONG_TERM_LIABILITIES",
+    "EXTRA_EQUITY",
+];
+
+/// Lines that are a list (`balance_sheet_details`): their amount is the total of
+/// the list, computed when the Neraca is shown and never stored as a line.
+const LIST_ITEMS: &[&str] = &[
+    "OTHER_LOANS",
+    "FIXED_ASSETS",
     "EXTRA_CURRENT_ASSETS",
     "EXTRA_CURRENT_LIABILITIES",
     "EXTRA_LONG_TERM_LIABILITIES",
@@ -96,8 +107,9 @@ pub(crate) async fn get_balance_sheet(
 }
 
 /// Saves the typed lines of a book year (lines left out keep their value) and
-/// replaces the rincian of each line in `details`, setting that line to the
-/// total of its rincian. Everything is saved together or not at all.
+/// replaces the rincian of each line in `details`. A list line has no stored
+/// amount: its total is the sum of its rincian. Everything is saved together or
+/// not at all.
 pub(crate) async fn set_balance_sheet(
     input: SetBalanceSheetInput,
     company_id: &str,
@@ -112,6 +124,14 @@ pub(crate) async fn set_balance_sheet(
         return Err(format!("Pos neraca tidak dikenal: {key}"));
     }
 
+    if let Some(key) = input
+        .items
+        .keys()
+        .find(|key| LIST_ITEMS.contains(&key.as_str()))
+    {
+        return Err(format!("Pos neraca {key} diisi lewat rinciannya."));
+    }
+
     if input
         .details
         .values()
@@ -120,6 +140,22 @@ pub(crate) async fn set_balance_sheet(
     {
         return Err("Nama rincian wajib diisi".to_string());
     }
+
+    // Lines and rincian are replaced in place, so the audit keeps what they were.
+    // Read before the transaction: the pool has a single connection.
+    let previous = get_balance_sheet(company_id, input.year, pool).await?;
+    let before = serde_json::json!({
+        "items": previous
+            .items
+            .iter()
+            .filter(|(key, _)| input.items.contains_key(*key))
+            .collect::<BTreeMap<_, _>>(),
+        "details": previous
+            .details
+            .iter()
+            .filter(|(key, _)| input.details.contains_key(*key))
+            .collect::<BTreeMap<_, _>>(),
+    });
 
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
 
@@ -164,10 +200,18 @@ pub(crate) async fn set_balance_sheet(
             .await
             .map_err(|error| error.to_string())?;
         }
-
-        let total: i64 = details.iter().map(|detail| detail.amount).sum();
-        set_item(&mut db, company_id, input.year, key, total).await?;
     }
+
+    audit_change(
+        &mut db,
+        company_id,
+        AuditEntityType::BalanceSheet,
+        &input.year.to_string(),
+        AuditAction::Updated,
+        Some(before),
+        serde_json::json!({"items": &input.items, "details": &input.details}),
+    )
+    .await?;
 
     db.commit().await.map_err(|error| error.to_string())
 }
@@ -183,7 +227,7 @@ async fn set_item(
         "INSERT INTO balance_sheet_items (company_id, year, item_key, amount)
          VALUES (?, ?, ?, ?)
          ON CONFLICT (company_id, year, item_key)
-         DO UPDATE SET amount = excluded.amount, updated_at = CURRENT_TIMESTAMP",
+         DO UPDATE SET amount = excluded.amount",
     )
     .bind(company_id)
     .bind(year)
@@ -231,7 +275,6 @@ mod tests {
 
             for input in [
                 items(2030, "DEBT_PPBRI", 10_000_000),
-                items(2030, "OTHER_LOANS", 28_109_000),
                 items(2030, "DEBT_PPBRI", 5_000_000),
             ] {
                 set_balance_sheet(input, "default", &pool).await.unwrap();
@@ -239,7 +282,13 @@ mod tests {
 
             let sheet = get_balance_sheet("default", 2030, &pool).await.unwrap();
             assert_eq!(sheet.items.get("DEBT_PPBRI"), Some(&5_000_000));
-            assert_eq!(sheet.items.get("OTHER_LOANS"), Some(&28_109_000));
+
+            // A list line is only its rincian; it cannot be typed as one amount.
+            assert!(
+                set_balance_sheet(items(2030, "OTHER_LOANS", 28_109_000), "default", &pool)
+                    .await
+                    .is_err()
+            );
 
             assert!(get_balance_sheet("default", 2029, &pool)
                 .await
@@ -256,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    fn details_replace_the_rincian_and_set_the_line_total() {
+    fn details_replace_the_rincian_without_a_stored_total() {
         tauri::async_runtime::block_on(async {
             let pool = crate::database::memory_pool().await;
 
@@ -288,7 +337,7 @@ mod tests {
             assert_eq!(rows.len(), 3);
             assert_eq!(rows[1], detail("Peminjam A", -1_391_000, None));
             assert_eq!(rows[2].loan_date.as_deref(), Some("2023-01-04"));
-            assert_eq!(sheet.items.get("OTHER_LOANS"), Some(&2_809_000));
+            assert_eq!(sheet.items.get("OTHER_LOANS"), None);
 
             assert!(
                 set_balance_sheet(rincian("UNKNOWN", vec![]), "default", &pool)
@@ -327,7 +376,7 @@ mod tests {
 
             let sheet = get_balance_sheet("default", 2030, &pool).await.unwrap();
             assert_eq!(sheet.items.get("DEBT_PPBRI"), Some(&10_000_000));
-            assert_eq!(sheet.items.get("FIXED_ASSETS"), Some(&1_500_000));
+            assert_eq!(sheet.items.get("FIXED_ASSETS"), None);
 
             // A rincian row without a name rejects the whole save: the line
             // typed with it is not changed either.
@@ -346,6 +395,67 @@ mod tests {
                 sheet.details["FIXED_ASSETS"],
                 vec![detail("Meja", 1_500_000, None)]
             );
+        });
+    }
+
+    #[test]
+    fn saving_keeps_the_replaced_values_in_the_audit() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+            let save = |items: Vec<(&str, i64)>,
+                        details: Vec<(&str, Vec<BalanceSheetDetailDto>)>| {
+                SetBalanceSheetInput {
+                    year: 2026,
+                    items: items
+                        .into_iter()
+                        .map(|(key, amount)| (key.into(), amount))
+                        .collect(),
+                    details: details
+                        .into_iter()
+                        .map(|(key, rows)| (key.into(), rows))
+                        .collect(),
+                }
+            };
+
+            set_balance_sheet(
+                save(
+                    vec![("BANK_BALANCE", 1_000)],
+                    vec![("OTHER_LOANS", vec![detail("A", 300, None)])],
+                ),
+                "default",
+                &pool,
+            )
+            .await
+            .unwrap();
+
+            set_balance_sheet(
+                save(
+                    vec![("BANK_BALANCE", 2_000)],
+                    vec![("OTHER_LOANS", vec![detail("B", 500, None)])],
+                ),
+                "default",
+                &pool,
+            )
+            .await
+            .unwrap();
+
+            let (before, after): (String, String) = sqlx::query_as(
+                "SELECT before_json, after_json
+                 FROM audit_events
+                 WHERE entity_type = 'BALANCE_SHEET' AND entity_id = '2026'
+                 ORDER BY id DESC
+                 LIMIT 1",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+            let before: serde_json::Value = serde_json::from_str(&before).unwrap();
+            let after: serde_json::Value = serde_json::from_str(&after).unwrap();
+            assert_eq!(before["items"]["BANK_BALANCE"], 1_000);
+            assert_eq!(before["details"]["OTHER_LOANS"][0]["name"], "A");
+            assert_eq!(after["items"]["BANK_BALANCE"], 2_000);
+            assert_eq!(after["details"]["OTHER_LOANS"][0]["name"], "B");
         });
     }
 }

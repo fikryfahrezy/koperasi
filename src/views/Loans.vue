@@ -555,8 +555,8 @@ const {
                 <td>{{ item.row.loan.interestType.toLowerCase() }}</td>
                 <td>{{ item.row.loan.guarantee }}</td>
                 <td>{{ item.row.loan.loanType ?? "" }}</td>
-                <td>{{ item.row.loan.realizationDate }}</td>
-                <td>{{ item.row.loan.dueDate }}</td>
+                <td>{{ formatSheetDate(item.row.loan.realizationDate) }}</td>
+                <td>{{ formatSheetDate(item.row.loan.dueDate) }}</td>
                 <td class="num-cell">{{ item.row.loan.tenor }}</td>
                 <td
                   v-if="leftColumns"

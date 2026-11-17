@@ -2,10 +2,7 @@
 
 use sqlx::{Row, SqliteConnection, SqlitePool};
 
-use super::posting::{
-    append, audit, ensure_reference_unused, loan_balance, savings_balance, Component, Entry,
-    APP_ACTOR,
-};
+use super::posting::{append, audit, loan_balance, savings_balance, Component, Entry};
 
 use super::read_model::get_app_snapshot;
 use super::transaction_groups::deletion_set;
@@ -32,8 +29,6 @@ pub(crate) async fn reverse_transaction(
 
     let stamp = Stamp {
         business_date: &input.business_date,
-        display_date: &input.display_date,
-        display_time: &input.display_time,
     };
 
     for id in &ids {
@@ -47,8 +42,6 @@ pub(crate) async fn reverse_transaction(
 /// When a reversal is recorded.
 struct Stamp<'a> {
     business_date: &'a str,
-    display_date: &'a str,
-    display_time: &'a str,
 }
 
 /// The transaction itself, or every transaction still in effect in its group, in
@@ -107,7 +100,7 @@ async fn reverse_one(
     stamp: &Stamp<'_>,
 ) -> Result<String, String> {
     let original = sqlx::query(
-        "SELECT member_id, member_name, channel, description, reference, direction
+        "SELECT member_id, member_name, channel, description, direction
          FROM effective_transactions
          WHERE company_id = ? AND id = ?",
     )
@@ -198,7 +191,6 @@ async fn reverse_one(
 
     let reversal_id = timestamp_id("REV");
     let description = format!("Hapus · {}", get("description")?);
-    let reference = format!("{}/REV/{reversal_id}", get("reference")?);
 
     append(
         &mut *db,
@@ -206,15 +198,11 @@ async fn reverse_one(
         Entry {
             id: reversal_id.clone(),
             business_date: stamp.business_date,
-            display_date: stamp.display_date,
-            display_time: stamp.display_time,
             member_id: member_id.as_deref(),
             member_name: &get("member_name")?,
             channel,
             description: &description,
-            reference: &reference,
             direction,
-            actor: APP_ACTOR,
             reversed_transaction_id: Some(id),
             components,
         },
@@ -283,14 +271,6 @@ pub(crate) async fn post_cash_entry(
     validate_business_date(&input.business_date)?;
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
     let id = timestamp_id("CASH");
-
-    let reference = if input.reference.trim().is_empty() {
-        format!("KBS/CASH/{id}")
-    } else {
-        input.reference.trim().to_string()
-    };
-
-    ensure_reference_unused(&mut db, company_id, &reference).await?;
     let description = input.description.trim();
 
     if description.is_empty() {
@@ -303,15 +283,11 @@ pub(crate) async fn post_cash_entry(
         Entry {
             id: id.clone(),
             business_date: &input.business_date,
-            display_date: &input.display_date,
-            display_time: &input.display_time,
             member_id: None,
             member_name: "Koperasi",
             channel,
             description,
-            reference: &reference,
             direction,
-            actor: APP_ACTOR,
             reversed_transaction_id: None,
             components: vec![Component::new(component_type, label, input.amount)],
         },

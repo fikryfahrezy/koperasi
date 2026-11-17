@@ -234,7 +234,7 @@ const memberTransactions = computed(() => {
                 <strong>{{ formatLoanLabel(item.loan) }}</strong>
                 <small
                   >{{ item.loan.tenor }} bulan · jatuh tempo
-                  {{ item.loan.dueDate }}</small
+                  {{ formatDate(item.loan.dueDate) }}</small
                 >
               </div>
               <div class="member-detail__list-value">
@@ -328,10 +328,7 @@ const memberTransactions = computed(() => {
           <div v-for="item in memberTransactions" :key="item.id">
             <div>
               <strong>{{ item.description }}</strong>
-              <small
-                >{{ formatDate(item.businessDate) }} ·
-                {{ item.reference }}</small
-              >
+              <small>{{ formatDate(item.businessDate) }}</small>
             </div>
             <strong
               :class="

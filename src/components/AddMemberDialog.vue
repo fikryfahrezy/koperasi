@@ -7,6 +7,7 @@ import UiModal from "./UiModal.vue";
 import {
   formatCurrency,
   SavingsAccountType,
+  todayIso,
   useKoperasiStore,
 } from "../store/koperasi";
 
@@ -31,7 +32,7 @@ const open = pageState.field("open", () => false);
 const form = pageState.field("form", () => ({
   memberNumber: "",
   name: "",
-  joinedAt: "2026-09-13",
+  joinedAt: todayIso(),
   // 0 until the form opens, then the Simpanan Pokok parameter.
   principalSavings: 0,
 }));
@@ -87,7 +88,7 @@ async function submit() {
   Object.assign(submittedForm.value, {
     memberNumber: "",
     name: "",
-    joinedAt: "2026-09-13",
+    joinedAt: todayIso(),
     principalSavings: 0,
   });
 }

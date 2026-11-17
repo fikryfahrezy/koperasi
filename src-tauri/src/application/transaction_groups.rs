@@ -132,8 +132,8 @@ async fn group_label(
     id: &str,
     originals: &[Original],
 ) -> Result<String, String> {
-    let group = sqlx::query(
-        "SELECT g.label, COALESCE(m.name, l.member_name, '') name
+    let name: Option<String> = sqlx::query_scalar(
+        "SELECT COALESCE(m.name, l.member_name, '') name
          FROM transaction_groups g
          LEFT JOIN members m ON m.id = g.member_id
          LEFT JOIN loans l ON l.id = g.loan_id
@@ -147,22 +147,13 @@ async fn group_label(
 
     let first = originals.first();
 
-    Ok(match group {
-        Some(row) => {
-            let label: String = row.try_get("label").map_err(|error| error.to_string())?;
-            let name: String = row.try_get("name").map_err(|error| error.to_string())?;
-
-            if !label.is_empty() {
-                label
-            } else {
-                format!(
-                    "{name} · {}",
-                    first.map_or(String::new(), |original| month_label(
-                        &original.business_date
-                    ))
-                )
-            }
-        }
+    Ok(match name {
+        Some(name) => format!(
+            "{name} · {}",
+            first.map_or(String::new(), |original| month_label(
+                &original.business_date
+            ))
+        ),
         None => first.map_or(String::new(), |original| original.description.clone()),
     })
 }

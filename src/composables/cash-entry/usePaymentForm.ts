@@ -285,7 +285,6 @@ export function usePaymentForm(
         wajib: nonMember ? 0 : form.wajib || 0,
         voluntary: nonMember ? 0 : form.voluntary || 0,
         description,
-        reference: "",
       },
       options,
     );

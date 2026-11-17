@@ -72,24 +72,23 @@ pub(crate) struct TransactionDto {
     pub(crate) id: String,
     /// The transaction's date, "2026-08-06".
     pub(crate) business_date: String,
-    /// The date as it was written when recorded ("06-Aug-2026" from the sheet).
-    pub(crate) date: String,
-    pub(crate) time: String,
+    /// When the row was saved, UTC ("2026-08-06 03:15:00"); the time shown for a Hapus.
+    pub(crate) created_at: String,
     pub(crate) member_name: String,
     /// Current ID Anggota of the transaction's member, if any.
     pub(crate) member_number: String,
     pub(crate) channel: Channel,
     pub(crate) description: String,
-    pub(crate) reference: String,
     pub(crate) direction: TransactionDirection,
     pub(crate) amount: i64,
     pub(crate) status: TransactionStatus,
     /// The row that cancels another row (Dibalik).
     pub(crate) is_reversal: bool,
+    /// For a reversal, the id of the row it cancels; empty otherwise.
+    pub(crate) reversed_transaction_id: String,
     /// Imported month this transaction belongs to; Hapus may cancel more of it.
     pub(crate) group_id: String,
     pub(crate) components: Vec<ComponentDto>,
-    pub(crate) actor: String,
 }
 
 #[derive(Serialize)]
@@ -127,8 +126,6 @@ pub(crate) struct AddMemberInput {
     pub(crate) opening_savings: Vec<OpeningSavingsInput>,
     pub(crate) channel: String,
     pub(crate) business_date: String,
-    pub(crate) display_date: String,
-    pub(crate) display_time: String,
 }
 
 #[derive(Deserialize)]
@@ -137,7 +134,7 @@ pub(crate) struct UpdateMemberInput {
     pub(crate) member_id: String,
     pub(crate) name: String,
     pub(crate) member_number: String,
-    /// Empty keeps the stored join date (e.g. the "Migrasi 2026" import placeholder).
+    /// Empty keeps the stored join date (empty itself when not known, as for imported members).
     #[serde(default)]
     pub(crate) joined_at: String,
 }
@@ -195,8 +192,6 @@ pub(crate) struct CreateLoanInput {
 pub(crate) struct DisbursementInput {
     pub(crate) channel: String,
     pub(crate) business_date: String,
-    pub(crate) display_date: String,
-    pub(crate) display_time: String,
 }
 
 #[derive(Deserialize)]
@@ -220,11 +215,8 @@ pub(crate) struct PaymentInput {
     /// Uraian typed by the user; empty uses "Setoran {name}".
     #[serde(default)]
     pub(crate) description: String,
-    pub(crate) reference: String,
     pub(crate) channel: String,
     pub(crate) business_date: String,
-    pub(crate) display_date: String,
-    pub(crate) display_time: String,
 }
 
 #[derive(Deserialize)]
@@ -252,11 +244,8 @@ pub(crate) struct SavingsTransactionInput {
     /// Uraian typed by the user; empty uses the generated text.
     #[serde(default)]
     pub(crate) description: String,
-    pub(crate) reference: String,
     pub(crate) channel: String,
     pub(crate) business_date: String,
-    pub(crate) display_date: String,
-    pub(crate) display_time: String,
 }
 
 #[derive(Deserialize)]
@@ -281,8 +270,6 @@ pub(crate) struct TransactionGroupDto {
 pub(crate) struct ReverseTransactionInput {
     pub(crate) id: String,
     pub(crate) business_date: String,
-    pub(crate) display_date: String,
-    pub(crate) display_time: String,
 }
 
 /// One row of the rincian of a typed Neraca line (Piutang Lainnya: a Bon
@@ -434,10 +421,7 @@ pub(crate) struct CashEntryInput {
     pub(crate) description: String,
     pub(crate) amount: i64,
     pub(crate) channel: String,
-    pub(crate) reference: String,
     pub(crate) business_date: String,
-    pub(crate) display_date: String,
-    pub(crate) display_time: String,
 }
 
 #[derive(Serialize)]

@@ -2,10 +2,7 @@
 
 use sqlx::{Row, SqliteConnection, SqlitePool};
 
-use super::posting::{
-    append, audit, ensure_reference_unused, loan_balance, savings_balance, Component, Entry,
-    APP_ACTOR,
-};
+use super::posting::{append, audit, loan_balance, savings_balance, Component, Entry};
 
 use super::read_model::get_app_snapshot;
 
@@ -179,24 +176,17 @@ pub(crate) async fn post_savings_transaction(
     );
 
     let id = timestamp_id(if is_deposit { "SAV-IN" } else { "SAV-OUT" });
-    let reference = trimmed_or(&input.reference, format!("KBS/SAV/{id}"));
-    ensure_reference_unused(&mut db, company_id, &reference).await?;
-
     let amount = append(
         &mut db,
         company_id,
         Entry {
             id: id.clone(),
             business_date: &input.business_date,
-            display_date: &input.display_date,
-            display_time: &input.display_time,
             member_id: Some(&input.member_id),
             member_name: &member_name,
             channel,
             description: &description,
-            reference: &reference,
             direction,
-            actor: APP_ACTOR,
             reversed_transaction_id: None,
             components,
         },
@@ -214,7 +204,6 @@ pub(crate) async fn post_savings_transaction(
             "amounts": amounts.iter().map(|(account_type, amount)| serde_json::json!({"accountType": account_type.as_str(), "amount": amount})).collect::<Vec<_>>(),
             "amount": amount,
             "channel": channel.as_str(),
-            "reference": reference,
         }),
     )
     .await?;
@@ -299,11 +288,8 @@ pub(crate) async fn post_payment(
             amount: 0,
             amounts,
             description: input.description,
-            reference: input.reference,
             channel: input.channel,
             business_date: input.business_date,
-            display_date: input.display_date,
-            display_time: input.display_time,
         };
 
         return post_savings_transaction(deposit, company_id, pool).await;
@@ -312,9 +298,6 @@ pub(crate) async fn post_payment(
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
     let member_name = member_name(&mut db, company_id, &input.member_id).await?;
     let id = timestamp_id("TRX");
-    let reference = trimmed_or(&input.reference, format!("KBS/RCPT/{id}"));
-    ensure_reference_unused(&mut db, company_id, &reference).await?;
-
     let mut components = Vec::new();
 
     if !input.loans.is_empty() {
@@ -415,15 +398,11 @@ pub(crate) async fn post_payment(
         Entry {
             id: id.clone(),
             business_date: &input.business_date,
-            display_date: &input.display_date,
-            display_time: &input.display_time,
             member_id: Some(&input.member_id),
             member_name: &member_name,
             channel,
             description: &trimmed_or(&input.description, format!("Setoran {member_name}")),
-            reference: &reference,
             direction: TransactionDirection::In,
-            actor: APP_ACTOR,
             reversed_transaction_id: None,
             components,
         },
@@ -436,7 +415,7 @@ pub(crate) async fn post_payment(
         AuditEntityType::Transaction,
         &id,
         AuditAction::Posted,
-        serde_json::json!({"amount": amount, "channel": channel.as_str(), "reference": reference}),
+        serde_json::json!({"amount": amount, "channel": channel.as_str()}),
     )
     .await?;
 
@@ -566,9 +545,15 @@ async fn post_loan_payment(
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
 
     let loan = sqlx::query(
-        "SELECT member_id, member_name
-         FROM loans
-         WHERE company_id = ? AND id = ?",
+        // A member's loan is paid under the member's current name.
+        "SELECT
+             l.member_id,
+             COALESCE(
+                 (SELECT m.name FROM members m WHERE m.company_id = l.company_id AND m.id = l.member_id),
+                 l.member_name
+             ) AS member_name
+         FROM loans l
+         WHERE l.company_id = ? AND l.id = ?",
     )
     .bind(company_id)
     .bind(loan_id)
@@ -615,24 +600,17 @@ async fn post_loan_payment(
     };
 
     let id = timestamp_id("TRX");
-    let reference = trimmed_or(&input.reference, format!("KBS/RCPT/{id}"));
-    ensure_reference_unused(&mut db, company_id, &reference).await?;
-
     let amount = append(
         &mut db,
         company_id,
         Entry {
             id: id.clone(),
             business_date: &input.business_date,
-            display_date: &input.display_date,
-            display_time: &input.display_time,
             member_id: member_id.as_deref(),
             member_name: &borrower_name,
             channel,
             description: &trimmed_or(&input.description, format!("Setoran {borrower_name}")),
-            reference: &reference,
             direction: TransactionDirection::In,
-            actor: APP_ACTOR,
             reversed_transaction_id: None,
             components,
         },
@@ -646,10 +624,10 @@ async fn post_loan_payment(
         &id,
         AuditAction::Posted,
         if input.loans.is_empty() {
-            serde_json::json!({"amount": amount, "loanId": loan_id, "channel": channel.as_str(), "reference": reference})
+            serde_json::json!({"amount": amount, "loanId": loan_id, "channel": channel.as_str()})
         } else {
             let loan_ids: Vec<&str> = input.loans.iter().map(|line| line.loan_id.trim()).collect();
-            serde_json::json!({"amount": amount, "loanIds": loan_ids, "channel": channel.as_str(), "reference": reference})
+            serde_json::json!({"amount": amount, "loanIds": loan_ids, "channel": channel.as_str()})
         },
     )
     .await?;

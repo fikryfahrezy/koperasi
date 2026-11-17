@@ -3,7 +3,7 @@
 use sqlx::{Row, SqliteConnection, SqlitePool};
 
 use super::loans::{format_thousands, parameter};
-use super::posting::{append, audit, Component, Entry, APP_ACTOR};
+use super::posting::{append, audit, Component, Entry};
 use super::read_model::get_app_snapshot;
 
 use crate::{
@@ -113,22 +113,6 @@ pub(crate) async fn update_member(
     .await
     .map_err(|error| error.to_string())?;
 
-    // Loans show the borrower's current name; posted transactions keep the name
-    // they were recorded under.
-    if previous_name != name {
-        sqlx::query(
-            "UPDATE loans
-             SET member_name = ?
-             WHERE company_id = ? AND member_id = ?",
-        )
-        .bind(name)
-        .bind(company_id)
-        .bind(&input.member_id)
-        .execute(&mut *db)
-        .await
-        .map_err(|error| error.to_string())?;
-    }
-
     audit(
         &mut db,
         company_id,
@@ -222,6 +206,8 @@ pub(crate) async fn add_member(
 
     let id = format!("{company_id}-M{next:03}");
     let name = input.name.trim();
+    let joined_at = input.joined_at.trim();
+    validate_business_date(joined_at)?;
 
     sqlx::query(
         "INSERT INTO members (id, company_id, member_number, name, joined_at)
@@ -231,7 +217,7 @@ pub(crate) async fn add_member(
     .bind(company_id)
     .bind(member_number)
     .bind(name)
-    .bind(input.joined_at.trim())
+    .bind(joined_at)
     .execute(&mut *db)
     .await
     .map_err(|error| error.to_string())?;
@@ -255,7 +241,6 @@ pub(crate) async fn add_member(
     }
 
     let transaction_id = timestamp_id("SAV-IN");
-    let reference = format!("KBS/SAV/{transaction_id}");
 
     let description = if opening_savings
         .iter()
@@ -286,15 +271,11 @@ pub(crate) async fn add_member(
         Entry {
             id: transaction_id.clone(),
             business_date: &input.business_date,
-            display_date: &input.display_date,
-            display_time: &input.display_time,
             member_id: Some(&id),
             member_name: name,
             channel,
             description,
-            reference: &reference,
             direction: TransactionDirection::In,
-            actor: APP_ACTOR,
             reversed_transaction_id: None,
             components,
         },
@@ -307,7 +288,7 @@ pub(crate) async fn add_member(
         AuditEntityType::Transaction,
         &transaction_id,
         AuditAction::Posted,
-        serde_json::json!({"openingSavings": opening_savings.iter().map(|(kind, amount)| (kind.as_str(), amount)).collect::<Vec<_>>(), "amount": amount, "reference": reference}),
+        serde_json::json!({"openingSavings": opening_savings.iter().map(|(kind, amount)| (kind.as_str(), amount)).collect::<Vec<_>>(), "amount": amount}),
     )
     .await?;
 

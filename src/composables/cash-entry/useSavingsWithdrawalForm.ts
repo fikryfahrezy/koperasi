@@ -84,7 +84,6 @@ export function useSavingsWithdrawalForm(pageState: WorkspacePageState) {
         memberId: savingsForm.value.memberId,
         amounts: savingsAmounts.value,
         description,
-        reference: "",
       },
       options,
     );

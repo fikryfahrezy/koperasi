@@ -64,30 +64,6 @@ fn quarter_of(period: &str) -> usize {
     (month.clamp(1, 12) - 1) / 3
 }
 
-/// `YYYY-MM-DD` for a date stored as `YYYY-MM-DD` or `DD-Mon-YYYY` (imported rows).
-fn iso_date(value: &str) -> String {
-    const SHORT: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-
-    let mut parts = value.split('-');
-
-    if let (Some(day), Some(month), Some(year), None) =
-        (parts.next(), parts.next(), parts.next(), parts.next())
-    {
-        if let (Ok(day), Some(month)) = (
-            day.parse::<u32>(),
-            SHORT.iter().position(|name| *name == month),
-        ) {
-            if year.len() == 4 {
-                return format!("{year}-{:02}-{day:02}", month + 1);
-            }
-        }
-    }
-
-    value.to_string()
-}
-
 async fn company_name(company_id: &str, pool: &SqlitePool) -> Result<String, String> {
     Ok(list_companies(pool)
         .await?
@@ -1299,17 +1275,16 @@ fn loan_row(
         Style::Text,
     );
 
-    let realization = iso_date(&loan.realization_date);
-    let due = iso_date(&loan.due_date);
-    sheet.date(row, 8, &realization);
+    let (realization, due) = (&loan.realization_date, &loan.due_date);
+    sheet.date(row, 8, realization);
 
     // Tanggal Jatuh Tempo = Tanggal Realisasi + hari, as in the sheet (=H8+304).
-    match (date_serial(&realization), date_serial(&due)) {
+    match (date_serial(realization), date_serial(due)) {
         (Some(start), Some(end)) => {
             let days = Expr::cell(row, 8).add(Expr::num(end - start));
             sheet.formula(row, 9, &days, Style::Date);
         }
-        _ => sheet.date(row, 9, &due),
+        _ => sheet.date(row, 9, due),
     }
 
     sheet.number(row, TENOR, loan.tenor as f64, Style::Integer);
@@ -1598,8 +1573,6 @@ mod tests {
         assert_eq!(month_label("2026-01"), "JANUARI 2026");
         assert_eq!(shift_period("2026-01", -1), "2025-12");
         assert_eq!(shift_period("2026-12", 1), "2027-01");
-        assert_eq!(iso_date("28-Jan-2026"), "2026-01-28");
-        assert_eq!(iso_date("2026-01-28"), "2026-01-28");
     }
 
     /// Exports the three pages from a copy of a real database:

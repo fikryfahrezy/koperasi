@@ -79,12 +79,10 @@ mod tests {
             }],
             channel: Channel::Cash.as_str().into(),
             business_date: DATE.into(),
-            display_date: "13 Sep 2026".into(),
-            display_time: "10:00".into(),
         }
     }
 
-    fn payment(principal: i64, reference: &str, channel: &str) -> PaymentInput {
+    fn payment(principal: i64, channel: &str) -> PaymentInput {
         PaymentInput {
             member_id: "testing-M001".into(),
             loan_id: String::new(),
@@ -95,11 +93,8 @@ mod tests {
             wajib: 10_000,
             voluntary: 5_000,
             description: String::new(),
-            reference: reference.into(),
             channel: channel.into(),
             business_date: DATE.into(),
-            display_date: "13 Sep 2026".into(),
-            display_time: "10:15".into(),
         }
     }
 
@@ -115,10 +110,7 @@ mod tests {
                     description: "Mutasi".into(),
                     amount,
                     channel: channel.into(),
-                    reference: String::new(),
                     business_date: DATE.into(),
-                    display_date: "13 Sep 2026".into(),
-                    display_time: "09:00".into(),
                 };
 
             post_cash_entry(
@@ -297,7 +289,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            let mut input = payment(0, "POKOK-TEST", Channel::Cash.as_str());
+            let mut input = payment(0, Channel::Cash.as_str());
             input.member_id = snapshot.members[0].id.clone();
             input.interest = 0;
             input.pokok = 20_000;
@@ -306,7 +298,7 @@ mod tests {
             let paid = post_payment(input, "default", &pool).await.unwrap();
             assert_eq!(paid.members[0].principal_savings, 70_000);
             assert_eq!(paid.totals.cash, 80_000);
-            let mut negative = payment(0, "", Channel::Cash.as_str());
+            let mut negative = payment(0, Channel::Cash.as_str());
             negative.member_id = snapshot.members[0].id.clone();
             negative.pokok = -1;
 
@@ -400,8 +392,6 @@ mod tests {
                     disbursement: DisbursementInput {
                         channel: Channel::Cash.as_str().into(),
                         business_date: DATE.into(),
-                        display_date: "13 Sep 2026".into(),
-                        display_time: "10:10".into(),
                     },
                 },
                 "default",
@@ -413,7 +403,7 @@ mod tests {
             let loan_id = snapshot.loans[0].id.clone();
 
             let loan_payment = |principal: i64, savings: i64| {
-                let mut input = payment(principal, "", "KAS");
+                let mut input = payment(principal, "KAS");
                 input.member_id = String::new();
                 input.loan_id = loan_id.clone();
                 input.interest = 60_000;
@@ -467,8 +457,6 @@ mod tests {
                 disbursement: DisbursementInput {
                     channel: Channel::Cash.as_str().into(),
                     business_date: DATE.into(),
-                    display_date: "13 Sep 2026".into(),
-                    display_time: "10:30".into(),
                 },
             };
 
@@ -502,8 +490,8 @@ mod tests {
                 interest,
             };
 
-            let both = |reference: &str, loans: Vec<LoanPaymentLine>| {
-                let mut input = payment(0, reference, "KAS");
+            let both = |loans: Vec<LoanPaymentLine>| {
+                let mut input = payment(0, "KAS");
                 input.member_id = String::new();
                 (input.interest, input.wajib, input.voluntary) = (0, 0, 0);
                 input.loans = loans;
@@ -511,13 +499,10 @@ mod tests {
             };
 
             let paid = post_payment(
-                both(
-                    "BOTH",
-                    vec![
-                        line(&loan_id, 300_000, 60_000),
-                        line(&second_id, 100_000, 20_000),
-                    ],
-                ),
+                both(vec![
+                    line(&loan_id, 300_000, 60_000),
+                    line(&second_id, 100_000, 20_000),
+                ]),
                 "default",
                 &pool,
             )
@@ -540,7 +525,7 @@ mod tests {
             let row = paid
                 .transactions
                 .iter()
-                .find(|row| row.reference == "BOTH")
+                .find(|row| row.amount == 480_000)
                 .unwrap();
 
             assert_eq!(row.amount, 480_000);
@@ -548,10 +533,7 @@ mod tests {
 
             assert_eq!(
                 post_payment(
-                    both(
-                        "OTHER",
-                        vec![line(&loan_id, 10_000, 0), line(&other_id, 10_000, 0)]
-                    ),
+                    both(vec![line(&loan_id, 10_000, 0), line(&other_id, 10_000, 0)]),
                     "default",
                     &pool,
                 )
@@ -560,6 +542,76 @@ mod tests {
                 .unwrap(),
                 "Pinjaman tidak ditemukan untuk peminjam ini."
             );
+        });
+    }
+
+    #[test]
+    fn renamed_member_pays_a_loan_under_the_new_name() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+
+            add_member(member_input("Old Name"), "default", &pool)
+                .await
+                .unwrap();
+
+            let snapshot = create_loan(
+                CreateLoanInput {
+                    loan_group: LoanGroup::Member.as_str().into(),
+                    member_id: "default-M001".into(),
+                    borrower_name: String::new(),
+                    plafond: 1_000_000,
+                    tenor: 10,
+                    interest_type: InterestType::Flat.as_str().into(),
+                    annual_rate: None,
+                    loan_type: LoanType::Monthly.as_str().into(),
+                    guarantee: String::new(),
+                    recommender: String::new(),
+                    provision: None,
+                    payoffs: Vec::new(),
+                    description: String::new(),
+                    disbursement: DisbursementInput {
+                        channel: Channel::Cash.as_str().into(),
+                        business_date: DATE.into(),
+                    },
+                },
+                "default",
+                &pool,
+            )
+            .await
+            .unwrap();
+
+            let loan_id = snapshot.loans[0].id.clone();
+
+            update_member(
+                crate::contracts::UpdateMemberInput {
+                    member_id: "default-M001".into(),
+                    name: "New Name".into(),
+                    member_number: "Old Name".into(),
+                    joined_at: String::new(),
+                },
+                "default",
+                &pool,
+            )
+            .await
+            .unwrap();
+
+            // Paid by loan, without choosing the member.
+            let mut input = payment(100_000, Channel::Cash.as_str());
+            input.member_id = String::new();
+            input.loan_id = loan_id.clone();
+            (input.interest, input.wajib, input.voluntary) = (0, 0, 0);
+            let paid = post_payment(input, "default", &pool).await.unwrap();
+
+            let loan = paid.loans.iter().find(|loan| loan.id == loan_id).unwrap();
+            assert_eq!(loan.member_name, "New Name");
+
+            let row = paid
+                .transactions
+                .iter()
+                .find(|row| row.amount == 100_000)
+                .unwrap();
+            assert_eq!(row.member_name, "New Name");
+            assert_eq!(row.description, "Setoran New Name");
         });
     }
 
@@ -586,11 +638,8 @@ mod tests {
                         })
                         .collect(),
                     description: String::new(),
-                    reference: String::new(),
                     channel: Channel::Cash.as_str().into(),
                     business_date: DATE.into(),
-                    display_date: "13 Sep 2026".into(),
-                    display_time: "10:00".into(),
                 }
             };
 
@@ -686,9 +735,8 @@ mod tests {
                 interest: 0,
                 wajib: 50_000,
                 voluntary: 25_000,
-                reference: String::new(),
                 channel: Channel::Cash.as_str().into(),
-                ..payment(0, "", Channel::Cash.as_str())
+                ..payment(0, Channel::Cash.as_str())
             };
 
             let snapshot = post_payment(deposit, "default", &pool).await.unwrap();
@@ -703,11 +751,8 @@ mod tests {
                 amount: 20_000,
                 amounts: Vec::new(),
                 description: String::new(),
-                reference: String::new(),
                 channel: Channel::Cash.as_str().into(),
                 business_date: DATE.into(),
-                display_date: "13 Sep 2026".into(),
-                display_time: "11:00".into(),
             };
 
             let snapshot = post_savings_withdrawal(withdrawal, "default", &pool)
@@ -773,12 +818,12 @@ mod tests {
                   amount: i64| {
             format!(
                 "INSERT INTO transactions (
-                     id, company_id, business_date, display_date, display_time, member_name,
-                     channel, description, reference, direction, amount, actor
+                     id, company_id, business_date, member_name,
+                     channel, description, direction, amount
                  )
                  VALUES (
-                     '{id}', 'default', '{date}', '{date}', '', 'Koperasi', '{channel}',
-                     '{description}', '{id}', '{direction}', {amount}, 'Migrasi'
+                     '{id}', 'default', '{date}', 'Koperasi', '{channel}',
+                     '{description}', '{direction}', {amount}
                  )"
             )
         };
@@ -911,9 +956,9 @@ mod tests {
         ] {
             sqlx::query(
                 "INSERT INTO transaction_groups (
-                     company_id, group_id, label, member_id, transaction_id
+                     company_id, group_id, member_id, transaction_id
                  )
-                 VALUES ('default', 'G-02', '', 'default-M001', ?)",
+                 VALUES ('default', 'G-02', 'default-M001', ?)",
             )
             .bind(id)
             .execute(pool)
@@ -960,8 +1005,6 @@ mod tests {
             let stamp = |id: &str| ReverseTransactionInput {
                 id: id.into(),
                 business_date: DATE.into(),
-                display_date: "13 Sep 2026".into(),
-                display_time: "12:00".into(),
             };
 
             // The new loan was repaid in March: its suplesi cannot be deleted.
@@ -989,13 +1032,13 @@ mod tests {
             // Without the March repayment the suplesi can be deleted.
             sqlx::query(
                 "INSERT INTO transactions (
-                     id, company_id, business_date, display_date, display_time, member_name,
-                     channel, description, reference, direction, amount, actor,
+                     id, company_id, business_date, member_name,
+                     channel, description, direction, amount,
                      reversed_transaction_id
                  )
                  VALUES (
-                     'REV-03', 'default', '2026-03-02', '2026-03-02', '', 'Koperasi', 'NON_KAS',
-                     'Hapus', 'REV-03', 'Keluar', 300000, 'Test', 'PIN-NEW-03'
+                     'REV-03', 'default', '2026-03-02', 'Koperasi', 'NON_KAS',
+                     'Hapus', 'Keluar', 300000, 'PIN-NEW-03'
                  )",
             )
             .execute(&pool)
@@ -1006,8 +1049,6 @@ mod tests {
                 ReverseTransactionInput {
                     id: "KAS-160".into(),
                     business_date: DATE.into(),
-                    display_date: "13 Sep 2026".into(),
-                    display_time: "12:00".into(),
                 },
                 "default",
                 &pool,
@@ -1059,8 +1100,6 @@ mod tests {
                     disbursement: DisbursementInput {
                         channel: Channel::Cash.as_str().into(),
                         business_date: DATE.into(),
-                        display_date: "13 Sep 2026".into(),
-                        display_time: "10:10".into(),
                     },
                 },
                 "default",
@@ -1085,8 +1124,6 @@ mod tests {
                 ReverseTransactionInput {
                     id: disbursement,
                     business_date: DATE.into(),
-                    display_date: "13 Sep 2026".into(),
-                    display_time: "10:20".into(),
                 },
                 "default",
                 &pool,
@@ -1124,8 +1161,6 @@ mod tests {
                 disbursement: DisbursementInput {
                     channel: Channel::Cash.as_str().into(),
                     business_date: DATE.into(),
-                    display_date: "13 Sep 2026".into(),
-                    display_time: "10:10".into(),
                 },
             };
 
@@ -1288,11 +1323,8 @@ mod tests {
                     movement: SavingsMovement::Deposit.as_str().into(),
                     amount: 10_000,
                     description: "  Titipan manasuka  ".into(),
-                    reference: "TYPED-DESCRIPTION".into(),
                     channel: Channel::Cash.as_str().into(),
                     business_date: DATE.into(),
-                    display_date: "13 Sep 2026".into(),
-                    display_time: "10:06".into(),
                 },
                 "default",
                 &pool,
@@ -1328,11 +1360,8 @@ mod tests {
                     movement: crate::domain::SavingsMovement::Deposit.as_str().into(),
                     amount: 25_000,
                     description: String::new(),
-                    reference: "INVALID-TYPE".into(),
                     channel: Channel::Cash.as_str().into(),
                     business_date: DATE.into(),
-                    display_date: "13 Sep 2026".into(),
-                    display_time: "10:01".into(),
                 },
                 "testing",
                 &pool,
@@ -1369,7 +1398,7 @@ mod tests {
                 assert_eq!(parameters.effective_date, "2026-02-01");
             }
 
-            // References may be reused across companies.
+            // Each company records its own deposit.
             for (company_id, member_id) in
                 [("default", "default-M001"), ("testing", "testing-M001")]
             {
@@ -1381,11 +1410,8 @@ mod tests {
                         movement: SavingsMovement::Deposit.as_str().into(),
                         amount: 25_000,
                         description: String::new(),
-                        reference: "SHARED-REFERENCE".into(),
                         channel: Channel::Cash.as_str().into(),
                         business_date: DATE.into(),
-                        display_date: "13 Sep 2026".into(),
-                        display_time: "10:05".into(),
                     },
                     company_id,
                     &pool,
@@ -1402,11 +1428,8 @@ mod tests {
                     movement: SavingsMovement::Withdrawal.as_str().into(),
                     amount: 30_000,
                     description: String::new(),
-                    reference: String::new(),
                     channel: Channel::Cash.as_str().into(),
                     business_date: DATE.into(),
-                    display_date: "13 Sep 2026".into(),
-                    display_time: "10:06".into(),
                 },
                 "testing",
                 &pool,
@@ -1424,11 +1447,8 @@ mod tests {
                     movement: SavingsMovement::Withdrawal.as_str().into(),
                     amount: 60_000,
                     description: String::new(),
-                    reference: String::new(),
                     channel: Channel::Cash.as_str().into(),
                     business_date: DATE.into(),
-                    display_date: "13 Sep 2026".into(),
-                    display_time: "10:07".into(),
                 },
                 "testing",
                 &pool,
@@ -1498,8 +1518,6 @@ mod tests {
                     disbursement: DisbursementInput {
                         channel: Channel::Cash.as_str().into(),
                         business_date: DATE.into(),
-                        display_date: "13 Sep 2026".into(),
-                        display_time: "10:10".into(),
                     },
                 },
                 "testing",
@@ -1514,7 +1532,11 @@ mod tests {
 
             // Deposits outside the cash ledger do not change cash balances.
             let paid = post_payment(
-                payment(100_000, "PAYMENT-TEST", Channel::NonCash.as_str()),
+                {
+                    let mut input = payment(100_000, Channel::NonCash.as_str());
+                    input.description = "PAYMENT-TEST".into();
+                    input
+                },
                 "testing",
                 &pool,
             )
@@ -1527,7 +1549,7 @@ mod tests {
             let payment_id = paid
                 .transactions
                 .iter()
-                .find(|transaction| transaction.reference == "PAYMENT-TEST")
+                .find(|transaction| transaction.description == "PAYMENT-TEST")
                 .unwrap()
                 .id
                 .clone();
@@ -1537,8 +1559,6 @@ mod tests {
                 ReverseTransactionInput {
                     id: payment_id.clone(),
                     business_date: DATE.into(),
-                    display_date: "13 Sep 2026".into(),
-                    display_time: "10:20".into(),
                 },
                 "testing",
                 &pool,
@@ -1560,8 +1580,6 @@ mod tests {
                 ReverseTransactionInput {
                     id: payment_id,
                     business_date: DATE.into(),
-                    display_date: "13 Sep 2026".into(),
-                    display_time: "10:21".into(),
                 },
                 "testing",
                 &pool,
@@ -1570,12 +1588,8 @@ mod tests {
 
             assert!(twice.is_err());
 
-            let overpay = post_payment(
-                payment(2_000_000, "OVERPAY", Channel::Cash.as_str()),
-                "testing",
-                &pool,
-            )
-            .await;
+            let overpay =
+                post_payment(payment(2_000_000, Channel::Cash.as_str()), "testing", &pool).await;
 
             assert_eq!(
                 overpay.err().unwrap(),
@@ -1584,13 +1598,13 @@ mod tests {
 
             // A member's payment can name the loan it pays.
             let loan_id = loan_snapshot.loans[0].id.clone();
-            let mut targeted = payment(50_000, "TARGETED", Channel::NonCash.as_str());
+            let mut targeted = payment(50_000, Channel::NonCash.as_str());
             targeted.loan_id = loan_id.clone();
             (targeted.interest, targeted.wajib, targeted.voluntary) = (0, 0, 0);
             let paid = post_payment(targeted, "testing", &pool).await.unwrap();
             let loan = paid.loans.iter().find(|loan| loan.id == loan_id).unwrap();
             assert_eq!(loan.balance, 950_000);
-            let mut other = payment(50_000, "OTHER-LOAN", Channel::NonCash.as_str());
+            let mut other = payment(50_000, Channel::NonCash.as_str());
             other.loan_id = "not-this-member".into();
             assert!(post_payment(other, "testing", &pool).await.is_err());
 
@@ -1601,7 +1615,8 @@ mod tests {
                 interest,
             };
 
-            let mut per_loan = payment(0, "PER-LOAN", Channel::NonCash.as_str());
+            let mut per_loan = payment(0, Channel::NonCash.as_str());
+            per_loan.description = "PER-LOAN".into();
             (per_loan.interest, per_loan.wajib, per_loan.voluntary) = (0, 0, 0);
             per_loan.loans = vec![line(&loan_id, 200_000, 18_000)];
             let paid = post_payment(per_loan, "testing", &pool).await.unwrap();
@@ -1611,18 +1626,18 @@ mod tests {
             let row = paid
                 .transactions
                 .iter()
-                .find(|transaction| transaction.reference == "PER-LOAN")
+                .find(|transaction| transaction.description == "PER-LOAN")
                 .unwrap();
 
             assert_eq!(row.amount, 218_000);
-            let mut mixed = payment(10_000, "MIXED", Channel::Cash.as_str());
+            let mut mixed = payment(10_000, Channel::Cash.as_str());
             mixed.loans = vec![line(&loan_id, 10_000, 0)];
             assert!(post_payment(mixed, "testing", &pool).await.is_err());
-            let mut too_much = payment(0, "TOO-MUCH", Channel::Cash.as_str());
+            let mut too_much = payment(0, Channel::Cash.as_str());
             too_much.interest = 0;
             too_much.loans = vec![line(&loan_id, 800_000, 0)];
             assert!(post_payment(too_much, "testing", &pool).await.is_err());
-            let mut foreign = payment(0, "FOREIGN", Channel::Cash.as_str());
+            let mut foreign = payment(0, Channel::Cash.as_str());
             foreign.interest = 0;
             foreign.loans = vec![line("not-this-member", 10_000, 0)];
             assert!(post_payment(foreign, "testing", &pool).await.is_err());
@@ -1634,10 +1649,7 @@ mod tests {
                     description: "Biaya pulsa karyawan".into(),
                     amount: 15_000,
                     channel: Channel::Cash.as_str().into(),
-                    reference: String::new(),
                     business_date: DATE.into(),
-                    display_date: "13 Sep 2026".into(),
-                    display_time: "11:00".into(),
                 },
                 "testing",
                 &pool,

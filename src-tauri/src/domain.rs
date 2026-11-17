@@ -202,6 +202,8 @@ string_enum!(AuditEntityType {
     Transaction => "TRANSACTION",
     Member => "MEMBER",
     Loan => "LOAN",
+    BalanceSheet => "BALANCE_SHEET",
+    Parameter => "PARAMETER",
 });
 
 string_enum!(AuditAction {
