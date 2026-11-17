@@ -3,11 +3,20 @@
 -- terbaru (PINJAMAN BULANAN) sudah diperbaiki menjadi 18%/tahun (1,5%/bulan) Plat:
 -- angsuran 1.000.000 pokok + 375.000 bunga. Belum ada setoran untuk pinjaman ini, jadi
 -- hanya data pinjamannya yang diubah; provisi 30.000 tetap.
--- Gagal tanpa mengubah apa pun kalau pinjamannya tidak ada.
-CREATE TEMP TABLE loan_rate038_guard (found INTEGER CHECK (found = 1));
+-- Gagal tanpa mengubah apa pun kalau database berisi pinjaman hasil impor sheet
+-- (default-L…/default-SYNC…) tetapi pinjaman ini tidak ada. Database baru (instalasi
+-- baru, e2e) tidak punya pinjaman impor, jadi skrip ini tidak mengubah apa pun di sana.
+CREATE TEMP TABLE loan_rate038_guard (missing INTEGER CHECK (missing = 0));
 INSERT INTO loan_rate038_guard
-SELECT COUNT(*) FROM loans
-WHERE company_id = 'default' AND id = 'default-SYNC017-L102';
+SELECT
+  EXISTS (
+    SELECT 1 FROM loans
+    WHERE company_id = 'default' AND (id GLOB 'default-L*' OR id GLOB 'default-SYNC*')
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM loans
+    WHERE company_id = 'default' AND id = 'default-SYNC017-L102'
+  );
 
 INSERT INTO audit_events (company_id, entity_type, entity_id, action, before_json, after_json, actor)
 SELECT
