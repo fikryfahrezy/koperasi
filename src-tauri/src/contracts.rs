@@ -316,6 +316,9 @@ pub(crate) struct SetIncentiveRatesInput {
     /// Fractions: 0.101 = 10,1%. A rate left out is not changed.
     pub(crate) loan_incentive_rate: Option<f64>,
     pub(crate) savings_incentive_rate: Option<f64>,
+    /// Uang duduk + uang makan per anggota, in rupiah.
+    #[serde(default)]
+    pub(crate) sitting_allowance: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -406,6 +409,8 @@ pub(crate) struct MonthlyLedgerDto {
     /// Insentif Pinjaman and Insentif Simpanan rates of the book year (0.101 = 10,1%).
     pub(crate) loan_incentive_rate: f64,
     pub(crate) savings_incentive_rate: f64,
+    /// Uang duduk + uang makan per anggota in the Daftar SHU of the year.
+    pub(crate) sitting_allowance: i64,
     pub(crate) periods: Vec<String>,
     pub(crate) savings: Vec<SavingsMonthDto>,
     pub(crate) loans: Vec<LoanMonthDto>,

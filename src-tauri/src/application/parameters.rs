@@ -70,6 +70,31 @@ pub(crate) async fn get_financial_parameters(
     })
 }
 
+/// The latest value of a yearly parameter effective on or before 31 December
+/// of `year` (0 when never set).
+async fn yearly_parameter(
+    company_id: &str,
+    key: ParameterKey,
+    year: i32,
+    pool: &SqlitePool,
+) -> Result<f64, String> {
+    let value: Option<f64> = sqlx::query_scalar(
+        "SELECT value
+         FROM parameters
+         WHERE company_id = ? AND parameter_key = ? AND effective_date <= ?
+         ORDER BY effective_date DESC
+         LIMIT 1",
+    )
+    .bind(company_id)
+    .bind(key.as_str())
+    .bind(format!("{year:04}-12-31"))
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    Ok(value.unwrap_or(0.0))
+}
+
 /// Insentif Pinjaman and Insentif Simpanan rates for a book year: the latest
 /// values effective on or before 31 December of that year (0 when never set).
 pub(crate) async fn incentive_rates(
@@ -77,37 +102,28 @@ pub(crate) async fn incentive_rates(
     year: i32,
     pool: &SqlitePool,
 ) -> Result<(f64, f64), String> {
-    let year_end = format!("{year:04}-12-31");
-    let mut rates = [0.0; 2];
-
-    for (slot, key) in [
-        ParameterKey::LoanIncentiveRate,
-        ParameterKey::SavingsIncentiveRate,
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let value: Option<f64> = sqlx::query_scalar(
-            "SELECT value
-             FROM parameters
-             WHERE company_id = ? AND parameter_key = ? AND effective_date <= ?
-             ORDER BY effective_date DESC
-             LIMIT 1",
-        )
-        .bind(company_id)
-        .bind(key.as_str())
-        .bind(&year_end)
-        .fetch_optional(pool)
-        .await
-        .map_err(|error| error.to_string())?;
-
-        rates[slot] = value.unwrap_or(0.0);
-    }
-
-    Ok((rates[0], rates[1]))
+    Ok((
+        yearly_parameter(company_id, ParameterKey::LoanIncentiveRate, year, pool).await?,
+        yearly_parameter(company_id, ParameterKey::SavingsIncentiveRate, year, pool).await?,
+    ))
 }
 
-/// Records the incentive rates decided for a book year (effective 1 January).
+/// Uang duduk + uang makan per anggota in the Daftar SHU of a book year, in
+/// rupiah; a year without its own amount keeps the previous one.
+pub(crate) async fn sitting_allowance(
+    company_id: &str,
+    year: i32,
+    pool: &SqlitePool,
+) -> Result<i64, String> {
+    Ok(
+        yearly_parameter(company_id, ParameterKey::ShuSittingAllowance, year, pool)
+            .await?
+            .round() as i64,
+    )
+}
+
+/// Records the incentive rates and the uang duduk decided for a book year
+/// (effective 1 January).
 pub(crate) async fn set_incentive_rates(
     input: SetIncentiveRatesInput,
     company_id: &str,
@@ -127,6 +143,15 @@ pub(crate) async fn set_incentive_rates(
     {
         return Err("Persentase insentif harus antara 0% dan 100%.".into());
     }
+
+    if input.sitting_allowance.is_some_and(|amount| amount < 0) {
+        return Err("Uang duduk tidak boleh negatif.".into());
+    }
+
+    let rates = rates.into_iter().chain([(
+        ParameterKey::ShuSittingAllowance,
+        input.sitting_allowance.map(|amount| amount as f64),
+    )]);
 
     let effective_date = format!("{:04}-01-01", input.year);
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
@@ -198,6 +223,7 @@ mod tests {
                     year: 2025,
                     loan_incentive_rate: Some(0.101),
                     savings_incentive_rate: Some(0.0365),
+                    sitting_allowance: Some(100_000),
                 },
                 "default",
                 &pool,
@@ -216,6 +242,7 @@ mod tests {
                     year: 2027,
                     loan_incentive_rate: Some(0.12),
                     savings_incentive_rate: None,
+                    sitting_allowance: None,
                 },
                 "default",
                 &pool,
@@ -233,12 +260,20 @@ mod tests {
                 (0.12, 0.0365)
             );
 
+            // Uang duduk is kept per year the same way.
+            assert_eq!(sitting_allowance("default", 2024, &pool).await.unwrap(), 0);
+            assert_eq!(
+                sitting_allowance("default", 2027, &pool).await.unwrap(),
+                100_000
+            );
+
             // Saving a year again keeps the replaced rate in the audit.
             set_incentive_rates(
                 SetIncentiveRatesInput {
                     year: 2027,
                     loan_incentive_rate: Some(0.13),
                     savings_incentive_rate: None,
+                    sitting_allowance: None,
                 },
                 "default",
                 &pool,
