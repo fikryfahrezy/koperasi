@@ -31,6 +31,7 @@ import Members from "../views/Members.vue";
 import Savings from "../views/Savings.vue";
 import Loans from "../views/Loans.vue";
 import CashLedger from "../views/CashLedger.vue";
+import Shu from "../views/Shu.vue";
 
 const router = useRouter();
 
@@ -63,6 +64,7 @@ const pages = [
   { path: "/savings", component: Savings },
   { path: "/loans", component: Loans },
   { path: "/cash-ledger", component: CashLedger },
+  { path: "/shu", component: Shu },
   { path: "/balance-sheet", component: BalanceSheet },
 ];
 

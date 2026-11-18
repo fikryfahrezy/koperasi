@@ -6,6 +6,7 @@ import Members from "../views/Members.vue";
 import Savings from "../views/Savings.vue";
 import Loans from "../views/Loans.vue";
 import CashLedger from "../views/CashLedger.vue";
+import Shu from "../views/Shu.vue";
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -46,6 +47,11 @@ export const router = createRouter({
       path: "/cash-ledger",
       component: CashLedger,
       meta: { titleKey: "sidebar.nav.cashLedger", fitViewport: true },
+    },
+    {
+      path: "/shu",
+      component: Shu,
+      meta: { titleKey: "sidebar.nav.shu" },
     },
     {
       path: "/balance-sheet",

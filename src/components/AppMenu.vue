@@ -3,6 +3,7 @@ import { RouterLink, useRouter } from "vue-router";
 
 import {
   BookOpen,
+  ChartPie,
   Coins,
   Database,
   HandCoins,
@@ -30,6 +31,7 @@ const menuItems = [
   { to: "/cash-ledger", labelKey: "sidebar.nav.cashLedger", icon: BookOpen },
   { to: "/savings", labelKey: "sidebar.nav.savings", icon: Coins },
   { to: "/loans", labelKey: "sidebar.nav.loans", icon: HandCoins },
+  { to: "/shu", labelKey: "sidebar.nav.shu", icon: ChartPie },
   { to: "/balance-sheet", labelKey: "sidebar.nav.balanceSheet", icon: Scale },
   { to: "/members", labelKey: "sidebar.nav.members", icon: Users },
 ];

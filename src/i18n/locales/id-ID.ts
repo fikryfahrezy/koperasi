@@ -29,6 +29,7 @@ export default {
       savings: "Simpanan",
       loans: "Pinjaman",
       cashLedger: "Buku kas",
+      shu: "SHU",
       balanceSheet: "Neraca",
       data: "Database",
     },

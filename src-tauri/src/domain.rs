@@ -196,6 +196,8 @@ string_enum!(ParameterKey {
     // Set at each RAT for the book year; see notes/rules-and-formulas.md 1.10, 2.3a.
     LoanIncentiveRate => "LOAN_INCENTIVE_RATE",
     SavingsIncentiveRate => "SAVINGS_INCENTIVE_RATE",
+    // Uang duduk + uang makan per anggota in the Daftar SHU, set for each book year.
+    ShuSittingAllowance => "SHU_SITTING_ALLOWANCE",
 });
 
 string_enum!(AuditEntityType {

@@ -10,7 +10,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use sqlx::{Row, SqlitePool};
 
 use super::ledger_report::{apply_loan_report_per_loan, apply_savings_report};
-use super::parameters::incentive_rates;
+use super::parameters::{incentive_rates, sitting_allowance};
 use crate::contracts::{LoanMonthDto, MonthlyLedgerDto, SavingsMonthDto};
 use crate::domain::{round_up_amount, ComponentType, InterestType, LoanType, SavingsAccountType};
 
@@ -269,6 +269,7 @@ pub(crate) async fn get_monthly_ledger(
         return Ok(MonthlyLedgerDto {
             loan_incentive_rate,
             savings_incentive_rate,
+            sitting_allowance: sitting_allowance(company_id, year, pool).await?,
             periods: Vec::new(),
             savings: Vec::new(),
             loans: Vec::new(),
@@ -521,6 +522,7 @@ pub(crate) async fn get_monthly_ledger(
     Ok(MonthlyLedgerDto {
         loan_incentive_rate,
         savings_incentive_rate,
+        sitting_allowance: sitting_allowance(company_id, year, pool).await?,
         periods,
         savings,
         loans,

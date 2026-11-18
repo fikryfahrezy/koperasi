@@ -290,6 +290,8 @@ export interface MonthlyLedger {
   /** Insentif Pinjaman and Insentif Simpanan rates of the year (0.101 = 10,1%). */
   loanIncentiveRate: number;
   savingsIncentiveRate: number;
+  /** Uang duduk + uang makan per anggota in the Daftar SHU of the year. */
+  sittingAllowance: number;
   periods: string[];
   savings: SavingsMonth[];
   loans: LoanMonth[];
@@ -648,6 +650,7 @@ const backend = {
     year: number;
     loanIncentiveRate?: number;
     savingsIncentiveRate?: number;
+    sittingAllowance?: number;
   }) =>
     invoke<void>(command.setIncentiveRates, {
       input,
@@ -1331,6 +1334,7 @@ async function getTransactionGroup(id: string) {
 const emptyMonthlyLedger: MonthlyLedger = {
   loanIncentiveRate: 0,
   savingsIncentiveRate: 0,
+  sittingAllowance: 0,
   periods: [],
   savings: [],
   loans: [],
@@ -1590,6 +1594,27 @@ async function setIncentiveRate(
   }
 }
 
+/** Saves the uang duduk + uang makan per anggota (in rupiah) of a year. */
+async function setSittingAllowance(year: number, amount: number) {
+  const companyId = selectedCompanyId.value;
+
+  try {
+    await backend.setIncentiveRates({ year, sittingAllowance: amount });
+
+    // Later years without their own amount inherit this one.
+    await queryClient.invalidateQueries({
+      queryKey: ["company", companyId, "monthly-ledger"],
+      predicate: (query) => Number(query.queryKey[3]) >= year,
+    });
+
+    notify("Uang duduk disimpan", `Tahun ${year}: ${formatCurrency(amount)}.`);
+    return true;
+  } catch (error) {
+    notify("Uang duduk gagal disimpan", errorMessage(error), "warning");
+    return false;
+  }
+}
+
 export const useKoperasiStore = () => ({
   members,
   loans,
@@ -1613,6 +1638,7 @@ export const useKoperasiStore = () => ({
   addMember,
   updateMember,
   setIncentiveRate,
+  setSittingAllowance,
   setBalanceSheetItems,
   memberNumberOwner,
   nextMemberNumber,
