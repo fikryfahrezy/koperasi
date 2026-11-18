@@ -116,31 +116,26 @@ const months = computed(() =>
   }),
 );
 
-const incomeTotal = computed(() => sum(months.value, (month) => month.income));
+type MonthKey = "interest" | "provision" | "income" | "disbursed";
 
-const disbursedTotal = computed(() =>
-  sum(months.value, (month) => month.disbursed),
+const totalOf = (key: MonthKey) => sum(months.value, (month) => month[key]);
+
+const incomeTotal = computed(() => totalOf("income"));
+
+const monthKeys: readonly MonthKey[] = [
+  "interest",
+  "provision",
+  "income",
+  "disbursed",
+];
+
+const monthTotals = computed(
+  () =>
+    Object.fromEntries(monthKeys.map((key) => [key, totalOf(key)])) as Record<
+      MonthKey,
+      number
+    >,
 );
-
-const maxOf = (key: "income" | "disbursed") =>
-  Math.max(1, ...months.value.map((month) => month[key]));
-
-const shortMonth = (period: string) => formatPeriod(period).slice(0, 3);
-
-const barCharts = computed(() => [
-  {
-    key: "income" as const,
-    title: "Pendapatan bunga + provisi per bulan",
-    total: incomeTotal.value,
-    max: maxOf("income"),
-  },
-  {
-    key: "disbursed" as const,
-    title: "Pinjaman baru (realisasi) per bulan",
-    total: disbursedTotal.value,
-    max: maxOf("disbursed"),
-  },
-]);
 
 const topArrears = computed(() =>
   loanRows.value
@@ -234,96 +229,43 @@ const share = (part: number, whole: number) =>
         </article>
       </div>
 
-      <div class="dashboard__grid">
-        <section class="panel dashboard__card">
-          <h2>Komposisi simpanan</h2>
-          <dl class="dashboard__list">
-            <div>
-              <dt>Simpanan pokok</dt>
-              <dd>{{ formatSheetNumber(savings.principal) }}</dd>
-              <small>{{ share(savings.principal, savings.total) }}</small>
-            </div>
-            <div>
-              <dt>Simpanan wajib</dt>
-              <dd>{{ formatSheetNumber(savings.mandatory) }}</dd>
-              <small>{{ share(savings.mandatory, savings.total) }}</small>
-            </div>
-            <div>
-              <dt>Simpanan manasuka</dt>
-              <dd>{{ formatSheetNumber(savings.voluntary) }}</dd>
-              <small>{{ share(savings.voluntary, savings.total) }}</small>
-            </div>
-            <div class="dashboard__list-total">
-              <dt>Jumlah</dt>
-              <dd>{{ formatSheetNumber(savings.total) }}</dd>
-              <small></small>
-            </div>
-          </dl>
-        </section>
-        <section class="panel dashboard__card">
-          <h2>Pinjaman</h2>
-          <dl class="dashboard__list">
-            <div>
-              <dt>Anggota PP BRI</dt>
-              <dd>{{ formatSheetNumber(loanSummary.member) }}</dd>
-              <small>{{ share(loanSummary.member, loanSummary.total) }}</small>
-            </div>
-            <div>
-              <dt>Non anggota PP BRI</dt>
-              <dd>{{ formatSheetNumber(loanSummary.nonMember) }}</dd>
-              <small>{{
-                share(loanSummary.nonMember, loanSummary.total)
-              }}</small>
-            </div>
-            <div>
-              <dt>Tunggakan pokok</dt>
-              <dd>{{ formatSheetNumber(loanSummary.arrearsPrincipal) }}</dd>
-              <small></small>
-            </div>
-            <div>
-              <dt>Tunggakan bunga</dt>
-              <dd>{{ formatSheetNumber(loanSummary.arrearsInterest) }}</dd>
-              <small></small>
-            </div>
-          </dl>
-        </section>
-      </div>
-
-      <div class="dashboard__grid">
-        <section
-          v-for="chart in barCharts"
-          :key="chart.key"
-          class="panel dashboard__card"
-        >
-          <h2>{{ chart.title }}</h2>
-          <p class="dashboard__card-meta">
-            Jumlah {{ selectedYear }}:
-            <strong>{{ formatSheetNumber(chart.total) }}</strong>
-          </p>
-          <div class="dashboard__bars" role="table" :aria-label="chart.title">
-            <div
-              v-for="month in months"
-              :key="month.period"
-              class="dashboard__bar"
-              role="row"
-              tabindex="0"
-              :data-value="`${formatPeriod(month.period)}: ${formatSheetNumber(month[chart.key])}`"
-            >
-              <span class="dashboard__bar-track" role="cell">
-                <span
-                  class="dashboard__bar-fill"
-                  :style="{
-                    height: `${(month[chart.key] / chart.max) * 100}%`,
-                  }"
-                ></span>
-              </span>
-              <span class="dashboard__bar-label" role="cell">
-                {{ shortMonth(month.period) }}
-              </span>
-            </div>
-          </div>
-        </section>
-      </div>
+      <section class="panel dashboard__card">
+        <h2>Pendapatan dan pinjaman baru per bulan {{ selectedYear }}</h2>
+        <div class="data-table-wrap">
+          <table class="dashboard__table">
+            <thead>
+              <tr>
+                <th>Bulan</th>
+                <th class="num-cell">Pendapatan bunga</th>
+                <th class="num-cell">Pendapatan provisi</th>
+                <th class="num-cell">Jumlah bunga + provisi</th>
+                <th class="num-cell">Pinjaman baru (realisasi)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="month in months" :key="month.period">
+                <td>{{ formatPeriod(month.period) }}</td>
+                <td v-for="key in monthKeys" :key="key" class="num-cell">
+                  <strong v-if="key === 'income'">{{
+                    formatSheetNumber(month[key])
+                  }}</strong>
+                  <template v-else>{{
+                    formatSheetNumber(month[key])
+                  }}</template>
+                </td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr>
+                <td>Jumlah</td>
+                <td v-for="key in monthKeys" :key="key" class="num-cell">
+                  {{ formatSheetNumber(monthTotals[key]) }}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </section>
 
       <section class="panel dashboard__card">
         <h2>10 tunggakan terbesar</h2>
@@ -402,11 +344,6 @@ const share = (part: number, whole: number) =>
 .dashboard__tile--warning {
   border-left: 3px solid var(--amber);
 }
-.dashboard__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 12px;
-}
 .dashboard__card {
   padding: 15px 17px;
   min-width: 0;
@@ -454,60 +391,6 @@ const share = (part: number, whole: number) =>
 .dashboard__list-total dt {
   color: var(--ink);
 }
-.dashboard__bars {
-  height: 170px;
-  display: grid;
-  grid-auto-columns: 1fr;
-  grid-auto-flow: column;
-  gap: 6px;
-  padding-top: 26px;
-}
-.dashboard__bar {
-  position: relative;
-  min-width: 0;
-  display: grid;
-  grid-template-rows: 1fr auto;
-  gap: 5px;
-  outline: 0;
-}
-.dashboard__bar-track {
-  display: flex;
-  align-items: flex-end;
-  border-bottom: 1px solid var(--line-strong);
-}
-.dashboard__bar-fill {
-  width: 100%;
-  max-width: 28px;
-  margin: 0 auto;
-  background: var(--green);
-  border-radius: 4px 4px 0 0 !important;
-}
-.dashboard__bar:hover .dashboard__bar-fill,
-.dashboard__bar:focus-visible .dashboard__bar-fill {
-  background: var(--green-dark);
-}
-.dashboard__bar-label {
-  color: var(--soft);
-  font-size: 10px;
-  text-align: center;
-}
-.dashboard__bar:hover::after,
-.dashboard__bar:focus-visible::after {
-  content: attr(data-value);
-  position: absolute;
-  bottom: calc(100% - 20px);
-  left: 50%;
-  z-index: 2;
-  transform: translateX(-50%);
-  padding: 4px 7px;
-  border: 1px solid var(--line-strong);
-  color: var(--ink);
-  background: #fff;
-  font-size: 10.5px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  pointer-events: none;
-}
 .dashboard__table {
   width: 100%;
   border-collapse: collapse;
@@ -523,6 +406,11 @@ const share = (part: number, whole: number) =>
 }
 .dashboard__table th.num-cell {
   text-align: right;
+}
+.dashboard__table tfoot td {
+  border-top: 2px solid var(--line-strong);
+  color: var(--ink);
+  font-weight: 700;
 }
 .dashboard__table td {
   padding: 7px 8px;
