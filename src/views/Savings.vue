@@ -220,6 +220,8 @@ const {
           aria-label="Bulan"
           variant="toolbar"
         />
+      </template>
+      <template #actions>
         <button
           v-if="monthlyLedger.periods.length"
           class="button button--secondary"
@@ -228,8 +230,6 @@ const {
         >
           <Percent :size="16" /> Insentif {{ selectedYear }}
         </button>
-      </template>
-      <template #actions>
         <ExportButton
           v-if="monthlyLedger.periods.length"
           kind="savings"
