@@ -124,6 +124,8 @@ const formatAmount = (value: number) => formatSheetNumber(Math.round(value));
             placeholder="Cari nama atau ID anggota..."
           />
         </label>
+      </template>
+      <template #actions>
         <button
           v-if="monthlyLedger.periods.length"
           class="button button--secondary"
