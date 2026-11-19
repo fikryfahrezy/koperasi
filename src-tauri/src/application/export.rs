@@ -12,7 +12,9 @@ use sqlx::{Row, SqlitePool};
 
 use super::ledger_report::{apply_loan_report_per_loan, is_running};
 use super::{get_app_snapshot, get_cash_book, get_monthly_ledger, list_companies};
-use crate::contracts::{CashBookDto, LoanDto, LoanMonthDto, MonthlyLedgerDto, SavingsMonthDto};
+use crate::contracts::{
+    CashBookDto, LoanDto, LoanMonthDto, MonthlyLedgerDto, SavingsMonthDto, SheetInput,
+};
 
 use crate::domain::{
     Channel, InterestType, LoanGroup, TransactionDirection, TransactionStatus, CASH_CATEGORIES,
@@ -181,6 +183,86 @@ pub(crate) async fn export_workbook(
             loans_sheet(&ledger, year, &snapshot.loans, &company, filter)
         }
     };
+
+    sheet.to_xlsx()
+}
+
+// --- Pages laid out by the frontend (SHU, Neraca) ----------------------------
+
+/// Largest row and column a page may write (Excel's own limits).
+const MAX_ROW: u32 = 1_048_576;
+const MAX_COL: u32 = 16_384;
+
+/// Only cell references, numbers, arithmetic and functions without text
+/// arguments (SUM, ROUNDUP): no quotes, so no links, paths or other sheets.
+fn is_plain_formula(formula: &str) -> bool {
+    !formula.is_empty()
+        && formula.chars().all(|ch| {
+            ch.is_ascii_uppercase()
+                || ch.is_ascii_digit()
+                || matches!(
+                    ch,
+                    '$' | ':' | '+' | '-' | '*' | '/' | '(' | ')' | ',' | '.'
+                )
+        })
+}
+
+fn in_bounds(row: u32, col: u32) -> bool {
+    (1..=MAX_ROW).contains(&row) && (1..=MAX_COL).contains(&col)
+}
+
+/// The .xlsx bytes of a sheet a page laid out itself, with its formulas.
+pub(crate) fn sheet_workbook(input: &SheetInput) -> Result<Vec<u8>, String> {
+    let mut sheet = Sheet::new(&input.sheet_name);
+
+    for cell in &input.cells {
+        if !in_bounds(cell.row, cell.col) {
+            return Err(format!("Sel di luar batas: {}, {}", cell.row, cell.col));
+        }
+
+        let style = Style::parse(&cell.style)?;
+
+        if let Some(formula) = &cell.formula {
+            if !is_plain_formula(formula) {
+                return Err(format!("Rumus tidak didukung: {formula}"));
+            }
+
+            sheet.formula_text(
+                cell.row,
+                cell.col,
+                formula,
+                cell.number.unwrap_or(0.0),
+                style,
+            );
+        } else if let Some(text) = &cell.text {
+            sheet.text(cell.row, cell.col, text, style);
+        } else if let Some(date) = &cell.date {
+            match date_serial(date) {
+                Some(serial) => sheet.number(cell.row, cell.col, serial, style),
+                None => sheet.text(cell.row, cell.col, date, style),
+            }
+        } else if let Some(number) = cell.number {
+            sheet.number(cell.row, cell.col, number, style);
+        } else {
+            sheet.style(cell.row, cell.col, style);
+        }
+    }
+
+    for [first_row, first_col, last_row, last_col] in &input.merges {
+        if !in_bounds(*first_row, *first_col) || !in_bounds(*last_row, *last_col) {
+            return Err("Rentang gabungan di luar batas.".into());
+        }
+
+        sheet.merge((*first_row, *first_col), (*last_row, *last_col));
+    }
+
+    for column in &input.columns {
+        sheet.width(column.col, column.width);
+    }
+
+    if let Some([row, col]) = input.freeze {
+        sheet.freeze(row, col);
+    }
 
     sheet.to_xlsx()
 }
@@ -1619,5 +1701,47 @@ mod tests {
                 std::fs::write(out.join(name), bytes).unwrap();
             }
         });
+    }
+
+    #[test]
+    fn writes_a_page_sheet_and_rejects_unsafe_formulas() {
+        use crate::contracts::{SheetCellInput, SheetColumnInput};
+
+        let cell = |row, col, number: Option<f64>, formula: Option<&str>| SheetCellInput {
+            row,
+            col,
+            text: None,
+            number,
+            date: None,
+            formula: formula.map(str::to_string),
+            style: "number".into(),
+        };
+
+        let mut input = SheetInput {
+            file_name: "SHU.xlsx".into(),
+            sheet_name: "Sheet1".into(),
+            cells: vec![
+                cell(1, 1, Some(418_657.795), None),
+                cell(1, 2, Some(419_000.0), Some("ROUNDUP(A1,-3)")),
+                cell(2, 2, Some(419_000.0), Some("SUM($B$1:B1)")),
+            ],
+            merges: vec![[3, 1, 3, 2]],
+            columns: vec![SheetColumnInput {
+                col: 1,
+                width: 12.0,
+            }],
+            freeze: Some([2, 1]),
+        };
+
+        assert!(sheet_workbook(&input).is_ok());
+
+        for formula in ["HYPERLINK(\"http://x\")", "[1]SIMPANAN!A1", "A1&B1", ""] {
+            input.cells[1].formula = Some(formula.into());
+            assert!(sheet_workbook(&input).is_err(), "{formula}");
+        }
+
+        input.cells[1].formula = None;
+        input.cells[0].row = 0;
+        assert!(sheet_workbook(&input).is_err());
     }
 }

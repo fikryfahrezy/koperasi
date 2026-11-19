@@ -57,6 +57,7 @@ pub(crate) fn run() {
             crate::commands::get_balance_sheet,
             crate::commands::set_balance_sheet,
             crate::commands::export_xlsx,
+            crate::commands::export_sheet,
             crate::commands::database_location,
             crate::commands::export_database,
             crate::commands::import_database

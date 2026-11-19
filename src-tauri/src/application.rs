@@ -14,7 +14,7 @@ mod transaction_groups;
 mod transactions;
 
 pub(crate) use balance_sheet::{get_balance_sheet, set_balance_sheet};
-pub(crate) use export::{export_workbook, ExportFilter, ExportKind};
+pub(crate) use export::{export_workbook, sheet_workbook, ExportFilter, ExportKind};
 pub(crate) use ledger::get_monthly_ledger;
 pub(crate) use loans::{create_loan, preview_loan};
 pub(crate) use members::{add_member, update_member};

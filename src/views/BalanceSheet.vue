@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { PencilLine, Plus, X } from "lucide-vue-next";
+import ExportButton from "../components/ExportButton.vue";
 import BalanceSheetListPanel from "../components/BalanceSheetListPanel.vue";
 import SheetAmountInput from "../components/SheetAmountInput.vue";
 import PageHeader from "../components/PageHeader.vue";
@@ -8,6 +9,7 @@ import UiSelect from "../components/UiSelect.vue";
 import { useBalanceSheetDrafts } from "../composables/useBalanceSheetDrafts";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import { BalanceSheetItem, balanceSheetAt, sheetRows } from "../balance-sheet";
+import { balanceSheetSheet } from "../balance-sheet-export";
 
 import {
   Channel,
@@ -148,6 +150,25 @@ const columns = computed(() => [
   columnLabel(selectedPeriod.value),
 ]);
 
+const COMPANY = "KOPERASI PENSIUNAN BRI BINA SEJAHTERA";
+
+// The Neraca shown, unsaved changes included, as NERACA of BUKU KAS HARIAN.
+const exportSheet = () => {
+  const position = lastDay(selectedPeriod.value).toUpperCase();
+
+  return balanceSheetSheet({
+    company: COMPANY,
+    position,
+    periods: [previousPeriod.value, selectedPeriod.value],
+    rows: rows.value,
+    notes: {
+      nonMemberByRecommender: current.value.nonMemberByRecommender,
+      otherLoans: balanceSheetDetails.value[BalanceSheetItem.OtherLoans] ?? [],
+    },
+    fileName: `NERACA POSISI ${position}.xlsx`,
+  });
+};
+
 const hasEstimate = computed(() =>
   rows.value.some((row) =>
     [row.left, row.right].some(
@@ -169,6 +190,9 @@ const hasEstimate = computed(() =>
           aria-label="Bulan"
           variant="toolbar"
         />
+      </template>
+      <template #actions>
+        <ExportButton v-if="periods.length" :sheet="exportSheet" />
       </template>
     </PageHeader>
 
@@ -192,7 +216,7 @@ const hasEstimate = computed(() =>
 
       <section class="panel balance-sheet">
         <header class="balance-sheet__title">
-          <h2>KOPERASI PENSIUNAN BRI BINA SEJAHTERA</h2>
+          <h2>{{ COMPANY }}</h2>
           <strong>NERACA</strong>
           <u>POSISI {{ lastDay(selectedPeriod).toUpperCase() }}</u>
         </header>

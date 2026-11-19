@@ -30,6 +30,25 @@ pub(crate) enum Style {
     HeaderPercent = 10,
 }
 
+impl Style {
+    /// A style by the name the frontend uses for a page's own export.
+    pub(crate) fn parse(value: &str) -> Result<Self, String> {
+        Ok(match value {
+            "header" => Self::Header,
+            "number" => Self::Number,
+            "date" => Self::Date,
+            "text" => Self::Text,
+            "totalNumber" => Self::TotalNumber,
+            "totalText" => Self::TotalText,
+            "title" => Self::Title,
+            "percent" => Self::Percent,
+            "integer" => Self::Integer,
+            "headerPercent" => Self::HeaderPercent,
+            _ => return Err(format!("Gaya sel tidak valid: {value}")),
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 enum Value {
     Number(f64),
@@ -256,6 +275,19 @@ impl Sheet {
     pub(crate) fn formula(&mut self, row: u32, col: u32, expr: &Expr, style: Style) {
         let value = self.eval(expr);
         self.put(row, col, Value::Formula(expr.formula(), value), style);
+    }
+
+    /// A formula given as text (without `=`) with the value it gives, for a
+    /// page that lays out its own export (SHU, Neraca).
+    pub(crate) fn formula_text(
+        &mut self,
+        row: u32,
+        col: u32,
+        text: &str,
+        value: f64,
+        style: Style,
+    ) {
+        self.put(row, col, Value::Formula(text.to_string(), value), style);
     }
 
     /// Writes the formula when Excel shows it as `expected` (the app's value),

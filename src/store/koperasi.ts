@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/vue-query";
 import { computed, reactive, ref, watch } from "vue";
 import { queryClient, queryKeys } from "../query-client";
 import { DEFAULT_LOCALE, translate } from "../i18n";
+import type { SheetSpec } from "../xlsx-sheet";
 
 export const TransactionStatus = {
   Posted: "Terposting",
@@ -521,6 +522,7 @@ const command = {
   getBalanceSheet: "get_balance_sheet",
   setBalanceSheet: "set_balance_sheet",
   exportXlsx: "export_xlsx",
+  exportSheet: "export_sheet",
   databaseLocation: "database_location",
   exportDatabase: "export_database",
   importDatabase: "import_database",
@@ -540,6 +542,8 @@ export interface ExportFilter {
 }
 
 const backend = {
+  exportSheet: (input: SheetSpec) =>
+    invoke<string | null>(command.exportSheet, { input }),
   databaseLocation: () => invoke<string>(command.databaseLocation),
   exportDatabase: () => invoke<string | null>(command.exportDatabase),
   // Restarts the app once the picked file replaces the database.
@@ -688,15 +692,22 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Saves the year's page as .xlsx where the user picks; false when it failed. */
-async function exportXlsx(kind: ExportKind, filter: ExportFilter = {}) {
+/** Saves the year's page as .xlsx where the user picks; false when it failed.
+ * A page that lays out its sheet itself (SHU, Neraca) passes it as `sheet`. */
+async function exportXlsx(
+  kind: ExportKind | SheetSpec,
+  filter: ExportFilter = {},
+) {
   try {
-    const path = await backend.exportXlsx(
-      kind,
-      selectedYear.value,
-      currentPeriod(),
-      filter,
-    );
+    const path =
+      typeof kind === "string"
+        ? await backend.exportXlsx(
+            kind,
+            selectedYear.value,
+            currentPeriod(),
+            filter,
+          )
+        : await backend.exportSheet(kind);
 
     if (path)
       notify(translate("notifications.exported"), path, "success", path);

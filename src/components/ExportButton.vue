@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import { FileSpreadsheet } from "lucide-vue-next";
 
+import type { SheetSpec } from "../xlsx-sheet";
 import {
   type ExportFilter,
   type ExportKind,
@@ -9,8 +10,13 @@ import {
 } from "../store/koperasi";
 
 // Saves the page's year as .xlsx in the layout of its workbook, with formulas,
-// limited to what the page's filters show.
-const props = defineProps<{ kind: ExportKind; filter?: ExportFilter }>();
+// limited to what the page's filters show. SHU and Neraca lay out their sheet
+// themselves and pass it as `sheet`.
+const props = defineProps<{
+  kind?: ExportKind;
+  filter?: ExportFilter;
+  sheet?: () => SheetSpec;
+}>();
 
 const { exportXlsx } = useKoperasiStore();
 const exporting = ref(false);
@@ -20,7 +26,8 @@ async function handleExport() {
   exporting.value = true;
 
   try {
-    await exportXlsx(props.kind, props.filter);
+    const target = props.sheet?.() ?? props.kind;
+    if (target) await exportXlsx(target, props.filter);
   } finally {
     exporting.value = false;
   }
