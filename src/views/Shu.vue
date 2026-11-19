@@ -3,9 +3,11 @@ import { computed, ref } from "vue";
 import { CalendarX2, Search, Wallet } from "lucide-vue-next";
 import { useDebouncedRef } from "../composables/useDebouncedRef";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
+import ExportButton from "../components/ExportButton.vue";
 import PageHeader from "../components/PageHeader.vue";
 import SittingAllowanceDialog from "../components/SittingAllowanceDialog.vue";
 import { registeredBy, shuRows, sumShuRows } from "../shu";
+import { shuSheet } from "../shu-export";
 
 import {
   formatPeriod,
@@ -99,6 +101,15 @@ const amountKeys = [
   "rounded",
 ] as const;
 
+// The rows the page shows (search included), as DAFTAR SHU TAHUN BUKU.
+const exportSheet = () =>
+  shuSheet({
+    year: selectedYear.value,
+    rows: rows.value,
+    savingsRate: monthlyLedger.value.savingsIncentiveRate,
+    loanRate: monthlyLedger.value.loanIncentiveRate,
+  });
+
 // Members without a loan show "-" for Jasa Pinjaman and its SHU.
 const formatAmount = (value: number) => formatSheetNumber(Math.round(value));
 </script>
@@ -134,6 +145,10 @@ const formatAmount = (value: number) => formatSheetNumber(Math.round(value));
         >
           <Wallet :size="16" /> Uang duduk {{ selectedYear }}
         </button>
+        <ExportButton
+          v-if="monthlyLedger.periods.length"
+          :sheet="exportSheet"
+        />
       </template>
     </PageHeader>
     <section

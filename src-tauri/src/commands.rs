@@ -13,7 +13,7 @@ use crate::{
         AddMemberInput, AppSnapshot, BalanceSheetDto, CashBookDto, CashEntryInput, CompanyDto,
         CreateLoanInput, FinancialParametersDto, LoanPreview, MonthlyLedgerDto, PaymentInput,
         PreviewLoanInput, ReverseTransactionInput, SavingsTransactionInput, SetBalanceSheetInput,
-        SetIncentiveRatesInput, TransactionGroupDto, UpdateMemberInput,
+        SetIncentiveRatesInput, SheetInput, TransactionGroupDto, UpdateMemberInput,
     },
     database,
     state::AppState,
@@ -317,4 +317,34 @@ pub(crate) async fn import_database(
     }
 
     app.restart()
+}
+
+/// Exports a sheet a page laid out itself (SHU, Neraca) as .xlsx to a file the
+/// user picks. Returns the saved path, or nothing when cancelled.
+#[tauri::command]
+pub(crate) async fn export_sheet(
+    input: SheetInput,
+    app: tauri::AppHandle,
+) -> Result<Option<String>, String> {
+    // Built before asking where to save, so a bad sheet fails without a dialog.
+    let bytes = application::sheet_workbook(&input)?;
+    let file_name = input.file_name;
+
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_file_name(file_name)
+            .add_filter("Excel", &["xlsx"])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+
+    let path = picked.into_path().map_err(|error| error.to_string())?;
+    std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
+    Ok(Some(path.display().to_string()))
 }

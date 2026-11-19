@@ -456,3 +456,45 @@ pub(crate) struct CashBookDto {
     pub(crate) savings_book_opening_balance: Option<i64>,
     pub(crate) rows: Vec<CashBookRowDto>,
 }
+
+/// One cell of a sheet a page lays out itself (SHU, Neraca). Exactly one of
+/// `text`, `number`, `date` (`YYYY-MM-DD`) or `formula` (without `=`, with the
+/// value it gives in `number`) is set; none leaves an empty, styled cell.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SheetCellInput {
+    pub(crate) row: u32,
+    pub(crate) col: u32,
+    #[serde(default)]
+    pub(crate) text: Option<String>,
+    #[serde(default)]
+    pub(crate) number: Option<f64>,
+    #[serde(default)]
+    pub(crate) date: Option<String>,
+    #[serde(default)]
+    pub(crate) formula: Option<String>,
+    pub(crate) style: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SheetColumnInput {
+    pub(crate) col: u32,
+    pub(crate) width: f64,
+}
+
+/// A page's export as one worksheet: cells, merged ranges
+/// (`[first row, first col, last row, last col]`) and column widths.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SheetInput {
+    pub(crate) file_name: String,
+    pub(crate) sheet_name: String,
+    pub(crate) cells: Vec<SheetCellInput>,
+    #[serde(default)]
+    pub(crate) merges: Vec<[u32; 4]>,
+    #[serde(default)]
+    pub(crate) columns: Vec<SheetColumnInput>,
+    #[serde(default)]
+    pub(crate) freeze: Option<[u32; 2]>,
+}
