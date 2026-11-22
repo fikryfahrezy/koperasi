@@ -33,6 +33,16 @@ pub(crate) struct SavingsBalanceDto {
     pub(crate) balance: i64,
 }
 
+/// A penabung Non Anggota: a Manasuka account with a name and no member.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NonMemberSaverDto {
+    /// The savings account id; it identifies the saver.
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) balance: i64,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LoanDto {
@@ -105,6 +115,8 @@ pub(crate) struct TotalsDto {
 pub(crate) struct AppSnapshot {
     pub(crate) members: Vec<MemberDto>,
     pub(crate) savings_balances: Vec<SavingsBalanceDto>,
+    /// Penabung Non Anggota, in the order they were added (SIMPANAN).
+    pub(crate) non_member_savers: Vec<NonMemberSaverDto>,
     pub(crate) loans: Vec<LoanDto>,
     pub(crate) transactions: Vec<TransactionDto>,
     pub(crate) totals: TotalsDto,
@@ -212,6 +224,10 @@ pub(crate) struct PaymentInput {
     pub(crate) pokok: i64,
     pub(crate) wajib: i64,
     pub(crate) voluntary: i64,
+    /// Penabung Non Anggota (member_id empty): the saver's name. A new name
+    /// opens their Manasuka account.
+    #[serde(default)]
+    pub(crate) saver_name: String,
     /// Uraian typed by the user; empty uses "Setoran {name}".
     #[serde(default)]
     pub(crate) description: String,
@@ -231,6 +247,10 @@ pub(crate) struct LoanPaymentLine {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SavingsTransactionInput {
     pub(crate) member_id: String,
+    /// Penabung Non Anggota (member_id empty): the saver's name. Only
+    /// Manasuka; a deposit under a new name opens the account.
+    #[serde(default)]
+    pub(crate) saver_name: String,
     #[serde(default)]
     pub(crate) account_type: String,
     pub(crate) movement: String,
@@ -294,6 +314,13 @@ pub(crate) struct BalanceSheetDto {
     pub(crate) items: std::collections::BTreeMap<String, i64>,
     /// Rincian by line key, in their saved order.
     pub(crate) details: std::collections::BTreeMap<String, Vec<BalanceSheetDetailDto>>,
+    /// Typed lines of all earlier book years added up, by key: with
+    /// `prior_categories`, the 1 January balance of lines carried from the
+    /// Neraca of last year (dana, cadangan, hutang).
+    pub(crate) prior_items: std::collections::BTreeMap<String, i64>,
+    /// Buku Kas (KAS) components dated before this book year added up, by
+    /// component type.
+    pub(crate) prior_categories: std::collections::BTreeMap<String, i64>,
 }
 
 #[derive(Deserialize)]
@@ -321,6 +348,27 @@ pub(crate) struct SetIncentiveRatesInput {
     pub(crate) sitting_allowance: Option<i64>,
 }
 
+/// New values of the parameters used by the forms, from `effective_date`
+/// ("YYYY-MM-DD"). A value left out is not changed.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SetFinancialParametersInput {
+    pub(crate) effective_date: String,
+    #[serde(default)]
+    pub(crate) principal_savings: Option<i64>,
+    #[serde(default)]
+    pub(crate) mandatory_savings: Option<i64>,
+    /// Percent: 1 = 1%.
+    #[serde(default)]
+    pub(crate) provision_rate: Option<f64>,
+    /// Percent per year: 24 = 24%.
+    #[serde(default)]
+    pub(crate) annual_rate: Option<f64>,
+    /// Batas sisa pinjaman per peminjam; 0 turns the warning off.
+    #[serde(default)]
+    pub(crate) max_loan_outstanding: Option<i64>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FinancialParametersDto {
@@ -346,7 +394,10 @@ pub(crate) struct LoanPreview {
 #[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SavingsMonthDto {
+    /// The member, or for a penabung Non Anggota their savings account id.
     pub(crate) member_id: String,
+    /// A penabung Non Anggota: no SHU or Insentif Simpanan.
+    pub(crate) non_member: bool,
     pub(crate) period: String,
     pub(crate) transaction_date: String,
     pub(crate) principal_opening: i64,

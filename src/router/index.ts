@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import NewTab from "../views/NewTab.vue";
 import Dashboard from "../views/Dashboard.vue";
 import BalanceSheet from "../views/BalanceSheet.vue";
+import IncomeStatement from "../views/IncomeStatement.vue";
 import Members from "../views/Members.vue";
 import Savings from "../views/Savings.vue";
 import Loans from "../views/Loans.vue";
@@ -59,9 +60,19 @@ export const router = createRouter({
       meta: { titleKey: "sidebar.nav.balanceSheet" },
     },
     {
+      path: "/income-statement",
+      component: IncomeStatement,
+      meta: { titleKey: "sidebar.nav.incomeStatement" },
+    },
+    {
       path: "/data",
       component: () => import("../views/DataTransfer.vue"),
       meta: { titleKey: "sidebar.nav.data" },
+    },
+    {
+      path: "/settings",
+      component: () => import("../views/Settings.vue"),
+      meta: { titleKey: "sidebar.nav.settings" },
     },
     { path: "/:pathMatch(.*)*", redirect: "/new-tab" },
   ],

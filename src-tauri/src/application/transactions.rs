@@ -10,8 +10,8 @@ use super::transaction_groups::deletion_set;
 use crate::{
     contracts::{AppSnapshot, CashEntryInput, ReverseTransactionInput},
     domain::{
-        timestamp_id, validate_business_date, AuditAction, AuditEntityType, Channel, ComponentType,
-        TransactionDirection, CASH_CATEGORIES,
+        cash_category, timestamp_id, validate_business_date, AuditAction, AuditEntityType, Channel,
+        ComponentType, TransactionDirection,
     },
 };
 
@@ -248,12 +248,20 @@ pub(crate) async fn post_cash_entry(
         "" => (ComponentType::Cash, "Mutasi kas"),
         code => {
             let component_type = ComponentType::try_from(code)?;
+            let (label, only) =
+                cash_category(component_type).ok_or("Kategori Buku Kas tidak valid.")?;
 
-            CASH_CATEGORIES
-                .iter()
-                .find(|(category, _)| *category == component_type)
-                .copied()
-                .ok_or("Kategori Buku Kas tidak valid.")?
+            match only {
+                Some(TransactionDirection::In) if direction != TransactionDirection::In => {
+                    return Err(format!("{label} hanya untuk kas masuk."))
+                }
+                Some(TransactionDirection::Out) if direction != TransactionDirection::Out => {
+                    return Err(format!("{label} hanya untuk kas keluar."))
+                }
+                _ => {}
+            }
+
+            (component_type, label)
         }
     };
 

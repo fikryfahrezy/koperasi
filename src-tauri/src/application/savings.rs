@@ -52,6 +52,84 @@ pub(crate) async fn savings_account_id(
     .ok_or_else(|| "Rekening simpanan tidak ditemukan.".to_string())
 }
 
+/// The Manasuka account of a penabung Non Anggota by name (case-insensitive),
+/// with the name as recorded. A deposit under a new name opens the account.
+pub(crate) async fn non_member_account(
+    db: &mut SqliteConnection,
+    company_id: &str,
+    name: &str,
+    open: bool,
+) -> Result<(String, String), String> {
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    if name.is_empty() {
+        return Err("Pilih anggota atau isi nama penabung non anggota.".into());
+    }
+
+    let found = sqlx::query(
+        "SELECT id, holder_name
+         FROM savings_accounts
+         WHERE company_id = ? AND member_id IS NULL AND holder_name = ? COLLATE NOCASE",
+    )
+    .bind(company_id)
+    .bind(&name)
+    .fetch_optional(&mut *db)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    if let Some(row) = found {
+        return Ok((
+            row.try_get("id").map_err(|error| error.to_string())?,
+            row.try_get("holder_name")
+                .map_err(|error| error.to_string())?,
+        ));
+    }
+
+    if !open {
+        return Err("Penabung non anggota tidak ditemukan.".into());
+    }
+
+    // Member names as stored may hold extra spaces; compare them the way the
+    // saver's name was cleaned.
+    let normalized = |text: &str| {
+        text.split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase()
+    };
+    let wanted = normalized(&name);
+
+    let taken = sqlx::query_scalar::<_, String>("SELECT name FROM members WHERE company_id = ?")
+        .bind(company_id)
+        .fetch_all(&mut *db)
+        .await
+        .map_err(|error| error.to_string())?
+        .iter()
+        .any(|member| normalized(member) == wanted);
+
+    if taken {
+        return Err(format!(
+            "{name} terdaftar sebagai anggota; pilih anggotanya, bukan penabung non anggota."
+        ));
+    }
+
+    let id = timestamp_id("SA-NA");
+
+    sqlx::query(
+        "INSERT INTO savings_accounts (id, company_id, member_id, holder_name, account_type)
+         VALUES (?, ?, NULL, ?, ?)",
+    )
+    .bind(&id)
+    .bind(company_id)
+    .bind(&name)
+    .bind(SavingsAccountType::Voluntary.as_str())
+    .execute(&mut *db)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    Ok((id, name))
+}
+
 /// The trimmed text the user typed, or `fallback` when it is empty.
 pub(crate) fn trimmed_or(input: &str, fallback: String) -> String {
     if input.trim().is_empty() {
@@ -110,8 +188,27 @@ pub(crate) async fn post_savings_transaction(
     let channel = Channel::try_from(input.channel.as_str())?;
     validate_business_date(&input.business_date)?;
     let mut db = pool.begin().await.map_err(|error| error.to_string())?;
-    let member_name = member_name(&mut db, company_id, &input.member_id).await?;
     let is_deposit = movement == SavingsMovement::Deposit;
+    // A penabung Non Anggota has no member, only a Manasuka account.
+    let non_member = input.member_id.trim().is_empty();
+
+    let (member_name, non_member_account_id) = if non_member {
+        if amounts
+            .iter()
+            .any(|(account_type, _)| *account_type != SavingsAccountType::Voluntary)
+        {
+            return Err("Penabung non anggota hanya punya simpanan manasuka.".into());
+        }
+
+        let (id, name) =
+            non_member_account(&mut db, company_id, &input.saver_name, is_deposit).await?;
+        (name, Some(id))
+    } else {
+        (
+            member_name(&mut db, company_id, &input.member_id).await?,
+            None,
+        )
+    };
 
     let (component_type, direction) = if is_deposit {
         (ComponentType::SavingsDeposit, TransactionDirection::In)
@@ -130,8 +227,12 @@ pub(crate) async fn post_savings_transaction(
     let mut components = Vec::new();
 
     for (account_type, amount) in &amounts {
-        let account_id =
-            savings_account_id(&mut db, company_id, &input.member_id, *account_type).await?;
+        let account_id = match &non_member_account_id {
+            Some(id) => id.clone(),
+            None => {
+                savings_account_id(&mut db, company_id, &input.member_id, *account_type).await?
+            }
+        };
 
         if !is_deposit && savings_balance(&mut db, company_id, &account_id).await? < *amount {
             return Err(if amounts.len() == 1 {
@@ -182,7 +283,7 @@ pub(crate) async fn post_savings_transaction(
         Entry {
             id: id.clone(),
             business_date: &input.business_date,
-            member_id: Some(&input.member_id),
+            member_id: (!non_member).then_some(input.member_id.as_str()),
             member_name: &member_name,
             channel,
             description: &description,
@@ -283,6 +384,7 @@ pub(crate) async fn post_payment(
 
         let deposit = SavingsTransactionInput {
             member_id: input.member_id,
+            saver_name: input.saver_name,
             account_type: String::new(),
             movement: SavingsMovement::Deposit.as_str().into(),
             amount: 0,

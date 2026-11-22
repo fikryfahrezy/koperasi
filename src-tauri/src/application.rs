@@ -18,7 +18,9 @@ pub(crate) use export::{export_workbook, sheet_workbook, ExportFilter, ExportKin
 pub(crate) use ledger::get_monthly_ledger;
 pub(crate) use loans::{create_loan, preview_loan};
 pub(crate) use members::{add_member, update_member};
-pub(crate) use parameters::{get_financial_parameters, set_incentive_rates};
+pub(crate) use parameters::{
+    get_financial_parameters, set_financial_parameters, set_incentive_rates,
+};
 pub(crate) use read_model::{get_app_snapshot, get_cash_book};
 
 #[cfg(test)]
@@ -85,6 +87,7 @@ mod tests {
     fn payment(principal: i64, channel: &str) -> PaymentInput {
         PaymentInput {
             member_id: "testing-M001".into(),
+            saver_name: String::new(),
             loan_id: String::new(),
             principal,
             interest: 20_000,
@@ -627,6 +630,7 @@ mod tests {
             let savings = |movement: SavingsMovement, amounts: &[(SavingsAccountType, i64)]| {
                 SavingsTransactionInput {
                     member_id: "default-M001".into(),
+                    saver_name: String::new(),
                     account_type: String::new(),
                     movement: movement.as_str().into(),
                     amount: 0,
@@ -746,6 +750,7 @@ mod tests {
             // movement it is sent.
             let withdrawal = SavingsTransactionInput {
                 member_id: "default-M001".into(),
+                saver_name: String::new(),
                 account_type: SavingsAccountType::Voluntary.as_str().into(),
                 movement: SavingsMovement::Deposit.as_str().into(),
                 amount: 20_000,
@@ -783,6 +788,101 @@ mod tests {
                     ("SAV", "Pengambilan Manasuka Saver", 20_000),
                 ]
             );
+        });
+    }
+
+    #[test]
+    fn non_member_savers_save_manasuka_without_a_member() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+
+            add_member(member_input("Anggota"), "default", &pool)
+                .await
+                .unwrap();
+
+            let deposit = |name: &str, voluntary: i64| PaymentInput {
+                member_id: String::new(),
+                saver_name: name.into(),
+                principal: 0,
+                interest: 0,
+                wajib: 0,
+                voluntary,
+                ..payment(0, Channel::Cash.as_str())
+            };
+
+            // A new name opens the saver's Manasuka account; the same name
+            // (any case or spacing) deposits into it again.
+            post_payment(deposit("Penabung Satu", 700_000), "default", &pool)
+                .await
+                .unwrap();
+
+            let snapshot = post_payment(deposit(" penabung   satu ", 600_000), "default", &pool)
+                .await
+                .unwrap();
+
+            assert_eq!(snapshot.members.len(), 1, "not a member");
+            assert_eq!(snapshot.non_member_savers.len(), 1);
+            assert_eq!(snapshot.non_member_savers[0].name, "Penabung Satu");
+            assert_eq!(snapshot.non_member_savers[0].balance, 1_300_000);
+
+            // Only Manasuka, and not under a member's name.
+            let wajib = PaymentInput {
+                wajib: 10_000,
+                ..deposit("Penabung Satu", 0)
+            };
+            assert!(post_payment(wajib, "default", &pool).await.is_err());
+            assert!(post_payment(deposit("anggota", 1_000), "default", &pool)
+                .await
+                .is_err());
+
+            let withdrawal = |name: &str, amount: i64| SavingsTransactionInput {
+                member_id: String::new(),
+                saver_name: name.into(),
+                account_type: SavingsAccountType::Voluntary.as_str().into(),
+                movement: SavingsMovement::Withdrawal.as_str().into(),
+                amount,
+                amounts: Vec::new(),
+                description: String::new(),
+                channel: Channel::Cash.as_str().into(),
+                business_date: DATE.into(),
+            };
+
+            assert!(post_savings_withdrawal(
+                withdrawal("Penabung Satu", 2_000_000),
+                "default",
+                &pool
+            )
+            .await
+            .is_err());
+            assert!(
+                post_savings_withdrawal(withdrawal("Orang Lain", 1_000), "default", &pool)
+                    .await
+                    .is_err()
+            );
+
+            let snapshot =
+                post_savings_withdrawal(withdrawal("PENABUNG SATU", 300_000), "default", &pool)
+                    .await
+                    .unwrap();
+
+            assert_eq!(snapshot.non_member_savers[0].balance, 1_000_000);
+
+            let book = get_cash_book("default", 2026, Channel::Cash.as_str(), &pool)
+                .await
+                .unwrap();
+
+            let last = &book.rows[book.rows.len() - 1].transaction;
+            assert_eq!(last.description, "Pengambilan Manasuka Penabung Satu");
+
+            // The ledger lists the saver after the members, without Insentif.
+            let ledger = get_monthly_ledger("default", 2026, None, &pool)
+                .await
+                .unwrap();
+            let saver: Vec<_> = ledger.savings.iter().filter(|row| row.non_member).collect();
+            assert_eq!(saver.len(), 1);
+            assert_eq!(saver[0].member_id, snapshot.non_member_savers[0].id);
+            assert_eq!(saver[0].voluntary_closing, 1_000_000);
+            assert_eq!(saver[0].savings_incentive, 0);
         });
     }
 
@@ -1318,6 +1418,7 @@ mod tests {
             let typed = post_savings_transaction(
                 SavingsTransactionInput {
                     member_id: "default-M001".into(),
+                    saver_name: String::new(),
                     amounts: Vec::new(),
                     account_type: SavingsAccountType::Voluntary.as_str().into(),
                     movement: SavingsMovement::Deposit.as_str().into(),
@@ -1355,6 +1456,7 @@ mod tests {
             let invalid_account_type = post_savings_transaction(
                 SavingsTransactionInput {
                     member_id: "testing-M001".into(),
+                    saver_name: String::new(),
                     amounts: Vec::new(),
                     account_type: "UNKNOWN".into(),
                     movement: crate::domain::SavingsMovement::Deposit.as_str().into(),
@@ -1405,6 +1507,7 @@ mod tests {
                 post_savings_transaction(
                     SavingsTransactionInput {
                         member_id: member_id.into(),
+                        saver_name: String::new(),
                         amounts: Vec::new(),
                         account_type: SavingsAccountType::Voluntary.as_str().into(),
                         movement: SavingsMovement::Deposit.as_str().into(),
@@ -1423,6 +1526,7 @@ mod tests {
             let overdraw = post_savings_transaction(
                 SavingsTransactionInput {
                     member_id: "testing-M001".into(),
+                    saver_name: String::new(),
                     amounts: Vec::new(),
                     account_type: SavingsAccountType::Voluntary.as_str().into(),
                     movement: SavingsMovement::Withdrawal.as_str().into(),
@@ -1442,6 +1546,7 @@ mod tests {
             let principal_overdraw = post_savings_transaction(
                 SavingsTransactionInput {
                     member_id: "testing-M001".into(),
+                    saver_name: String::new(),
                     amounts: Vec::new(),
                     account_type: SavingsAccountType::Principal.as_str().into(),
                     movement: SavingsMovement::Withdrawal.as_str().into(),

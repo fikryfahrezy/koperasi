@@ -146,6 +146,17 @@ string_enum!(ComponentType {
     Other => "LAINNYA",
     Dekopinda => "DEKOPINDA",
     Parcel => "PARCEL",
+    // Neraca categories of Buku Kas: cash that moves a Neraca line instead of
+    // being a Laba Rugi expense (Neraca Penyesuaian of BUKU KAS HARIAN).
+    EducationFundUse => "PAKAI_DANA_PENDIDIKAN",
+    PmdkFundUse => "PAKAI_DANA_PMDK",
+    RatReserveUse => "PAKAI_CADANGAN_RAT",
+    RetainedEarningsUse => "PAKAI_LABA_DITAHAN",
+    ShuPayout => "BAGI_SHU",
+    CashBond => "KAS_BON",
+    CashBondRepayment => "BAYAR_KAS_BON",
+    DebtReceived => "TERIMA_HUTANG",
+    DebtRepayment => "CICIL_HUTANG",
     Reversal => "REVERSAL",
 });
 
@@ -171,6 +182,74 @@ pub(crate) const CASH_CATEGORIES: [(ComponentType, &str); 15] = [
     (ComponentType::Dekopinda, "Dekopinda"),
     (ComponentType::Parcel, "Parcel"),
 ];
+
+/// Buku Kas categories that move a Neraca line (a fund, a reserve, Piutang
+/// Lainnya, Hutang ke KOWABRI / PP) or pay out last year's SHU: not expenses,
+/// so they are not Buku Kas expense columns. Each is for one direction.
+pub(crate) const BALANCE_SHEET_CATEGORIES: [(ComponentType, &str, TransactionDirection); 9] = [
+    (
+        ComponentType::EducationFundUse,
+        "Pakai Dana Pendidikan",
+        TransactionDirection::Out,
+    ),
+    (
+        ComponentType::PmdkFundUse,
+        "Pakai Dana PMDK",
+        TransactionDirection::Out,
+    ),
+    (
+        ComponentType::RatReserveUse,
+        "Pakai Cadangan RAT",
+        TransactionDirection::Out,
+    ),
+    (
+        ComponentType::RetainedEarningsUse,
+        "Pakai Laba Ditahan",
+        TransactionDirection::Out,
+    ),
+    (
+        ComponentType::ShuPayout,
+        "Bagi SHU",
+        TransactionDirection::Out,
+    ),
+    (
+        ComponentType::CashBond,
+        "Kas Bon",
+        TransactionDirection::Out,
+    ),
+    (
+        ComponentType::CashBondRepayment,
+        "Bayar Kas Bon",
+        TransactionDirection::In,
+    ),
+    (
+        ComponentType::DebtReceived,
+        "Pinjaman Modal KOWABRI / PP",
+        TransactionDirection::In,
+    ),
+    (
+        ComponentType::DebtRepayment,
+        "Cicil Hutang KOWABRI / PP",
+        TransactionDirection::Out,
+    ),
+];
+
+/// The Buku Kas category of a component type with its label, and the one
+/// direction it is for (None: any direction).
+pub(crate) fn cash_category(
+    component_type: ComponentType,
+) -> Option<(&'static str, Option<TransactionDirection>)> {
+    CASH_CATEGORIES
+        .iter()
+        .find(|(category, _)| *category == component_type)
+        .map(|(_, label)| (*label, None))
+        .or_else(|| {
+            BALANCE_SHEET_CATEGORIES
+                .iter()
+                .find(|(category, _, _)| *category == component_type)
+                .map(|(_, label, direction)| (*label, Some(*direction)))
+        })
+}
 
 impl ComponentType {
     pub(crate) const fn is_opening(self) -> bool {

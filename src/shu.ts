@@ -52,7 +52,8 @@ export function shuRows(input: {
   const savingsSum = new Map<string, number>();
 
   for (const row of input.savings) {
-    if (!yearMonths.has(row.period)) continue;
+    // Penabung Non Anggota get no SHU.
+    if (!yearMonths.has(row.period) || row.nonMember) continue;
 
     const total =
       row.principalClosing + row.mandatoryClosing + row.voluntaryClosing;

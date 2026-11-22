@@ -2,8 +2,8 @@
 
 use super::posting::audit_change;
 use crate::{
-    contracts::{FinancialParametersDto, SetIncentiveRatesInput},
-    domain::{AuditAction, AuditEntityType, ParameterKey},
+    contracts::{FinancialParametersDto, SetFinancialParametersInput, SetIncentiveRatesInput},
+    domain::{validate_business_date, AuditAction, AuditEntityType, ParameterKey},
 };
 
 use sqlx::{Row, SqlitePool};
@@ -59,15 +59,128 @@ pub(crate) async fn get_financial_parameters(
     }
 
     let value = |key| values.get(&key).copied().unwrap_or(0.0);
+    // Fractions to percent without floating-point noise (0.07 -> 7, not
+    // 7.000000000000001).
+    let percent = |key| (value(key) * 100.0 * 1e6).round() / 1e6;
 
     Ok(FinancialParametersDto {
         principal_savings: value(ParameterKey::PrincipalSavings) as i64,
         mandatory_savings: value(ParameterKey::MandatorySavings) as i64,
-        provision_rate: value(ParameterKey::LoanProvisionRate) * 100.0,
-        annual_rate: value(ParameterKey::LoanAnnualRate) * 100.0,
+        provision_rate: percent(ParameterKey::LoanProvisionRate),
+        annual_rate: percent(ParameterKey::LoanAnnualRate),
         max_loan_outstanding: value(ParameterKey::LoanMaxOutstanding) as i64,
         effective_date,
     })
+}
+
+/// Records new values of the form parameters (Pengaturan), effective from
+/// `effective_date`; earlier dates keep their values. Saving again on the same
+/// date overwrites that date's row.
+pub(crate) async fn set_financial_parameters(
+    input: SetFinancialParametersInput,
+    company_id: &str,
+    pool: &SqlitePool,
+) -> Result<(), String> {
+    validate_business_date(&input.effective_date)
+        .map_err(|_| "Tanggal berlaku tidak valid.".to_string())?;
+
+    let rate = |percent: Option<f64>, label: &str| match percent {
+        Some(percent) if !(0.0..=100.0).contains(&percent) => {
+            Err(format!("{label} harus antara 0% dan 100%."))
+        }
+        percent => Ok(percent.map(|percent| percent / 100.0)),
+    };
+    let amount = |value: Option<i64>, label: &str| match value {
+        Some(value) if value < 0 => Err(format!("{label} tidak boleh negatif.")),
+        value => Ok(value.map(|value| value as f64)),
+    };
+
+    let values = [
+        (
+            ParameterKey::PrincipalSavings,
+            amount(input.principal_savings, "Simpanan pokok")?,
+        ),
+        (
+            ParameterKey::MandatorySavings,
+            amount(input.mandatory_savings, "Simpanan wajib")?,
+        ),
+        (
+            ParameterKey::LoanProvisionRate,
+            rate(input.provision_rate, "Provisi")?,
+        ),
+        (
+            ParameterKey::LoanAnnualRate,
+            rate(input.annual_rate, "Bunga")?,
+        ),
+        (
+            ParameterKey::LoanMaxOutstanding,
+            amount(input.max_loan_outstanding, "Batas sisa pinjaman")?,
+        ),
+    ];
+
+    save_parameters(company_id, &input.effective_date, values, pool).await
+}
+
+/// Writes each value given at `effective_date`, with one audit event holding
+/// the values it replaces.
+async fn save_parameters(
+    company_id: &str,
+    effective_date: &str,
+    values: impl IntoIterator<Item = (ParameterKey, Option<f64>)>,
+    pool: &SqlitePool,
+) -> Result<(), String> {
+    let mut db = pool.begin().await.map_err(|error| error.to_string())?;
+    let mut before = serde_json::Map::new();
+    let mut after = serde_json::Map::new();
+
+    for (key, value) in values {
+        let Some(value) = value else { continue };
+
+        // A value saved again for the same date overwrites the row; keep the old one.
+        let previous: Option<f64> = sqlx::query_scalar(
+            "SELECT value
+             FROM parameters
+             WHERE company_id = ? AND parameter_key = ? AND effective_date = ?",
+        )
+        .bind(company_id)
+        .bind(key.as_str())
+        .bind(effective_date)
+        .fetch_optional(&mut *db)
+        .await
+        .map_err(|error| error.to_string())?;
+
+        before.insert(key.as_str().into(), previous.into());
+        after.insert(key.as_str().into(), value.into());
+
+        sqlx::query(
+            "INSERT INTO parameters (company_id, parameter_key, value, effective_date, created_by)
+             VALUES (?, ?, ?, ?, 'Aplikasi')
+             ON CONFLICT (company_id, parameter_key, effective_date)
+             DO UPDATE SET value = excluded.value",
+        )
+        .bind(company_id)
+        .bind(key.as_str())
+        .bind(value)
+        .bind(effective_date)
+        .execute(&mut *db)
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+
+    if !after.is_empty() {
+        audit_change(
+            &mut db,
+            company_id,
+            AuditEntityType::Parameter,
+            effective_date,
+            AuditAction::Updated,
+            Some(before.into()),
+            after.into(),
+        )
+        .await?;
+    }
+
+    db.commit().await.map_err(|error| error.to_string())
 }
 
 /// The latest value of a yearly parameter effective on or before 31 December
@@ -154,63 +267,58 @@ pub(crate) async fn set_incentive_rates(
     )]);
 
     let effective_date = format!("{:04}-01-01", input.year);
-    let mut db = pool.begin().await.map_err(|error| error.to_string())?;
-    let mut before = serde_json::Map::new();
-    let mut after = serde_json::Map::new();
 
-    for (key, value) in rates {
-        let Some(value) = value else { continue };
-
-        // A rate saved again for the same year overwrites the row; keep the old one.
-        let previous: Option<f64> = sqlx::query_scalar(
-            "SELECT value
-             FROM parameters
-             WHERE company_id = ? AND parameter_key = ? AND effective_date = ?",
-        )
-        .bind(company_id)
-        .bind(key.as_str())
-        .bind(&effective_date)
-        .fetch_optional(&mut *db)
-        .await
-        .map_err(|error| error.to_string())?;
-
-        before.insert(key.as_str().into(), previous.into());
-        after.insert(key.as_str().into(), value.into());
-
-        sqlx::query(
-            "INSERT INTO parameters (company_id, parameter_key, value, effective_date, created_by)
-             VALUES (?, ?, ?, ?, 'Aplikasi')
-             ON CONFLICT (company_id, parameter_key, effective_date)
-             DO UPDATE SET value = excluded.value",
-        )
-        .bind(company_id)
-        .bind(key.as_str())
-        .bind(value)
-        .bind(&effective_date)
-        .execute(&mut *db)
-        .await
-        .map_err(|error| error.to_string())?;
-    }
-
-    if !after.is_empty() {
-        audit_change(
-            &mut db,
-            company_id,
-            AuditEntityType::Parameter,
-            &effective_date,
-            AuditAction::Updated,
-            Some(before.into()),
-            after.into(),
-        )
-        .await?;
-    }
-
-    db.commit().await.map_err(|error| error.to_string())
+    save_parameters(company_id, &effective_date, rates, pool).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn form_parameters_change_from_their_date() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+            let input = |provision_rate, max_loan_outstanding| SetFinancialParametersInput {
+                effective_date: "2026-02-01".into(),
+                principal_savings: None,
+                mandatory_savings: Some(60_000),
+                provision_rate,
+                annual_rate: None,
+                max_loan_outstanding,
+            };
+
+            set_financial_parameters(input(Some(2.0), Some(30_000_000)), "default", &pool)
+                .await
+                .unwrap();
+
+            let parameters = get_financial_parameters("default", &pool).await.unwrap();
+            assert_eq!(parameters.mandatory_savings, 60_000);
+            assert_eq!(parameters.provision_rate, 2.0);
+            assert_eq!(parameters.max_loan_outstanding, 30_000_000);
+            // Left out: unchanged.
+            assert_eq!(parameters.annual_rate, 24.0);
+            assert_eq!(parameters.principal_savings, 50_000);
+            assert_eq!(parameters.effective_date, "2026-02-01");
+
+            assert!(
+                set_financial_parameters(input(Some(101.0), None), "default", &pool)
+                    .await
+                    .is_err()
+            );
+            assert!(
+                set_financial_parameters(input(None, Some(-1)), "default", &pool)
+                    .await
+                    .is_err()
+            );
+
+            let mut bad_date = input(None, None);
+            bad_date.effective_date = "2026-02-30".into();
+            assert!(set_financial_parameters(bad_date, "default", &pool)
+                .await
+                .is_err());
+        });
+    }
 
     #[test]
     fn incentive_rates_follow_the_book_year() {

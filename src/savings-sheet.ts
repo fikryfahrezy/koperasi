@@ -61,21 +61,35 @@ export const movementKeysForPeriod = (hasShu: boolean) =>
     ] as const
   ).filter((key) => key !== "shu" || hasShu);
 
-/** The month's rows, following member numbers (M001, M002, ...), narrowed
- * by the search. */
+/** Members by id, then penabung Non Anggota in the order they were added
+ * (the ledger's order), as at the bottom of SIMPANAN. */
+export const compareSavingsRows = (
+  a: Pick<SavingsMonth, "memberId" | "nonMember">,
+  b: Pick<SavingsMonth, "memberId" | "nonMember">,
+) =>
+  Number(a.nonMember) - Number(b.nonMember) ||
+  (a.nonMember ? 0 : a.memberId.localeCompare(b.memberId));
+
+/** The month's rows, members by number (M001, M002, ...) then penabung Non
+ * Anggota (`compareSavingsRows`), narrowed by the search. */
 export function savingsRowsForPeriod(
   ledgerRows: readonly SavingsMonth[],
   memberById: ReadonlyMap<string, Member>,
   period: string,
   query: string,
+  /** Names of penabung Non Anggota by savings account id. */
+  saverNames: ReadonlyMap<string, string> = new Map(),
 ) {
   return ledgerRows
     .filter((row) => row.period === period)
-    .sort((a, b) => a.memberId.localeCompare(b.memberId))
+    .sort(compareSavingsRows)
     .map((row, index) => ({
       ...row,
       no: index + 1,
-      name: memberById.get(row.memberId)?.name ?? row.memberId,
+      name:
+        memberById.get(row.memberId)?.name ??
+        saverNames.get(row.memberId) ??
+        row.memberId,
     }))
     .filter((row) =>
       matchesMember(

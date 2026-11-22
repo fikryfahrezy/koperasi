@@ -169,6 +169,12 @@ pub(crate) async fn export_workbook(
                 .members
                 .into_iter()
                 .map(|member| (member.id, member.name))
+                .chain(
+                    snapshot
+                        .non_member_savers
+                        .into_iter()
+                        .map(|saver| (saver.id, saver.name)),
+                )
                 .collect();
 
             let company = company_name(company_id, pool).await?;
@@ -519,12 +525,27 @@ fn savings_sheet(
         .map(|row| ((row.member_id.as_str(), row.period.as_str()), row))
         .collect();
 
-    let members: BTreeSet<&str> = ledger
-        .savings
-        .iter()
-        .filter(|row| periods.contains(&row.period))
+    // Members by id, then penabung Non Anggota in the order they were added,
+    // as at the bottom of SIMPANAN.
+    let shown = || {
+        ledger
+            .savings
+            .iter()
+            .filter(|row| periods.contains(&row.period))
+    };
+
+    let mut members: Vec<&str> = shown()
+        .filter(|row| !row.non_member)
         .map(|row| row.member_id.as_str())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
         .collect();
+
+    for row in shown().filter(|row| row.non_member) {
+        if !members.contains(&row.member_id.as_str()) {
+            members.push(&row.member_id);
+        }
+    }
 
     let mut sheet = Sheet::new("SIMPANAN");
 

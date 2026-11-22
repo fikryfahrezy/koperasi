@@ -24,6 +24,7 @@ import {
 import {
   closingKeys,
   closingTotal,
+  compareSavingsRows,
   incentiveKeys,
   incentivesAt,
   leadingColumnWidths,
@@ -45,7 +46,7 @@ import {
 const pageState = useWorkspacePageState("/savings");
 const ratesOpen = ref(false);
 
-const { members, selectedYear, refresh } = useKoperasiStore();
+const { members, nonMemberSavers, selectedYear, refresh } = useKoperasiStore();
 const { monthlyLedger, monthlyLedgerLoading } = useMonthlyLedger();
 
 const { period, periodOptions, visiblePeriods } = usePeriodFilter(
@@ -56,26 +57,59 @@ const { period, periodOptions, visiblePeriods } = usePeriodFilter(
 const query = pageState.field("query", () => "");
 const debouncedQuery = useDebouncedRef(query, pageState.tabId);
 
+// Anggota and penabung Non Anggota in two sections, as on Pinjaman.
+const SavingsGroup = { Member: "member", NonMember: "nonMember" } as const;
+type SavingsGroup = (typeof SavingsGroup)[keyof typeof SavingsGroup];
+
+const groupFilter = pageState.field<SavingsGroup | "">("groupFilter", () => "");
+
+const groupOptions = [
+  { value: "", label: "Semua" },
+  { value: SavingsGroup.Member, label: "Anggota PP BRI" },
+  { value: SavingsGroup.NonMember, label: "Non Anggota PP BRI" },
+];
+
+const sectionTitles = [
+  { group: SavingsGroup.Member, title: "SIMPANAN ANGGOTA PP BRI" },
+  { group: SavingsGroup.NonMember, title: "SIMPANAN NON ANGGOTA PP BRI" },
+] as const;
+
+const groupOf = (row: { nonMember?: boolean }): SavingsGroup =>
+  row.nonMember ? SavingsGroup.NonMember : SavingsGroup.Member;
+
+const inGroupFilter = (row: { nonMember?: boolean }) =>
+  !groupFilter.value || groupOf(row) === groupFilter.value;
+
 const memberById = computed(
   () => new Map(members.map((member) => [member.id, member])),
+);
+
+// Penabung Non Anggota (no member), listed after the members.
+const saverNames = computed(
+  () => new Map(nonMemberSavers.map((saver) => [saver.id, saver.name])),
 );
 
 // The export holds the month and the members the page shows.
 const exportFilter = computed(() => ({
   period: period.value,
-  ids: debouncedQuery.value.trim()
-    ? [
-        ...new Set(monthlyLedger.value.savings.map((row) => row.memberId)),
-      ].filter((memberId) => {
-        const member = memberById.value.get(memberId);
+  ids:
+    debouncedQuery.value.trim() || groupFilter.value
+      ? [
+          ...new Set(
+            monthlyLedger.value.savings
+              .filter(inGroupFilter)
+              .map((row) => row.memberId),
+          ),
+        ].filter((memberId) => {
+          const member = memberById.value.get(memberId);
 
-        return matchesMember(
-          debouncedQuery.value,
-          member?.name ?? memberId,
-          member?.memberNumber,
-        );
-      })
-    : undefined,
+          return matchesMember(
+            debouncedQuery.value,
+            member?.name ?? saverNames.value.get(memberId) ?? memberId,
+            member?.memberNumber,
+          );
+        })
+      : undefined,
 }));
 
 const periodTables = computed(() =>
@@ -85,7 +119,8 @@ const periodTables = computed(() =>
       memberById.value,
       period,
       debouncedQuery.value,
-    );
+      saverNames.value,
+    ).filter(inGroupFilter);
 
     const hasShu = period.endsWith("-01");
 
@@ -94,6 +129,12 @@ const periodTables = computed(() =>
       monthRows,
       rowsById: new Map(monthRows.map((row) => [row.memberId, row])),
       totals: sumSavingsRows(monthRows),
+      sectionTotals: Object.fromEntries(
+        sectionTitles.map(({ group }) => [
+          group,
+          sumSavingsRows(monthRows.filter((row) => groupOf(row) === group)),
+        ]),
+      ) as Record<SavingsGroup, ReturnType<typeof sumSavingsRows>>,
       hasShu,
       movementKeys: movementKeysForPeriod(hasShu),
     };
@@ -148,10 +189,36 @@ const monthRows = computed(() => {
     for (const row of table.monthRows) rowsById.set(row.memberId, row);
   }
 
-  return [...rowsById.values()]
-    .sort((a, b) => a.memberId.localeCompare(b.memberId))
-    .map((row, index) => ({ ...row, no: index + 1 }));
+  return [...rowsById.values()].sort(compareSavingsRows);
 });
+
+type SheetRow =
+  | {
+      kind: "heading" | "subtotal";
+      group: SavingsGroup;
+      title: string;
+      key: string;
+    }
+  | { kind: "saver"; row: SavingsSheetRow & { no: number }; key: string };
+
+// Each section: its heading, its rows numbered from 1, then SUB JUMLAH. A
+// section without rows is left out.
+const sheetRows = computed<SheetRow[]>(() =>
+  sectionTitles.flatMap(({ group, title }) => {
+    const rows = monthRows.value.filter((row) => groupOf(row) === group);
+    if (!rows.length) return [];
+
+    return [
+      { kind: "heading" as const, group, title, key: `${group}:heading` },
+      ...rows.map((row, index) => ({
+        kind: "saver" as const,
+        row: { ...row, no: index + 1 },
+        key: row.memberId,
+      })),
+      { kind: "subtotal" as const, group, title, key: `${group}:subtotal` },
+    ];
+  }),
+);
 
 const totalColumnCount = computed(
   () =>
@@ -159,17 +226,29 @@ const totalColumnCount = computed(
     columnGroups.value.reduce((count, group) => count + groupColumns(group), 0),
 );
 
-const incentiveTotals = computed(() => {
+const incentiveSum = (rows: readonly SavingsSheetRow[]) => {
   const sum = { average: 0, incentiveRaw: 0, incentive: 0 };
 
-  for (const row of monthRows.value) {
+  for (const row of rows) {
     const value = incentiveById.value.get(row.memberId);
     if (!value) continue;
     for (const key of incentiveKeys) sum[key] += value[key];
   }
 
   return sum;
-});
+};
+
+const incentiveTotals = computed(() => incentiveSum(monthRows.value));
+
+const sectionIncentiveTotals = computed(
+  () =>
+    Object.fromEntries(
+      sectionTitles.map(({ group }) => [
+        group,
+        incentiveSum(monthRows.value.filter((row) => groupOf(row) === group)),
+      ]),
+    ) as Record<SavingsGroup, ReturnType<typeof incentiveSum>>,
+);
 
 const {
   scroller,
@@ -186,9 +265,12 @@ const {
   navigation,
 } = useVirtualSheetGrid({
   pageState,
-  rows: monthRows,
-  rowKey: (row) => row.memberId,
-  columnSpans: () => Array(totalColumnCount.value).fill(1),
+  rows: sheetRows,
+  rowKey: (row) => row.key,
+  columnSpans: (index) =>
+    sheetRows.value[index]?.kind === "heading"
+      ? [1, 1, totalColumnCount.value - 2]
+      : Array(totalColumnCount.value).fill(1),
   groups: columnGroups,
   groupColumns,
   leadingWidths: leadingColumnWidths,
@@ -218,6 +300,14 @@ const {
           :options="periodOptions"
           label="Bulan"
           aria-label="Bulan"
+          variant="toolbar"
+        />
+        <UiSelect
+          v-if="monthlyLedger.periods.length"
+          v-model="groupFilter"
+          :options="groupOptions"
+          label="Kelompok"
+          aria-label="Kelompok"
           variant="toolbar"
         />
       </template>
@@ -263,7 +353,7 @@ const {
             width: `${totalWidth}px`,
           }"
           :aria-colcount="totalColumnCount"
-          :aria-rowcount="monthRows.length + 6"
+          :aria-rowcount="sheetRows.length + 6"
         >
           <colgroup>
             <col
@@ -449,89 +539,204 @@ const {
                 :style="{ height: `${paddingTop}px` }"
               ></td>
             </tr>
-            <tr
-              v-for="{ row, index } in renderedRows"
-              :key="row.memberId"
-              :data-virtual-row="index"
-              :aria-rowindex="index + 6"
+            <template
+              v-for="{ row: item, index } in renderedRows"
+              :key="item.key"
             >
-              <td class="sheet-sticky sheet-no">{{ row.no }}</td>
-              <td class="sheet-sticky sheet-name">
-                <strong>{{ row.name }}</strong>
-              </td>
-              <td
-                v-if="leftColumns"
-                class="sheet-column-spacer"
-                aria-hidden="true"
-                data-virtual-gap
-                :data-virtual-span="leftColumns"
-              ></td>
-              <template
-                v-for="table in renderedPeriodTables"
-                :key="table.period"
+              <tr
+                v-if="item.kind === 'heading'"
+                :data-virtual-row="index"
+                :aria-rowindex="index + 6"
               >
-                <template v-if="table.kind === 'tail'">
-                  <td v-for="key in incentiveKeys" :key="key" class="num-cell">
-                    {{
-                      formatSheetNumber(
-                        incentiveById.get(row.memberId)?.[key] ?? 0,
-                      )
-                    }}
-                  </td>
-                </template>
+                <td class="sheet-sticky sheet-no"></td>
+                <td class="sheet-sticky sheet-name">
+                  <strong>{{ item.title }}</strong>
+                </td>
+                <td
+                  :colspan="renderedColumnCount - 2"
+                  :data-virtual-span="totalColumnCount - 2"
+                ></td>
+              </tr>
+              <tr
+                v-else-if="item.kind === 'subtotal'"
+                :data-virtual-row="index"
+                :aria-rowindex="index + 6"
+              >
+                <td class="sheet-sticky sheet-no"></td>
+                <td class="sheet-sticky sheet-name">SUB JUMLAH</td>
+                <td
+                  v-if="leftColumns"
+                  class="sheet-column-spacer"
+                  aria-hidden="true"
+                  data-virtual-gap
+                  :data-virtual-span="leftColumns"
+                ></td>
                 <template
-                  v-for="monthRow in table.kind === 'opening'
-                    ? [table.rowsById.get(row.memberId)]
-                    : []"
+                  v-for="table in renderedPeriodTables"
                   :key="table.period"
                 >
-                  <td v-for="key in openingKeys" :key="key" class="num-cell">
-                    {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
-                  </td>
-                  <td class="num-cell sheet-total">
-                    {{
-                      monthRow ? formatSheetNumber(openingTotal(monthRow)) : "-"
-                    }}
-                  </td>
+                  <template v-if="table.kind === 'tail'">
+                    <td
+                      v-for="key in incentiveKeys"
+                      :key="key"
+                      class="num-cell"
+                    >
+                      {{
+                        formatSheetNumber(
+                          sectionIncentiveTotals[item.group][key],
+                        )
+                      }}
+                    </td>
+                  </template>
+                  <template v-else-if="table.kind === 'opening'">
+                    <td v-for="key in openingKeys" :key="key" class="num-cell">
+                      {{
+                        formatSheetNumber(table.sectionTotals[item.group][key])
+                      }}
+                    </td>
+                    <td class="num-cell sheet-total">
+                      {{
+                        formatSheetNumber(
+                          openingTotal(table.sectionTotals[item.group]),
+                        )
+                      }}
+                    </td>
+                  </template>
+                  <template v-else>
+                    <td></td>
+                    <td
+                      v-for="key in table.movementKeys"
+                      :key="key"
+                      class="num-cell"
+                    >
+                      {{
+                        formatSheetNumber(table.sectionTotals[item.group][key])
+                      }}
+                    </td>
+                    <td v-for="key in closingKeys" :key="key" class="num-cell">
+                      {{
+                        formatSheetNumber(table.sectionTotals[item.group][key])
+                      }}
+                    </td>
+                    <td class="num-cell sheet-total">
+                      {{
+                        formatSheetNumber(
+                          closingTotal(table.sectionTotals[item.group]),
+                        )
+                      }}
+                    </td>
+                  </template>
                 </template>
-                <template
-                  v-for="monthRow in table.kind === 'month'
-                    ? [table.rowsById.get(row.memberId)]
-                    : []"
-                  :key="table.period"
+                <td
+                  v-if="rightColumns"
+                  class="sheet-column-spacer"
+                  aria-hidden="true"
+                  data-virtual-gap
+                  :data-virtual-span="rightColumns"
+                ></td>
+              </tr>
+              <template v-else>
+                <tr
+                  v-for="row in [item.row]"
+                  :key="row.memberId"
+                  :data-virtual-row="index"
+                  :aria-rowindex="index + 6"
                 >
-                  <td>
-                    {{
-                      monthRow
-                        ? formatSheetDate(monthRow.transactionDate) || "-"
-                        : "-"
-                    }}
+                  <td class="sheet-sticky sheet-no">{{ row.no }}</td>
+                  <td class="sheet-sticky sheet-name">
+                    <strong>{{ row.name }}</strong>
                   </td>
                   <td
-                    v-for="key in table.movementKeys"
-                    :key="key"
-                    class="num-cell"
+                    v-if="leftColumns"
+                    class="sheet-column-spacer"
+                    aria-hidden="true"
+                    data-virtual-gap
+                    :data-virtual-span="leftColumns"
+                  ></td>
+                  <template
+                    v-for="table in renderedPeriodTables"
+                    :key="table.period"
                   >
-                    {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
-                  </td>
-                  <td v-for="key in closingKeys" :key="key" class="num-cell">
-                    {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
-                  </td>
-                  <td class="num-cell sheet-total">
-                    <strong>{{
-                      monthRow ? formatSheetNumber(closingTotal(monthRow)) : "-"
-                    }}</strong>
-                  </td>
-                </template>
+                    <template v-if="table.kind === 'tail'">
+                      <td
+                        v-for="key in incentiveKeys"
+                        :key="key"
+                        class="num-cell"
+                      >
+                        {{
+                          formatSheetNumber(
+                            incentiveById.get(row.memberId)?.[key] ?? 0,
+                          )
+                        }}
+                      </td>
+                    </template>
+                    <template
+                      v-for="monthRow in table.kind === 'opening'
+                        ? [table.rowsById.get(row.memberId)]
+                        : []"
+                      :key="table.period"
+                    >
+                      <td
+                        v-for="key in openingKeys"
+                        :key="key"
+                        class="num-cell"
+                      >
+                        {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
+                      </td>
+                      <td class="num-cell sheet-total">
+                        {{
+                          monthRow
+                            ? formatSheetNumber(openingTotal(monthRow))
+                            : "-"
+                        }}
+                      </td>
+                    </template>
+                    <template
+                      v-for="monthRow in table.kind === 'month'
+                        ? [table.rowsById.get(row.memberId)]
+                        : []"
+                      :key="table.period"
+                    >
+                      <td>
+                        {{
+                          monthRow
+                            ? formatSheetDate(monthRow.transactionDate) || "-"
+                            : "-"
+                        }}
+                      </td>
+                      <td
+                        v-for="key in table.movementKeys"
+                        :key="key"
+                        class="num-cell"
+                      >
+                        {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
+                      </td>
+                      <td
+                        v-for="key in closingKeys"
+                        :key="key"
+                        class="num-cell"
+                      >
+                        {{ monthRow ? formatSheetNumber(monthRow[key]) : "-" }}
+                      </td>
+                      <td class="num-cell sheet-total">
+                        <strong>{{
+                          monthRow
+                            ? formatSheetNumber(closingTotal(monthRow))
+                            : "-"
+                        }}</strong>
+                      </td>
+                    </template>
+                  </template>
+                  <td
+                    v-if="rightColumns"
+                    class="sheet-column-spacer"
+                    aria-hidden="true"
+                    data-virtual-gap
+                    :data-virtual-span="rightColumns"
+                  ></td>
+                </tr>
               </template>
-              <td
-                v-if="rightColumns"
-                class="sheet-column-spacer"
-                aria-hidden="true"
-                data-virtual-gap
-                :data-virtual-span="rightColumns"
-              ></td>
-            </tr>
+            </template>
             <tr v-if="paddingBottom" class="sheet-spacer" aria-hidden="true">
               <td
                 :colspan="renderedColumnCount"
@@ -541,8 +746,8 @@ const {
           </tbody>
           <tfoot>
             <tr
-              :data-virtual-row="monthRows.length"
-              :aria-rowindex="monthRows.length + 6"
+              :data-virtual-row="sheetRows.length"
+              :aria-rowindex="sheetRows.length + 6"
             >
               <td class="sheet-sticky sheet-no"></td>
               <td class="sheet-sticky sheet-name">JUMLAH</td>

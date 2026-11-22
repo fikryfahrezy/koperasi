@@ -1,6 +1,7 @@
 import { computed, watch } from "vue";
 
 import {
+  balanceSheetCategories,
   CashCategory,
   cashCategories,
   Channel,
@@ -15,10 +16,51 @@ import type { WorkspacePageState } from "../useWorkspacePageState";
 // posted on the TABUNGAN channel without a Buku Kas category.
 const SAVINGS_BOOK_ONLY = "SAVINGS_BOOK_ONLY";
 
-// Expense columns of Buku Kas TAHUN 2026 (L–W); the rest are the app's own.
-const sheetCategories = new Set<string>(
-  cashCategories.slice(3).map((option) => option.value),
+/** Groups of the Kategori list, in order. Biaya lowers Laba; the funds,
+ * Kas Bon and hutang move a Neraca line instead; Kas & tabungan moves money
+ * between Kas and the bank. */
+const CategoryGroup = {
+  Expense: "Biaya",
+  FundUse: "Pemakaian dana",
+  BondsAndDebt: "Kas bon & hutang",
+  CashAndSavings: "Kas & tabungan",
+} as const;
+
+const groupOrder: string[] = Object.values(CategoryGroup);
+
+const fundUses = new Set<string>([
+  CashCategory.SocialFund,
+  CashCategory.Dekopinda,
+  CashCategory.EducationFundUse,
+  CashCategory.PmdkFundUse,
+  CashCategory.RatReserveUse,
+  CashCategory.RetainedEarningsUse,
+  CashCategory.ShuPayout,
+]);
+
+const bondsAndDebt = new Set<string>([
+  CashCategory.CashBond,
+  CashCategory.CashBondRepayment,
+  CashCategory.DebtReceived,
+  CashCategory.DebtRepayment,
+]);
+
+// Expense columns of Buku Kas TAHUN 2026 (L–W), less Dansos and Dekopinda.
+const expenses = new Set<string>(
+  cashCategories
+    .slice(3)
+    .map((option) => option.value)
+    .filter((value) => !fundUses.has(value)),
 );
+
+const groupOf = (value: string) =>
+  expenses.has(value)
+    ? CategoryGroup.Expense
+    : fundUses.has(value)
+      ? CategoryGroup.FundUse
+      : bondsAndDebt.has(value)
+        ? CategoryGroup.BondsAndDebt
+        : CategoryGroup.CashAndSavings;
 
 const cashCategoryDescriptions: string[] = cashCategories.flatMap((option) =>
   option.description ? [option.description] : [],
@@ -45,12 +87,12 @@ export function useCashForm(
   );
 
   // Tambahan Kas is only cash in and Transfer ke Tabungan only cash out.
-  // Alphabetical after "Tanpa kategori", with Lainnya last. Grouped: first
-  // the sheet's expense columns, then the app's own categories.
+  // Alphabetical after "Tanpa kategori", with Lainnya last, in the groups of
+  // `CategoryGroup`.
   const cashCategoryOptions = computed(() => [
     { value: "", label: "Tanpa kategori" },
     ...[
-      ...cashCategories.filter(
+      ...[...cashCategories, ...balanceSheetCategories].filter(
         (option) =>
           !option.direction || option.direction === cashDirection.value,
       ),
@@ -68,14 +110,9 @@ export function useCashForm(
             Number(b.value === CashCategory.Other) ||
           a.label.localeCompare(b.label, "id-ID", { sensitivity: "base" }),
       )
-      .map((option) => ({
-        ...option,
-        group: sheetCategories.has(option.value) ? "Biaya" : "Kas & tabungan",
-      }))
+      .map((option) => ({ ...option, group: groupOf(option.value) }))
       .sort(
-        (a, b) =>
-          Number(a.group === "Kas & tabungan") -
-          Number(b.group === "Kas & tabungan"),
+        (a, b) => groupOrder.indexOf(a.group) - groupOrder.indexOf(b.group),
       ),
   ]);
 

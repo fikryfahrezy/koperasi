@@ -13,7 +13,8 @@ use crate::{
         AddMemberInput, AppSnapshot, BalanceSheetDto, CashBookDto, CashEntryInput, CompanyDto,
         CreateLoanInput, FinancialParametersDto, LoanPreview, MonthlyLedgerDto, PaymentInput,
         PreviewLoanInput, ReverseTransactionInput, SavingsTransactionInput, SetBalanceSheetInput,
-        SetIncentiveRatesInput, SheetInput, TransactionGroupDto, UpdateMemberInput,
+        SetFinancialParametersInput, SetIncentiveRatesInput, SheetInput, TransactionGroupDto,
+        UpdateMemberInput,
     },
     database,
     state::AppState,
@@ -157,6 +158,15 @@ pub(crate) async fn set_balance_sheet(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     application::set_balance_sheet(input, &company_id, &state.db).await
+}
+
+#[tauri::command]
+pub(crate) async fn set_financial_parameters(
+    input: SetFinancialParametersInput,
+    company_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    application::set_financial_parameters(input, &company_id, &state.db).await
 }
 
 #[tauri::command]
