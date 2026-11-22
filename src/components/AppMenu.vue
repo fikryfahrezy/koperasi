@@ -9,6 +9,8 @@ import {
   HandCoins,
   LayoutDashboard,
   Scale,
+  Settings,
+  TrendingUp,
   Users,
 } from "lucide-vue-next";
 
@@ -33,11 +35,21 @@ const menuItems = [
   { to: "/loans", labelKey: "sidebar.nav.loans", icon: HandCoins },
   { to: "/shu", labelKey: "sidebar.nav.shu", icon: ChartPie },
   { to: "/balance-sheet", labelKey: "sidebar.nav.balanceSheet", icon: Scale },
+  {
+    to: "/income-statement",
+    labelKey: "sidebar.nav.incomeStatement",
+    icon: TrendingUp,
+  },
   { to: "/members", labelKey: "sidebar.nav.members", icon: Users },
 ];
 
 // Kept apart on the right: it manages the whole database, not daily work.
 const dataItem = { to: "/data", labelKey: "sidebar.nav.data", icon: Database };
+const settingsItem = {
+  to: "/settings",
+  labelKey: "sidebar.nav.settings",
+  icon: Settings,
+};
 
 function navigate(path: string) {
   navigateActiveWorkspaceTab(path, router);
@@ -59,8 +71,17 @@ function navigate(path: string) {
         <span>{{ t(item.labelKey) }}</span>
       </RouterLink>
       <RouterLink
-        :to="dataItem.to"
+        :to="settingsItem.to"
         class="app-menu__item app-menu__item--end"
+        active-class="app-menu__item--active"
+        @click="navigate(settingsItem.to)"
+      >
+        <component :is="settingsItem.icon" :size="16" />
+        <span>{{ t(settingsItem.labelKey) }}</span>
+      </RouterLink>
+      <RouterLink
+        :to="dataItem.to"
+        class="app-menu__item"
         active-class="app-menu__item--active"
         @click="navigate(dataItem.to)"
       >

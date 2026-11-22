@@ -21,7 +21,10 @@ import {
   useLoanForm,
 } from "../composables/cash-entry/useLoanForm";
 
-import { usePaymentForm } from "../composables/cash-entry/usePaymentForm";
+import {
+  nonMemberPaymentOptions,
+  usePaymentForm,
+} from "../composables/cash-entry/usePaymentForm";
 import { useSavingsWithdrawalForm } from "../composables/cash-entry/useSavingsWithdrawalForm";
 import type { WorkspacePageState } from "../composables/useWorkspacePageState";
 import DateInput from "./DateInput.vue";
@@ -86,6 +89,10 @@ const payment = usePaymentForm(pageState, () => posting.value.businessDate);
 const {
   paymentForm,
   isNonMemberPayment,
+  isSaverPayment,
+  paymentGroup,
+  nonMemberPaymentKind,
+  saverNameOptions,
   paymentBorrowerOptions,
   paymentMemberOptions,
   paymentLoans,
@@ -118,6 +125,8 @@ const savings = useSavingsWithdrawalForm(pageState);
 
 const {
   savingsForm,
+  savingsOwnerOptions,
+  isSaverWithdrawal,
   savingsTotal,
   savingsMemberBalances,
   withdrawAllSavings,
@@ -309,12 +318,48 @@ defineExpose({ open: openModal });
         <label class="field">
           <span>Kelompok</span>
           <UiSelect
-            v-model="paymentForm.loanGroup"
+            v-model="paymentGroup"
             :options="loanGroupOptions"
             aria-label="Kelompok"
           />
         </label>
-        <label v-if="isNonMemberPayment" class="field">
+        <label v-if="paymentGroup === LoanGroup.NonMember" class="field">
+          <span>Setoran untuk</span>
+          <UiSelect
+            v-model="nonMemberPaymentKind"
+            :options="nonMemberPaymentOptions"
+            aria-label="Setoran untuk"
+          />
+        </label>
+        <template v-if="isSaverPayment">
+          <div class="field-row">
+            <label class="field">
+              <span>Nama penabung</span>
+              <input
+                v-model="paymentForm.saverName"
+                list="non-member-savers"
+                placeholder="Pilih atau ketik nama baru"
+                required
+              />
+              <datalist id="non-member-savers">
+                <option
+                  v-for="name in saverNameOptions"
+                  :key="name"
+                  :value="name"
+                />
+              </datalist>
+            </label>
+            <label class="field">
+              <span>Manasuka</span>
+              <RupiahInput
+                v-model="paymentForm.voluntary"
+                :min="0"
+                aria-label="Manasuka"
+              />
+            </label>
+          </div>
+        </template>
+        <label v-else-if="isNonMemberPayment" class="field">
           <span>Peminjam</span>
           <MemberCombobox
             v-model="paymentForm.borrower"
@@ -334,7 +379,10 @@ defineExpose({ open: openModal });
             required
           />
         </label>
-        <div v-if="!isNonMemberPayment" class="field-row field-row--three">
+        <div
+          v-if="!isNonMemberPayment && !isSaverPayment"
+          class="field-row field-row--three"
+        >
           <label class="field">
             <span>Simpanan pokok</span>
             <RupiahInput
@@ -426,7 +474,7 @@ defineExpose({ open: openModal });
           <span>Anggota</span>
           <MemberCombobox
             v-model="savingsForm.memberId"
-            :options="memberOptions"
+            :options="savingsOwnerOptions"
             aria-label="Anggota"
             placeholder="Cari nama atau ID anggota"
             required
@@ -438,7 +486,9 @@ defineExpose({ open: openModal });
               { key: 'principal', label: 'Pokok' },
               { key: 'mandatory', label: 'Wajib' },
               { key: 'voluntary', label: 'Manasuka' },
-            ] as const"
+            ].filter(
+              (item) => !isSaverWithdrawal || item.key === 'voluntary',
+            ) as const"
             :key="account.key"
             class="field"
           >

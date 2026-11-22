@@ -54,6 +54,7 @@ pub(crate) fn run() {
             crate::commands::get_transaction_group,
             crate::commands::get_financial_parameters,
             crate::commands::set_incentive_rates,
+            crate::commands::set_financial_parameters,
             crate::commands::get_balance_sheet,
             crate::commands::set_balance_sheet,
             crate::commands::export_xlsx,

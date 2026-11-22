@@ -8,7 +8,12 @@ import PageHeader from "../components/PageHeader.vue";
 import UiSelect from "../components/UiSelect.vue";
 import { useBalanceSheetDrafts } from "../composables/useBalanceSheetDrafts";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
-import { BalanceSheetItem, balanceSheetAt, sheetRows } from "../balance-sheet";
+import {
+  BalanceSheetItem,
+  balanceSheetAt,
+  previousYearLedger,
+  sheetRows,
+} from "../balance-sheet";
 import { balanceSheetSheet } from "../balance-sheet-export";
 
 import {
@@ -17,6 +22,7 @@ import {
   formatSheetNumber,
   useBalanceSheetDetails,
   useBalanceSheetItems,
+  useBalanceSheetPrior,
   useCashBook,
   useKoperasiStore,
   useMonthlyLedger,
@@ -33,6 +39,8 @@ const { cashBook: previousCashBook } = useCashBook(Channel.Cash, -1);
 const { balanceSheetItems: previousItems } = useBalanceSheetItems(-1);
 const { balanceSheetDetails } = useBalanceSheetDetails();
 const { balanceSheetDetails: previousDetails } = useBalanceSheetDetails(-1);
+const { balanceSheetPrior } = useBalanceSheetPrior();
+const { balanceSheetPrior: previousPrior } = useBalanceSheetPrior(-1);
 
 // Catatan "Piutang Lainnya (Bon Sementara) terdiri": the rincian per person.
 const otherLoansByName = computed(() => [
@@ -100,13 +108,20 @@ const current = computed(() =>
     loans,
     withDraftItems(selectedYear.value, balanceSheetItems.value),
     withDraftLists(selectedYear.value, balanceSheetDetails.value),
+    balanceSheetPrior.value,
   ),
 );
 
 const previous = computed(() =>
   balanceSheetAt(
     previousPeriod.value,
-    previousLedger.value,
+    // Last year without transactions (2025 removed): its balances are this
+    // year's openings.
+    previousYearLedger(
+      previousLedger.value,
+      monthlyLedger.value,
+      previousPeriod.value,
+    ),
     previousCashBook.value,
     loans,
     withDraftItems(selectedYear.value - 1, {
@@ -118,6 +133,7 @@ const previous = computed(() =>
         (cashBook.value?.savingsBookOpeningBalance ?? 0),
     }),
     withDraftLists(selectedYear.value - 1, previousDetails.value),
+    previousPrior.value,
   ),
 );
 
@@ -356,6 +372,10 @@ const hasEstimate = computed(() =>
             </tbody>
           </table>
         </div>
+        <p v-if="hasEstimate" class="field-hint">
+          * Bank dihitung dari Kas Buku Tabungan dan belum tentu sama dengan
+          saldo bank. Ketik saldo buku tabungan akhir bulan di selnya.
+        </p>
         <div v-if="hasChanges" class="balance-changes" role="status">
           <span>Ada perubahan yang belum disimpan.</span>
           <button
@@ -375,13 +395,6 @@ const hasEstimate = computed(() =>
             {{ savingChanges ? "Menyimpan..." : "Simpan" }}
           </button>
         </div>
-        <p class="field-hint">
-          Angka bergaris bawah putus-putus bisa diklik lalu diubah langsung (Esc
-          untuk batal). Perubahan baru tersimpan setelah klik Simpan. Kolom 31
-          Desember menyimpan ke tahun buku {{ selectedYear - 1 }}, kolom bulan
-          ke tahun buku {{ selectedYear }}. Kas yang diubah disimpan sebagai
-          Penyesuaian kas.
-        </p>
         <div class="balance-notes">
           <strong>Catatan :</strong>
           <table
@@ -440,22 +453,35 @@ const hasEstimate = computed(() =>
               <tr v-if="!otherLoansByName.length">
                 <td colspan="2" class="balance-notes__empty">Belum diisi</td>
               </tr>
+              <tr v-if="current.cashBonds.lent">
+                <td>Kas Bon {{ selectedYear }} (Buku Kas)</td>
+                <td class="num-cell">
+                  {{ formatSheetNumber(current.cashBonds.lent) }}
+                </td>
+              </tr>
+              <tr v-if="current.cashBonds.repaid">
+                <td>Bayar Kas Bon {{ selectedYear }} (Buku Kas)</td>
+                <td class="num-cell">
+                  {{ formatSheetNumber(-current.cashBonds.repaid) }}
+                </td>
+              </tr>
             </tbody>
             <tfoot>
               <tr>
                 <td></td>
                 <td class="num-cell">
-                  {{ formatSheetNumber(sumOf(otherLoansByName)) }}
+                  {{
+                    formatSheetNumber(
+                      sumOf(otherLoansByName) +
+                        current.cashBonds.lent -
+                        current.cashBonds.repaid,
+                    )
+                  }}
                 </td>
               </tr>
             </tfoot>
           </table>
         </div>
-        <p v-if="hasEstimate" class="field-hint">
-          * Bank dihitung dari Kas Buku Tabungan dan belum tentu sama dengan
-          saldo bank. Ketik saldo bank 31 Desember di selnya pada bulan
-          Desember.
-        </p>
       </section>
 
       <section class="panel balance-income">
@@ -488,11 +514,19 @@ const hasEstimate = computed(() =>
                 {{ formatSheetNumber(current.income.netIncome) }}
               </td>
             </tr>
+            <tr v-if="current.income.typedNetIncome !== undefined">
+              <td>Laba di Neraca (isian dari sheet)</td>
+              <td class="num-cell">
+                {{ formatSheetNumber(current.income.typedNetIncome) }}
+              </td>
+            </tr>
           </tfoot>
         </table>
         <p class="field-hint">
           Biaya diambil dari baris Buku Kas yang diberi kategori biaya. Baris
-          tanpa kategori tidak ikut dihitung.
+          tanpa kategori tidak ikut dihitung. Dansos, Dekopinda, dan kategori
+          Neraca (Pakai Dana, Kas Bon, Hutang KOWABRI / PP, Bagi SHU) bukan
+          biaya: Dansos mengurangi Dana Sosial, Dekopinda mengurangi Dana PMDK.
         </p>
       </section>
     </template>

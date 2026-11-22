@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { CalendarX2, History, Plus, Search, Trash2 } from "lucide-vue-next";
+import { CalendarX2, Plus, Search, Trash2 } from "lucide-vue-next";
 import { useDebouncedRef } from "../composables/useDebouncedRef";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import PageHeader from "../components/PageHeader.vue";
@@ -103,6 +103,11 @@ const filteredRows = computed(() =>
 // "Riwayat hapus" swaps the sheet for every deleted row of the year.
 const showDeleted = pageState.field("showDeleted", () => false);
 
+const ledgerTabs = [
+  { label: "Buku kas harian", deleted: false },
+  { label: "Riwayat hapus", deleted: true },
+];
+
 // The export holds the rows the search leaves.
 const exportFilter = computed(() =>
   debouncedQuery.value.trim()
@@ -153,6 +158,29 @@ async function refreshPage() {
       :title="showDeleted ? 'Riwayat hapus' : 'Buku kas harian'"
       :refresh="refreshPage"
     >
+      <template #title>
+        <div class="page-tabs" role="tablist" aria-label="Buku kas">
+          <button
+            v-for="tab in ledgerTabs"
+            :key="tab.label"
+            :class="[
+              'page-tabs__tab',
+              { 'is-active': showDeleted === tab.deleted },
+            ]"
+            type="button"
+            role="tab"
+            :aria-selected="showDeleted === tab.deleted"
+            @click="showDeleted = tab.deleted"
+          >
+            {{ tab.label }}
+            <span
+              v-if="tab.deleted && deletedRows.length"
+              class="deleted-count"
+              >{{ deletedRows.length }}</span
+            >
+          </button>
+        </div>
+      </template>
       <template #before-actions>
         <label class="search-field">
           <Search :size="18" />
@@ -165,20 +193,6 @@ async function refreshPage() {
         </label>
       </template>
       <template #actions>
-        <button
-          :class="[
-            'button',
-            showDeleted ? 'button--active' : 'button--secondary',
-          ]"
-          type="button"
-          :aria-pressed="showDeleted"
-          @click="showDeleted = !showDeleted"
-        >
-          <History :size="16" /> Riwayat hapus
-          <span v-if="deletedRows.length" class="deleted-count">{{
-            deletedRows.length
-          }}</span>
-        </button>
         <ExportButton
           v-if="!showDeleted"
           kind="cash-book"
@@ -589,10 +603,38 @@ async function refreshPage() {
   color: var(--soft);
   font-size: 10.5px;
 }
-.button--active {
-  border: 1px solid var(--green);
-  color: var(--green);
-  background: var(--green-soft);
+.page-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.page-tabs__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--soft);
+  background: transparent;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+  cursor: pointer;
+}
+.page-tabs__tab:first-child {
+  padding-left: 0;
+}
+.page-tabs__tab + .page-tabs__tab {
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+}
+.page-tabs__tab:hover {
+  color: inherit;
+}
+.page-tabs__tab.is-active {
+  color: inherit;
 }
 .deleted-count {
   min-width: 18px;

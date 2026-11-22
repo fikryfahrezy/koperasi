@@ -14,7 +14,7 @@ use super::transactions::group_members;
 
 use crate::{
     contracts::TransactionGroupDto,
-    domain::{Channel, ComponentType, TransactionDirection, CASH_CATEGORIES},
+    domain::{cash_category, Channel, ComponentType, TransactionDirection},
 };
 
 /// One item of a transaction: what it moves and by how much.
@@ -164,10 +164,7 @@ fn component_type(item: &Item) -> Result<ComponentType, String> {
 
 /// Items that only move cash: CASH or a Buku Kas category.
 fn is_cash_only(component_type: ComponentType) -> bool {
-    component_type == ComponentType::Cash
-        || CASH_CATEGORIES
-            .iter()
-            .any(|(category, _)| *category == component_type)
+    component_type == ComponentType::Cash || cash_category(component_type).is_some()
 }
 
 /// The direction an item moves money in, or None for cash-only items.

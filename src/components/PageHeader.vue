@@ -23,7 +23,9 @@ async function handleRefresh() {
 <template>
   <header class="page-heading">
     <div class="page-heading__title">
-      <h1>{{ title }}</h1>
+      <slot name="title">
+        <h1>{{ title }}</h1>
+      </slot>
       <slot name="title-meta" />
     </div>
     <div

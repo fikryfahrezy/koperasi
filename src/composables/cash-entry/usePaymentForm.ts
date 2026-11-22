@@ -21,11 +21,22 @@ import {
 
 import type { WorkspacePageState } from "../useWorkspacePageState";
 
+/** Kelompok of a Setoran by a penabung Non Anggota: Manasuka only, no loan. */
+export const NON_MEMBER_SAVER = "PENABUNG_NON_ANGGOTA";
+
+/** What a Non Anggota setoran is for: a loan, or Manasuka of a penabung. */
+export const nonMemberPaymentOptions = [
+  { value: LoanGroup.NonMember, label: "Pinjaman" },
+  { value: NON_MEMBER_SAVER, label: "Manasuka" },
+];
+
 const emptyPayment = () => ({
-  loanGroup: LoanGroup.Member as LoanGroup,
+  loanGroup: LoanGroup.Member as LoanGroup | typeof NON_MEMBER_SAVER,
   memberId: "",
   // Non Anggota: the borrower, by name (see `borrowerKey`).
   borrower: "",
+  // Penabung Non Anggota: the saver's name; a new name opens their account.
+  saverName: "",
   // Principal and interest per running loan of the member or borrower.
   lines: {} as Record<string, { principal: number; interest: number }>,
   pokok: 0,
@@ -40,11 +51,39 @@ export function usePaymentForm(
   pageState: WorkspacePageState,
   businessDate: () => string,
 ) {
-  const { members, loans, postPayment } = useKoperasiStore();
+  const { members, loans, nonMemberSavers, postPayment } = useKoperasiStore();
   const paymentForm = pageState.field("paymentForm", emptyPayment);
 
   const isNonMemberPayment = computed(
     () => paymentForm.value.loanGroup === LoanGroup.NonMember,
+  );
+
+  const isSaverPayment = computed(
+    () => paymentForm.value.loanGroup === NON_MEMBER_SAVER,
+  );
+
+  // Kelompok is Anggota or Non Anggota; a Non Anggota setoran is then for a
+  // loan or for Manasuka (`nonMemberPaymentKind`).
+  const paymentGroup = computed({
+    get: () =>
+      paymentForm.value.loanGroup === LoanGroup.Member
+        ? LoanGroup.Member
+        : LoanGroup.NonMember,
+    set: (group: LoanGroup) => {
+      if (group !== paymentGroup.value) paymentForm.value.loanGroup = group;
+    },
+  });
+
+  const nonMemberPaymentKind = computed({
+    get: () => paymentForm.value.loanGroup,
+    set: (kind: LoanGroup | typeof NON_MEMBER_SAVER) => {
+      paymentForm.value.loanGroup = kind;
+    },
+  });
+
+  // Names offered for a penabung Non Anggota; any other name opens an account.
+  const saverNameOptions = computed(() =>
+    nonMemberSavers.map((saver) => saver.name),
   );
 
   const runningLoans = computed(() =>
@@ -223,24 +262,28 @@ export function usePaymentForm(
   /** An Anggota setoran with no pokok or bunga for any loan: only savings. */
   const isSavingsOnlyPayment = computed(
     () =>
-      !isNonMemberPayment.value &&
-      paymentLoans.value.every(
-        (loan) =>
-          !(paymentLine(loan.id).principal || 0) &&
-          !(paymentLine(loan.id).interest || 0),
-      ),
+      isSaverPayment.value ||
+      (!isNonMemberPayment.value &&
+        paymentLoans.value.every(
+          (loan) =>
+            !(paymentLine(loan.id).principal || 0) &&
+            !(paymentLine(loan.id).interest || 0),
+        )),
   );
 
-  const paymentTotal = computed(
-    () =>
-      paymentLoans.value.reduce(
-        (sum, loan) =>
-          sum +
-          (paymentLine(loan.id).principal || 0) +
-          (paymentLine(loan.id).interest || 0),
-        0,
-      ) +
-      (isNonMemberPayment.value ? 0 : sumAmounts(paymentSavingsAmounts.value)),
+  const paymentTotal = computed(() =>
+    isSaverPayment.value
+      ? paymentForm.value.voluntary || 0
+      : paymentLoans.value.reduce(
+          (sum, loan) =>
+            sum +
+            (paymentLine(loan.id).principal || 0) +
+            (paymentLine(loan.id).interest || 0),
+          0,
+        ) +
+        (isNonMemberPayment.value
+          ? 0
+          : sumAmounts(paymentSavingsAmounts.value)),
   );
 
   const memberName = (id: string) =>
@@ -248,6 +291,16 @@ export function usePaymentForm(
 
   /** The Uraian the backend writes when none is typed; "" until it is known. */
   const generatedDescription = computed(() => {
+    if (isSaverPayment.value) {
+      const name = paymentForm.value.saverName.trim().replace(/\s+/g, " ");
+      const saved = nonMemberSavers.find(
+        (saver) => saver.name.toLowerCase() === name.toLowerCase(),
+      );
+      return name && paymentForm.value.voluntary
+        ? `Setoran Manasuka ${saved?.name ?? name}`
+        : "";
+    }
+
     if (isSavingsOnlyPayment.value) {
       const name = memberName(paymentForm.value.memberId);
       const accounts = savingsAccountsText(paymentSavingsAmounts.value);
@@ -267,6 +320,25 @@ export function usePaymentForm(
   /** Savings only (no pokok or bunga) is posted by the same command. */
   async function submit(options: PostingOptions, description: string) {
     const form = paymentForm.value;
+
+    if (isSaverPayment.value) {
+      if (!form.saverName.trim() || !(form.voluntary > 0)) return false;
+
+      return postPayment(
+        {
+          memberId: "",
+          saverName: form.saverName,
+          principal: 0,
+          interest: 0,
+          pokok: 0,
+          wajib: 0,
+          voluntary: form.voluntary,
+          description,
+        },
+        options,
+      );
+    }
+
     const nonMember = isNonMemberPayment.value;
     if (nonMember ? !paymentLoans.value[0] : !form.memberId) return false;
     if (paymentTotal.value <= 0) return false;
@@ -293,6 +365,10 @@ export function usePaymentForm(
   return {
     paymentForm,
     isNonMemberPayment,
+    isSaverPayment,
+    paymentGroup,
+    nonMemberPaymentKind,
+    saverNameOptions,
     paymentBorrowerOptions,
     paymentMemberOptions,
     paymentLoans,

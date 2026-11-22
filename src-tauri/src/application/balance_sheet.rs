@@ -13,6 +13,18 @@ pub(crate) const BALANCE_SHEET_ITEMS: &[&str] = &[
     // Aktiva
     "CASH_ADJUSTMENT",
     "BANK_BALANCE",
+    // Saldo bank at the end of January..November (BANK_BALANCE is 31 Desember)
+    "BANK_BALANCE_01",
+    "BANK_BALANCE_02",
+    "BANK_BALANCE_03",
+    "BANK_BALANCE_04",
+    "BANK_BALANCE_05",
+    "BANK_BALANCE_06",
+    "BANK_BALANCE_07",
+    "BANK_BALANCE_08",
+    "BANK_BALANCE_09",
+    "BANK_BALANCE_10",
+    "BANK_BALANCE_11",
     "OTHER_LOANS",
     "UNCLAIMED_RECEIVABLES",
     "ACCRUED_EXPENSES",
@@ -30,6 +42,12 @@ pub(crate) const BALANCE_SHEET_ITEMS: &[&str] = &[
     "RAT_RESERVE",
     "LOAN_WRITE_OFF_RESERVE",
     "RETAINED_EARNINGS",
+    // Laba of a year whose transactions are incomplete (2025), typed from the sheet
+    "NET_INCOME",
+    // Added to the derived Piutang / Simpanan Manasuka lines of such a year
+    "MEMBER_LOANS_ADJUSTMENT",
+    "NON_MEMBER_LOANS_ADJUSTMENT",
+    "VOLUNTARY_SAVINGS_ADJUSTMENT",
     // Pos added by hand to a group (a list each)
     "EXTRA_CURRENT_ASSETS",
     "EXTRA_CURRENT_LIABILITIES",
@@ -103,7 +121,57 @@ pub(crate) async fn get_balance_sheet(
         });
     }
 
-    Ok(BalanceSheetDto { items, details })
+    let prior_items = sums(
+        sqlx::query(
+            "SELECT item_key AS key, SUM(amount) AS amount
+             FROM balance_sheet_items
+             WHERE company_id = ? AND year < ?
+             GROUP BY item_key",
+        )
+        .bind(company_id)
+        .bind(year),
+        pool,
+    )
+    .await?;
+
+    let prior_categories = sums(
+        sqlx::query(
+            "SELECT component_type AS key, SUM(amount) AS amount
+             FROM effective_components
+             WHERE company_id = ? AND channel = 'KAS' AND business_date < ?
+             GROUP BY component_type",
+        )
+        .bind(company_id)
+        .bind(format!("{year:04}-01-01")),
+        pool,
+    )
+    .await?;
+
+    Ok(BalanceSheetDto {
+        items,
+        details,
+        prior_items,
+        prior_categories,
+    })
+}
+
+/// Rows of `key` and `amount` as a map.
+async fn sums<'q>(
+    query: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
+    pool: &SqlitePool,
+) -> Result<BTreeMap<String, i64>, String> {
+    query
+        .fetch_all(pool)
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|row| {
+            Ok((
+                row.try_get("key").map_err(|error| error.to_string())?,
+                row.try_get("amount").map_err(|error| error.to_string())?,
+            ))
+        })
+        .collect()
 }
 
 /// Saves the typed lines of a book year (lines left out keep their value) and
@@ -305,6 +373,29 @@ mod tests {
     }
 
     #[test]
+    fn earlier_book_years_are_added_up_for_the_opening() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+
+            for input in [
+                items(2029, "DEBT_PPBRI", 10_000_000),
+                items(2030, "DEBT_PPBRI", 2_000_000),
+                items(2031, "DEBT_PPBRI", 500_000),
+            ] {
+                set_balance_sheet(input, "default", &pool).await.unwrap();
+            }
+
+            let sheet = get_balance_sheet("default", 2031, &pool).await.unwrap();
+            assert_eq!(sheet.items.get("DEBT_PPBRI"), Some(&500_000));
+            assert_eq!(sheet.prior_items.get("DEBT_PPBRI"), Some(&12_000_000));
+
+            let first = get_balance_sheet("default", 2029, &pool).await.unwrap();
+            assert!(first.prior_items.is_empty());
+            assert!(first.prior_categories.is_empty());
+        });
+    }
+
+    #[test]
     fn details_replace_the_rincian_without_a_stored_total() {
         tauri::async_runtime::block_on(async {
             let pool = crate::database::memory_pool().await;
@@ -430,7 +521,7 @@ mod tests {
 
             set_balance_sheet(
                 save(
-                    vec![("BANK_BALANCE", 2_000)],
+                    vec![("BANK_BALANCE", 2_000), ("BANK_BALANCE_09", 1_500)],
                     vec![("OTHER_LOANS", vec![detail("B", 500, None)])],
                 ),
                 "default",
@@ -455,6 +546,8 @@ mod tests {
             assert_eq!(before["items"]["BANK_BALANCE"], 1_000);
             assert_eq!(before["details"]["OTHER_LOANS"][0]["name"], "A");
             assert_eq!(after["items"]["BANK_BALANCE"], 2_000);
+            // The saldo bank of a month end is a line of its own.
+            assert_eq!(after["items"]["BANK_BALANCE_09"], 1_500);
             assert_eq!(after["details"]["OTHER_LOANS"][0]["name"], "B");
         });
     }

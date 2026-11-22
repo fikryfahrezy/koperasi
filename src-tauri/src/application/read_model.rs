@@ -214,7 +214,7 @@ async fn snapshot(company_id: &str, pool: &SqlitePool) -> Result<AppSnapshot, St
     let savings_balances = sqlx::query(
         "SELECT member_id, account_type, balance
          FROM savings_balances
-         WHERE company_id = ? AND account_type IN (?, ?)
+         WHERE company_id = ? AND member_id IS NOT NULL AND account_type IN (?, ?)
          ORDER BY member_id, account_type",
     )
     .bind(company_id)
@@ -230,6 +230,27 @@ async fn snapshot(company_id: &str, pool: &SqlitePool) -> Result<AppSnapshot, St
             account_type: SavingsAccountType::try_from(
                 try_column!(row, "account_type", String).as_str(),
             )?,
+            balance: try_column!(row, "balance"),
+        })
+    })
+    .collect::<Result<Vec<_>, _>>()?;
+
+    let non_member_savers = sqlx::query(
+        "SELECT b.savings_account_id id, b.holder_name name, b.balance
+         FROM savings_balances b
+         JOIN savings_accounts sa ON sa.id = b.savings_account_id
+         WHERE b.company_id = ? AND b.member_id IS NULL
+         ORDER BY sa.rowid",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?
+    .into_iter()
+    .map(|row| -> Result<NonMemberSaverDto, String> {
+        Ok(NonMemberSaverDto {
+            id: try_column!(row, "id"),
+            name: try_column!(row, "name"),
             balance: try_column!(row, "balance"),
         })
     })
@@ -382,6 +403,7 @@ async fn snapshot(company_id: &str, pool: &SqlitePool) -> Result<AppSnapshot, St
     Ok(AppSnapshot {
         members,
         savings_balances,
+        non_member_savers,
         loans,
         transactions,
         totals: TotalsDto {

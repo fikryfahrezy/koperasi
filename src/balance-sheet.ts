@@ -25,7 +25,8 @@ export type BalanceSheetGroup =
   (typeof BalanceSheetGroup)[keyof typeof BalanceSheetGroup];
 
 /** Keys of the Neraca lines typed per book year (`balance_sheet_items`; the
- * same list as `BALANCE_SHEET_ITEMS` in the backend). */
+ * same list as `BALANCE_SHEET_ITEMS` in the backend, except the typed LABA
+ * RUGI keys, which only data scripts write). */
 export const BalanceSheetItem = {
   BankBalance: "BANK_BALANCE",
   CashAdjustment: "CASH_ADJUSTMENT",
@@ -43,6 +44,20 @@ export const BalanceSheetItem = {
   RatReserve: "RAT_RESERVE",
   LoanWriteOffReserve: "LOAN_WRITE_OFF_RESERVE",
   RetainedEarnings: "RETAINED_EARNINGS",
+  /** Laba of a book year whose transactions are not all in the app (2025:
+   * pinjaman migrated as one lump in December), typed from the sheet. */
+  NetIncome: "NET_INCOME",
+  /** LABA RUGI of such a year, typed from the sheet: Pendapatan Bunga and
+   * Provisi, and each Biaya as `EXPENSE_<Buku Kas category>`
+   * (`typedExpenseKey`). Used only where the year has none counted. */
+  IncomeInterest: "INCOME_INTEREST",
+  IncomeProvision: "INCOME_PROVISION",
+  /** Added to the derived Piutang and Simpanan Manasuka lines, for a book
+   * year whose transactions are not in the app (2025): its Neraca as in the
+   * sheet. */
+  MemberLoansAdjustment: "MEMBER_LOANS_ADJUSTMENT",
+  NonMemberLoansAdjustment: "NON_MEMBER_LOANS_ADJUSTMENT",
+  VoluntarySavingsAdjustment: "VOLUNTARY_SAVINGS_ADJUSTMENT",
   // Pos added by hand to a group, beside its fixed lines (a list each).
   ExtraCurrentAssets: "EXTRA_CURRENT_ASSETS",
   ExtraCurrentLiabilities: "EXTRA_CURRENT_LIABILITIES",
@@ -52,6 +67,23 @@ export const BalanceSheetItem = {
 
 export type BalanceSheetItem =
   (typeof BalanceSheetItem)[keyof typeof BalanceSheetItem];
+
+/** The typed Biaya of a book year whose transactions are not in the app. */
+export const typedExpenseKey = (category: CashCategory) =>
+  `EXPENSE_${category}`;
+
+/** Key of the bank balance typed for the end of `period` ("YYYY-MM"):
+ * `BANK_BALANCE` at 31 Desember (also the opening of the next year), and
+ * `BANK_BALANCE_MM` at the end of the other months. */
+export const bankBalanceKey = (period: string) => {
+  const month = period.slice(5, 7);
+
+  return (
+    month === "12"
+      ? BalanceSheetItem.BankBalance
+      : `${BalanceSheetItem.BankBalance}_${month}`
+  ) as BalanceSheetItem;
+};
 
 export const balanceSheetItems = [
   {
@@ -96,26 +128,32 @@ export const balanceSheetItems = [
   {
     key: BalanceSheetItem.DebtPpbri,
     label: "Hutang ke KOWABRI / PP",
+    hint: "Saldo 1 Januari dari Neraca 31 Desember tahun lalu. Isian = hutang baru di luar Buku Kas. Bertambah dengan kategori Kas Pinjaman Modal KOWABRI / PP, berkurang dengan Cicil Hutang",
   },
   {
     key: BalanceSheetItem.NonMemberSavings,
     label: "Simpanan Non Anggota",
+    hint: "Manasuka penabung non anggota (bagian bawah halaman Simpanan), dihitung otomatis",
   },
   {
     key: BalanceSheetItem.CapitalReserve,
     label: "Cadangan Modal",
+    hint: "Saldo 1 Januari dari Neraca 31 Desember tahun lalu. Isian = tambahan saat RAT (bagian SHU)",
   },
   {
     key: BalanceSheetItem.EducationFund,
     label: "Dana Pendidikan",
+    hint: "Saldo 1 Januari dari Neraca 31 Desember tahun lalu. Isian = tambahan saat RAT (bagian SHU). Berkurang dengan kategori Kas Pakai Dana Pendidikan",
   },
   {
     key: BalanceSheetItem.SocialFund,
     label: "Dana Sosial",
+    hint: "Saldo 1 Januari dari Neraca 31 Desember tahun lalu. Isian = tambahan saat RAT (bagian SHU). Berkurang dengan kategori Kas Dansos",
   },
   {
     key: BalanceSheetItem.PmdkFund,
     label: "Dana PMDK (Pembangunan Daerah Kerja)",
+    hint: "Saldo 1 Januari dari Neraca 31 Desember tahun lalu. Isian = tambahan saat RAT (bagian SHU). Berkurang dengan kategori Kas Pakai Dana PMDK dan Dekopinda",
   },
   {
     key: BalanceSheetItem.LongTermDebt,
@@ -124,14 +162,39 @@ export const balanceSheetItems = [
   {
     key: BalanceSheetItem.RatReserve,
     label: "Cadangan RAT",
+    hint: "Saldo 1 Januari dari Neraca 31 Desember tahun lalu. Isian = tambahan saat RAT (bagian SHU). Berkurang dengan kategori Kas Pakai Cadangan RAT",
   },
   {
     key: BalanceSheetItem.LoanWriteOffReserve,
     label: "Cadangan Penghapusan",
+    hint: "Saldo 1 Januari dari Neraca 31 Desember tahun lalu. Isian = tambahan saat RAT (bagian SHU)",
   },
   {
     key: BalanceSheetItem.RetainedEarnings,
     label: "Laba ditahan tahun lalu",
+    hint: "Saldo 1 Januari dari Neraca 31 Desember tahun lalu. Isian = tambahan saat RAT (laba tahun lalu yang ditahan). Berkurang dengan kategori Kas Pakai Laba Ditahan",
+  },
+  ...(
+    [
+      [BalanceSheetItem.MemberLoansAdjustment, "Penyesuaian Piutang Anggota"],
+      [
+        BalanceSheetItem.NonMemberLoansAdjustment,
+        "Penyesuaian Piutang Non Anggota",
+      ],
+      [
+        BalanceSheetItem.VoluntarySavingsAdjustment,
+        "Penyesuaian Simpanan Manasuka",
+      ],
+    ] as const
+  ).map(([key, label]) => ({
+    key,
+    label,
+    hint: "Ditambahkan ke angka dari pinjaman/simpanan; hanya untuk tahun yang transaksinya tidak ada di aplikasi (2025)",
+  })),
+  {
+    key: BalanceSheetItem.NetIncome,
+    label: "Laba tahun (isian)",
+    hint: "Hanya untuk tahun yang transaksinya tidak lengkap di aplikasi (2025). Kosong: Bunga + Provisi − Biaya",
   },
   ...(
     [
@@ -167,15 +230,62 @@ export const groupListKey: Record<BalanceSheetGroup, BalanceSheetItem> = {
 
 export type BalanceSheetItemKey = (typeof balanceSheetItems)[number]["key"];
 
-/** Biaya columns of Buku Kas (L–W), subtracted from income for Laba Bersih. */
+/** Biaya columns of Buku Kas (L–W), subtracted from income for Laba Bersih.
+ * Dansos and Dekopinda are not: as in Neraca Penyesuaian, they are paid from
+ * Dana Sosial and Dana PMDK (see `fundUses`). */
 export const expenseCategories = cashCategories.filter(
   (category) =>
     ![
       CashCategory.CashTopUp,
       CashCategory.CashTopUpFromSavingsBook,
       CashCategory.TransferToSavingsBook,
+      CashCategory.SocialFund,
+      CashCategory.Dekopinda,
     ].includes(category.value as never),
 );
+
+/** Neraca lines carried from the Neraca of last year: their 1 January
+ * balance is every earlier book year's typed amount and Buku Kas movement
+ * (`prior`), and the typed amount of the year is what the RAT adds (bagian
+ * SHU). The first book year's typed amount is its whole balance. */
+export const carriedItems: readonly BalanceSheetItem[] = [
+  BalanceSheetItem.DebtPpbri,
+  BalanceSheetItem.CapitalReserve,
+  BalanceSheetItem.EducationFund,
+  BalanceSheetItem.SocialFund,
+  BalanceSheetItem.PmdkFund,
+  BalanceSheetItem.RatReserve,
+  BalanceSheetItem.LoanWriteOffReserve,
+  BalanceSheetItem.RetainedEarnings,
+];
+
+/** Earlier book years added up (`get_balance_sheet`): typed amounts by key
+ * and Buku Kas components by type. */
+export type BalanceSheetPrior = {
+  items: Record<string, number>;
+  categories: Record<string, number>;
+};
+
+/** Neraca lines typed as their balance on 1 January (`balance_sheet_items`)
+ * that the Buku Kas categories move during the year: the typed balance plus
+ * `adds` less `uses` (Neraca Penyesuaian: saldo, then each pemakaian). */
+export const fundUses: Partial<
+  Record<BalanceSheetItem, { adds?: CashCategory[]; uses: CashCategory[] }>
+> = {
+  [BalanceSheetItem.DebtPpbri]: {
+    adds: [CashCategory.DebtReceived],
+    uses: [CashCategory.DebtRepayment],
+  },
+  [BalanceSheetItem.EducationFund]: { uses: [CashCategory.EducationFundUse] },
+  [BalanceSheetItem.SocialFund]: { uses: [CashCategory.SocialFund] },
+  [BalanceSheetItem.PmdkFund]: {
+    uses: [CashCategory.PmdkFundUse, CashCategory.Dekopinda],
+  },
+  [BalanceSheetItem.RatReserve]: { uses: [CashCategory.RatReserveUse] },
+  [BalanceSheetItem.RetainedEarnings]: {
+    uses: [CashCategory.RetainedEarningsUse],
+  },
+};
 
 export const LineEditKind = {
   /** A typed line of the book year (`balance_sheet_items`). */
@@ -239,8 +349,8 @@ export function cashAndBankAt(period: string, cashBook: CashBook | undefined) {
 }
 
 /** Neraca at the end of `period` ("YYYY-MM"). `items` are the typed lines of
- * that book year. Bank is the typed 31 December balance in December, and
- * otherwise Kas Buku Tabungan, which misses money moved only at the bank. */
+ * that book year. Bank is the balance typed for the month end, and otherwise
+ * Kas Buku Tabungan, which misses money moved only at the bank. */
 export function balanceSheetAt(
   period: string,
   ledger: MonthlyLedger,
@@ -248,6 +358,7 @@ export function balanceSheetAt(
   loans: Loan[],
   items: Record<string, number>,
   details: Record<string, BalanceSheetDetail[]> = {},
+  prior: BalanceSheetPrior = { items: {}, categories: {} },
 ) {
   const item = (key: BalanceSheetItemKey) => items[key] ?? 0;
 
@@ -266,7 +377,13 @@ export function balanceSheetAt(
   const year = Number(period.slice(0, 4));
   const groupOf = new Map(loans.map((loan) => [loan.id, loan.loanGroup]));
   const loanRows = ledger.loans.filter((row) => row.period === period);
-  const savingsRows = ledger.savings.filter((row) => row.period === period);
+  const monthRows = ledger.savings.filter((row) => row.period === period);
+  // Simpanan Pokok, Wajib, Manasuka are the members'; penabung Non Anggota
+  // are Simpanan Non Anggota.
+  const savingsRows = monthRows.filter((row) => !row.nonMember);
+  const nonMemberSavings = sum(
+    monthRows.filter((row) => row.nonMember).map((row) => row.voluntaryClosing),
+  );
 
   const loanBalance = (group: LoanGroup) =>
     sum(
@@ -274,6 +391,22 @@ export function balanceSheetAt(
         .filter((row) => groupOf.get(row.loanId) === group)
         .map((row) => row.closingBalance),
     );
+
+  // A derived line plus its typed adjustment (only typed for 2025), which is
+  // edited in place like Kas once it is set.
+  const adjusted = (
+    id: string,
+    label: string,
+    amount: number,
+    key: BalanceSheetItem,
+  ): BalanceSheetLine => ({
+    id,
+    label,
+    amount: amount + item(key),
+    edit: items[key]
+      ? { kind: LineEditKind.Item, key, offset: amount }
+      : undefined,
+  });
 
   // Catatan of the RAT Neraca: Piutang Non Anggota per Rekomendasi.
   const recommenderOf = new Map(
@@ -299,18 +432,18 @@ export function balanceSheetAt(
 
   const { cash, bank, postedRows } = cashAndBankAt(period, cashBook);
 
-  // 0 means not typed: a bank balance of exactly 0 is not expected.
-  const typedBank =
-    period.endsWith("-12") && items[BalanceSheetItem.BankBalance]
-      ? items[BalanceSheetItem.BankBalance]
-      : undefined;
+  // The bank balance typed for the end of this month. 0 means not typed: a
+  // bank balance of exactly 0 is not expected.
+  const bankKey = bankBalanceKey(period);
+  const typedBank = items[bankKey] || undefined;
 
   // Laba Bersih: Bunga + Provisi from January, less the Buku Kas expenses.
   const monthsSoFar = ledger.loans.filter((row) => row.period <= period);
-  const interest = sum(monthsSoFar.map((row) => row.interestPaid));
-  const provision = sum(monthsSoFar.map((row) => row.provision));
+  const countedInterest = sum(monthsSoFar.map((row) => row.interestPaid));
+  const countedProvision = sum(monthsSoFar.map((row) => row.provision));
 
-  const expenses = expenseCategories.map((category) => ({
+  const countedExpenses = expenseCategories.map((category) => ({
+    category: category.value,
     label: category.label,
     amount: sum(
       postedRows.flatMap((row) =>
@@ -321,8 +454,48 @@ export function balanceSheetAt(
     ),
   }));
 
+  // A year without its income in the app (2025) takes the LABA RUGI typed
+  // from the sheet, where there is one.
+  const typedIncome =
+    countedInterest === 0 &&
+    countedProvision === 0 &&
+    countedExpenses.every((expense) => expense.amount === 0) &&
+    Object.keys(items).some(
+      (key) => key.startsWith("INCOME_") || key.startsWith("EXPENSE_"),
+    );
+
+  const interest = typedIncome
+    ? (items[BalanceSheetItem.IncomeInterest] ?? 0)
+    : countedInterest;
+  const provision = typedIncome
+    ? (items[BalanceSheetItem.IncomeProvision] ?? 0)
+    : countedProvision;
+  const expenses = typedIncome
+    ? countedExpenses.map((expense) => ({
+        ...expense,
+        amount: items[typedExpenseKey(expense.category)] ?? 0,
+      }))
+    : countedExpenses;
+
   const expenseTotal = sum(expenses.map((expense) => expense.amount));
+
+  // Buku Kas total of categories from January to `period`.
+  const categoryTotal = (categories: readonly CashCategory[]) =>
+    sum(
+      postedRows.flatMap((row) =>
+        row.components
+          .filter((part) =>
+            categories.includes(part.componentType as CashCategory),
+          )
+          .map((part) => part.amount),
+      ),
+    );
+
+  const cashBondLent = categoryTotal([CashCategory.CashBond]);
+  const cashBondRepaid = categoryTotal([CashCategory.CashBondRepayment]);
   const netIncome = interest + provision - expenseTotal;
+  // 0 means not typed, as for Bank.
+  const typedNetIncome = items[BalanceSheetItem.NetIncome] || undefined;
 
   // The group's added pos go last, or before `lastLines` (Modal Sendiri:
   // before the Laba lines).
@@ -343,16 +516,37 @@ export function balanceSheetAt(
     };
   };
 
+  // A typed line; one in `carriedItems` starts from the Neraca of last year,
+  // one in `fundUses` moves with the Buku Kas categories, and typing it saves
+  // the amount that gives it.
   const typed = (
     key: BalanceSheetItem,
     label?: string,
     editable = true,
-  ): BalanceSheetLine => ({
-    id: key,
-    label: label ?? balanceSheetItems.find((entry) => entry.key === key)!.label,
-    amount: item(key),
-    edit: editable ? { kind: LineEditKind.Item, key } : undefined,
-  });
+  ): BalanceSheetLine => {
+    const rule = fundUses[key];
+    const priorTotal = (categories: readonly CashCategory[]) =>
+      sum(categories.map((category) => prior.categories[category] ?? 0));
+    const opening = carriedItems.includes(key)
+      ? (prior.items[key] ?? 0) +
+        (rule ? priorTotal(rule.adds ?? []) - priorTotal(rule.uses) : 0)
+      : 0;
+    const movement =
+      opening +
+      (rule ? categoryTotal(rule.adds ?? []) - categoryTotal(rule.uses) : 0);
+
+    return {
+      id: key,
+      label:
+        label ?? balanceSheetItems.find((entry) => entry.key === key)!.label,
+      amount: item(key) + movement,
+      edit: editable
+        ? movement
+          ? { kind: LineEditKind.Item, key, offset: movement }
+          : { kind: LineEditKind.Item, key }
+        : undefined,
+    };
+  };
 
   // Labels and order as in the Neraca of the RAT report.
   const assets = [
@@ -373,32 +567,36 @@ export function balanceSheetAt(
         ...(typedBank === undefined
           ? { amount: bank, estimated: true }
           : { amount: typedBank }),
-        // The typed balance is the one at 31 Desember.
-        edit: period.endsWith("-12")
-          ? { kind: LineEditKind.Item, key: BalanceSheetItem.BankBalance }
-          : undefined,
+        // Typed per month: the saldo of the buku tabungan at the month end.
+        edit: { kind: LineEditKind.Item, key: bankKey },
       },
-      {
-        id: "member-loans",
-        label: "Piutang Anggota",
-        amount: loanBalance(LoanGroup.Member),
-      },
-      {
-        id: "non-member-loans",
-        label: "Piutang Non Anggota",
-        amount: loanBalance(LoanGroup.NonMember),
-      },
-      // The total of its list (Bon Sementara), edited under Catatan.
+      adjusted(
+        "member-loans",
+        "Piutang Anggota",
+        loanBalance(LoanGroup.Member),
+        BalanceSheetItem.MemberLoansAdjustment,
+      ),
+      adjusted(
+        "non-member-loans",
+        "Piutang Non Anggota",
+        loanBalance(LoanGroup.NonMember),
+        BalanceSheetItem.NonMemberLoansAdjustment,
+      ),
+      // The total of its list (Bon Sementara on 1 January), edited under
+      // Catatan, with this year's Kas Bon and Bayar Kas Bon of Buku Kas.
       {
         id: BalanceSheetItem.OtherLoans,
         label: balanceSheetItems.find(
           (entry) => entry.key === BalanceSheetItem.OtherLoans,
         )!.label,
-        amount: sum(
-          (details[BalanceSheetItem.OtherLoans] ?? []).map(
-            (detail) => detail.amount,
-          ),
-        ),
+        amount:
+          sum(
+            (details[BalanceSheetItem.OtherLoans] ?? []).map(
+              (detail) => detail.amount,
+            ),
+          ) +
+          cashBondLent -
+          cashBondRepaid,
       },
       typed(BalanceSheetItem.UnclaimedReceivables),
       typed(BalanceSheetItem.AccruedExpenses),
@@ -411,13 +609,19 @@ export function balanceSheetAt(
       BalanceSheetGroup.CurrentLiabilities,
       "Jumlah Kewajiban Jangka Pendek",
       [
-        {
-          id: "voluntary-savings",
-          label: "Simpanan Manasuka",
-          amount: sum(savingsRows.map((row) => row.voluntaryClosing)),
-        },
+        // Members only: Simpanan Non Anggota is its own line below.
+        adjusted(
+          "voluntary-savings",
+          "Simpanan Manasuka",
+          sum(savingsRows.map((row) => row.voluntaryClosing)),
+          BalanceSheetItem.VoluntarySavingsAdjustment,
+        ),
         typed(BalanceSheetItem.DebtPpbri),
-        typed(BalanceSheetItem.NonMemberSavings),
+        {
+          id: BalanceSheetItem.NonMemberSavings,
+          label: "Simpanan Non Anggota",
+          amount: nonMemberSavings,
+        },
         typed(BalanceSheetItem.CapitalReserve),
         typed(BalanceSheetItem.EducationFund),
         typed(BalanceSheetItem.SocialFund),
@@ -451,7 +655,17 @@ export function balanceSheetAt(
           BalanceSheetItem.RetainedEarnings,
           `Laba ditahan tahun ${year - 1}`,
         ),
-        { id: "net-income", label: `Laba Tahun ${year}`, amount: netIncome },
+        typedNetIncome === undefined
+          ? { id: "net-income", label: `Laba Tahun ${year}`, amount: netIncome }
+          : {
+              id: "net-income",
+              label: `Laba Tahun ${year}`,
+              amount: typedNetIncome,
+              edit: {
+                kind: LineEditKind.Item,
+                key: BalanceSheetItem.NetIncome,
+              },
+            },
       ],
     ),
   ];
@@ -465,12 +679,73 @@ export function balanceSheetAt(
     totalAssets,
     totalLiabilities,
     difference: totalAssets - totalLiabilities,
-    income: { interest, provision, expenses, expenseTotal, netIncome },
+    income: {
+      interest,
+      provision,
+      expenses,
+      expenseTotal,
+      netIncome,
+      /** The typed Laba of the year (NET_INCOME), shown on the Neraca. */
+      typedNetIncome,
+    },
+    /** Kas Bon and Bayar Kas Bon of Buku Kas this year (Piutang Lainnya). */
     nonMemberByRecommender,
+    cashBonds: { lent: cashBondLent, repaid: cashBondRepaid },
   };
 }
 
 export type BalanceSheet = ReturnType<typeof balanceSheetAt>;
+
+/** The ledger of `period` (31 Desember of last year) when last year has no
+ * transactions in the app (2025 was removed, its balances kept as the
+ * openings of 1 January): each loan and member at the opening of `ledger`'s
+ * first month, with no income. */
+export function openingLedger(
+  ledger: MonthlyLedger,
+  period: string,
+): MonthlyLedger {
+  const first = [...ledger.periods].sort()[0];
+
+  return {
+    ...ledger,
+    periods: [period],
+    loans: ledger.loans
+      .filter((row) => row.period === first)
+      .map((row) => ({
+        ...row,
+        period,
+        disbursed: 0,
+        principalPaid: 0,
+        interestPaid: 0,
+        provision: 0,
+        closingBalance: row.openingBalance,
+      })),
+    savings: ledger.savings
+      .filter((row) => row.period === first)
+      .map((row) => ({
+        ...row,
+        period,
+        principalClosing: row.principalOpening,
+        mandatoryClosing: row.mandatoryOpening,
+        voluntaryClosing: row.voluntaryOpening,
+      })),
+  };
+}
+
+/** The ledger of 31 Desember of last year (`period`): last year's own, or,
+ * when last year has no transactions in the app (2025 was removed), this
+ * year's openings (`openingLedger`). */
+export function previousYearLedger(
+  previous: MonthlyLedger,
+  ledger: MonthlyLedger,
+  period: string,
+): MonthlyLedger {
+  const hasRows =
+    previous.loans.some((row) => row.period === period) ||
+    previous.savings.some((row) => row.period === period);
+
+  return hasRows ? previous : openingLedger(ledger, period);
+}
 
 type SheetCell =
   | { kind: "heading"; label: string; listKey: BalanceSheetItem }

@@ -30,6 +30,9 @@ const source = readFileSync(
   "utf8",
 );
 const { descriptor } = parse(source);
+// The main pages listed in WorkspaceTabPages, each mounted once.
+const mainPages = [...source.matchAll(/\{ path: "[^"]+", component: \w+ \}/g)]
+  .length;
 const script = compileScript(descriptor, {
   id: "tab-pages-test",
   inlineTemplate: true,
@@ -147,7 +150,8 @@ test("main pages mount once across tabs, preserving filters and scroll without c
   };
   try {
     await settle();
-    assert.equal(globalThis.__tabPageMounts.length, 5);
+    // Every main page of WorkspaceTabPages mounts once while warming.
+    assert.equal(globalThis.__tabPageMounts.length, mainPages);
     workspace.workspaceTabs.value[0].fullPath = "/loans";
     await settle();
     const filter = globalThis.__tabPageFields.Loans;
@@ -169,7 +173,7 @@ test("main pages mount once across tabs, preserving filters and scroll without c
     await settle();
     assert.equal(
       globalThis.__tabPageMounts.length,
-      5,
+      mainPages,
       "new tabs do not mount additional reports",
     );
     assert.equal(
@@ -223,7 +227,7 @@ test("main pages mount once across tabs, preserving filters and scroll without c
       "closed tabs release their saved state",
     );
     assert.deepEqual(errors, []);
-    assert.equal(globalThis.__tabPageMounts.length, 5);
+    assert.equal(globalThis.__tabPageMounts.length, mainPages);
   } finally {
     app.unmount();
     workspace.workspaceTabs.value = originalTabs;

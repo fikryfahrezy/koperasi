@@ -99,6 +99,16 @@ export const CashCategory = {
   Other: "LAINNYA",
   Dekopinda: "DEKOPINDA",
   Parcel: "PARCEL",
+  // Neraca categories: they move a Neraca line, not Laba Rugi.
+  EducationFundUse: "PAKAI_DANA_PENDIDIKAN",
+  PmdkFundUse: "PAKAI_DANA_PMDK",
+  RatReserveUse: "PAKAI_CADANGAN_RAT",
+  RetainedEarningsUse: "PAKAI_LABA_DITAHAN",
+  ShuPayout: "BAGI_SHU",
+  CashBond: "KAS_BON",
+  CashBondRepayment: "BAYAR_KAS_BON",
+  DebtReceived: "TERIMA_HUTANG",
+  DebtRepayment: "CICIL_HUTANG",
 } as const;
 
 export type CashCategory = (typeof CashCategory)[keyof typeof CashCategory];
@@ -192,6 +202,61 @@ export const cashCategories: readonly {
   },
 ];
 
+// Buku Kas categories that move a Neraca line instead of being an expense
+// (Neraca Penyesuaian of BUKU KAS HARIAN), each for one direction. Same list
+// as `BALANCE_SHEET_CATEGORIES` in the backend.
+export const balanceSheetCategories: readonly {
+  value: CashCategory;
+  label: string;
+  direction: TransactionDirection;
+}[] = [
+  {
+    value: CashCategory.EducationFundUse,
+    label: "Pakai Dana Pendidikan",
+    direction: TransactionDirection.Out,
+  },
+  {
+    value: CashCategory.PmdkFundUse,
+    label: "Pakai Dana PMDK",
+    direction: TransactionDirection.Out,
+  },
+  {
+    value: CashCategory.RatReserveUse,
+    label: "Pakai Cadangan RAT",
+    direction: TransactionDirection.Out,
+  },
+  {
+    value: CashCategory.RetainedEarningsUse,
+    label: "Pakai Laba Ditahan",
+    direction: TransactionDirection.Out,
+  },
+  {
+    value: CashCategory.ShuPayout,
+    label: "Bagi SHU",
+    direction: TransactionDirection.Out,
+  },
+  {
+    value: CashCategory.CashBond,
+    label: "Kas Bon",
+    direction: TransactionDirection.Out,
+  },
+  {
+    value: CashCategory.CashBondRepayment,
+    label: "Bayar Kas Bon",
+    direction: TransactionDirection.In,
+  },
+  {
+    value: CashCategory.DebtReceived,
+    label: "Pinjaman Modal KOWABRI / PP",
+    direction: TransactionDirection.In,
+  },
+  {
+    value: CashCategory.DebtRepayment,
+    label: "Cicil Hutang KOWABRI / PP",
+    direction: TransactionDirection.Out,
+  },
+];
+
 export interface Company {
   id: string;
   name: string;
@@ -209,6 +274,15 @@ export interface Member {
 export interface SavingsBalance {
   memberId: string;
   accountType: SavingsAccountType;
+  balance: number;
+}
+
+/** A penabung Non Anggota: a Manasuka account with a name and no member
+ * (SIMPANAN nomor 137 dst.), as Non Anggota borrowers on loans. */
+export interface NonMemberSaver {
+  /** The savings account id; it identifies the saver. */
+  id: string;
+  name: string;
   balance: number;
 }
 
@@ -233,7 +307,10 @@ export interface Loan {
 }
 
 export interface SavingsMonth {
+  /** The member, or for a penabung Non Anggota their savings account id. */
   memberId: string;
+  /** A penabung Non Anggota: no SHU or Insentif Simpanan. */
+  nonMember: boolean;
   period: string;
   transactionDate: string;
   principalOpening: number;
@@ -388,6 +465,17 @@ export interface FinancialParameters {
   effectiveDate: string;
 }
 
+/** New parameter values from `effectiveDate`; a value left out is kept. */
+export interface SetFinancialParametersInput {
+  effectiveDate: string;
+  principalSavings?: number;
+  mandatorySavings?: number;
+  /** Percent: 1 = 1%. */
+  provisionRate?: number;
+  annualRate?: number;
+  maxLoanOutstanding?: number;
+}
+
 interface AddMemberInput {
   memberNumber: string;
   name: string;
@@ -424,6 +512,8 @@ type ChannelInput = { channel: Channel };
 
 interface SavingsTransactionInput {
   memberId: string;
+  /** Penabung Non Anggota (memberId empty): the saver's name; Manasuka only. */
+  saverName?: string;
   movement: SavingsMovement;
   /** One row for every savings type moved together, e.g. Wajib & Manasuka. */
   amounts: { accountType: SavingsAccountType; amount: number }[];
@@ -433,6 +523,9 @@ interface SavingsTransactionInput {
 
 interface PaymentInput {
   memberId: string;
+  /** Penabung Non Anggota (memberId empty): the saver's name. A new name opens
+   * their Manasuka account. */
+  saverName?: string;
   /** Set to pay one loan directly (Non Anggota borrowers have no member). */
   loanId?: string;
   principal: number;
@@ -452,6 +545,7 @@ type OperationalTimestamp = ReturnType<typeof operationalTimestamp>;
 interface AppSnapshot {
   members: Member[];
   savingsBalances: SavingsBalance[];
+  nonMemberSavers: NonMemberSaver[];
   loans: Loan[];
   transactions: Transaction[];
   totals: {
@@ -475,6 +569,7 @@ const members = reactive<Member[]>([]);
 const loans = reactive<Loan[]>([]);
 /** Wajib and Manasuka balances; Pokok is on each member. */
 const savingsBalances = reactive<SavingsBalance[]>([]);
+const nonMemberSavers = reactive<NonMemberSaver[]>([]);
 const transactions = reactive<Transaction[]>([]);
 
 const totals = {
@@ -519,6 +614,7 @@ const command = {
   getTransactionGroup: "get_transaction_group",
   getFinancialParameters: "get_financial_parameters",
   setIncentiveRates: "set_incentive_rates",
+  setFinancialParameters: "set_financial_parameters",
   getBalanceSheet: "get_balance_sheet",
   setBalanceSheet: "set_balance_sheet",
   exportXlsx: "export_xlsx",
@@ -657,6 +753,11 @@ const backend = {
     sittingAllowance?: number;
   }) =>
     invoke<void>(command.setIncentiveRates, {
+      input,
+      companyId: selectedCompanyId.value,
+    }),
+  setFinancialParameters: (input: SetFinancialParametersInput) =>
+    invoke<void>(command.setFinancialParameters, {
       input,
       companyId: selectedCompanyId.value,
     }),
@@ -806,6 +907,12 @@ function applySnapshot(
     ...snapshot.savingsBalances,
   );
 
+  nonMemberSavers.splice(
+    0,
+    nonMemberSavers.length,
+    ...(snapshot.nonMemberSavers ?? []),
+  );
+
   transactions.splice(0, transactions.length, ...snapshot.transactions);
   totals.cash.value = snapshot.totals.cash;
   totals.savings.value = snapshot.totals.savings;
@@ -827,7 +934,9 @@ function applyMutationSnapshot(snapshot: AppSnapshot, companyId: string) {
     queryKey: queryKeys.company(companyId),
     predicate: (query) =>
       query.queryKey[2] === "monthly-ledger" ||
-      query.queryKey[2] === "cash-book",
+      query.queryKey[2] === "cash-book" ||
+      // Buku Kas of earlier years opens the carried Neraca lines.
+      query.queryKey[2] === "balance-sheet",
   });
 
   applySnapshot(snapshot, companyId);
@@ -1393,6 +1502,10 @@ export function useMonthlyLedger(yearOffset = 0) {
 interface BalanceSheetData {
   items: Record<string, number>;
   details: Record<string, BalanceSheetDetail[]>;
+  /** Earlier book years added up: typed lines by key. */
+  priorItems: Record<string, number>;
+  /** Buku Kas (KAS) components before the book year, by type. */
+  priorCategories: Record<string, number>;
 }
 
 /** The typed Neraca of the selected book year (or the one `yearOffset` from
@@ -1425,6 +1538,19 @@ export function useBalanceSheetItems(yearOffset = 0) {
 
   return {
     balanceSheetItems: computed(() => query.data.value?.items ?? {}),
+  };
+}
+
+/** Earlier book years of the selected one (or the one `yearOffset` from it)
+ * added up, for the lines carried from the Neraca of last year. */
+export function useBalanceSheetPrior(yearOffset = 0) {
+  const query = useBalanceSheet(yearOffset);
+
+  return {
+    balanceSheetPrior: computed(() => ({
+      items: query.data.value?.priorItems ?? {},
+      categories: query.data.value?.priorCategories ?? {},
+    })),
   };
 }
 
@@ -1461,8 +1587,12 @@ async function setBalanceSheetItems(
     // One save: the lines and their rincian are stored together or not at all.
     await backend.setBalanceSheet({ year, items, details });
 
+    // Later years carry this year's lines as their opening.
     await queryClient.invalidateQueries({
-      queryKey: queryKeys.balanceSheet(companyId, year),
+      queryKey: queryKeys.company(companyId),
+      predicate: (query) =>
+        query.queryKey[2] === "balance-sheet" &&
+        Number(query.queryKey[3]) >= year,
     });
 
     notify("Pos neraca disimpan", `Tahun buku ${year}.`);
@@ -1605,6 +1735,25 @@ async function setIncentiveRate(
   }
 }
 
+/** Saves the form parameters (Pengaturan) from their effective date. */
+async function setFinancialParameters(input: SetFinancialParametersInput) {
+  const companyId = selectedCompanyId.value;
+
+  try {
+    await backend.setFinancialParameters(input);
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.parameters(companyId),
+    });
+    await loadFinancialParameters();
+
+    notify("Pengaturan disimpan", `Berlaku sejak ${input.effectiveDate}.`);
+    return true;
+  } catch (error) {
+    notify("Pengaturan gagal disimpan", errorMessage(error), "warning");
+    return false;
+  }
+}
+
 /** Saves the uang duduk + uang makan per anggota (in rupiah) of a year. */
 async function setSittingAllowance(year: number, amount: number) {
   const companyId = selectedCompanyId.value;
@@ -1630,6 +1779,7 @@ export const useKoperasiStore = () => ({
   members,
   loans,
   savingsBalances,
+  nonMemberSavers,
   transactions,
   totals,
   loading,
@@ -1650,6 +1800,7 @@ export const useKoperasiStore = () => ({
   updateMember,
   setIncentiveRate,
   setSittingAllowance,
+  setFinancialParameters,
   setBalanceSheetItems,
   memberNumberOwner,
   nextMemberNumber,

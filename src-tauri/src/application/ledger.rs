@@ -172,7 +172,9 @@ pub(crate) async fn get_monthly_ledger(
     let mut member_first_period: HashMap<String, String> = HashMap::new();
 
     for row in sqlx::query(
-        "SELECT sa.member_id, sa.account_type, c.component_type, c.amount, c.business_date
+        // A penabung Non Anggota is keyed by their account.
+        "SELECT COALESCE(sa.member_id, sa.id) member_id, sa.account_type, c.component_type,
+                c.amount, c.business_date
          FROM effective_components c
          JOIN savings_accounts sa ON sa.company_id = c.company_id AND sa.id = c.savings_account_id
          WHERE c.company_id = ?",
@@ -291,13 +293,23 @@ pub(crate) async fn get_monthly_ledger(
 
     let mut savings = Vec::new();
 
-    let member_ids: Vec<String> = sqlx::query_scalar("SELECT id FROM members WHERE company_id = ?")
-        .bind(company_id)
-        .fetch_all(pool)
-        .await
-        .map_err(|error| error.to_string())?;
+    // Members, then penabung Non Anggota in the order they were added.
+    let owners: Vec<(String, bool)> = sqlx::query_as(
+        "SELECT id, 0 FROM members WHERE company_id = ?
+         UNION ALL
+         SELECT id, 1 FROM (
+             SELECT id FROM savings_accounts
+             WHERE company_id = ? AND member_id IS NULL
+             ORDER BY rowid
+         )",
+    )
+    .bind(company_id)
+    .bind(company_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?;
 
-    for member_id in member_ids {
+    for (member_id, non_member) in owners {
         let Some(first_period) = member_first_period.get(&member_id) else {
             continue;
         };
@@ -325,6 +337,7 @@ pub(crate) async fn get_monthly_ledger(
             if period.starts_with(&year_prefix) {
                 savings.push(SavingsMonthDto {
                     member_id: member_id.clone(),
+                    non_member,
                     period: period.clone(),
                     transaction_date: month.transaction_date,
                     principal_opening: opening[0],

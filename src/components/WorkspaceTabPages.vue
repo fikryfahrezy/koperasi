@@ -27,11 +27,14 @@ import {
 import NewTab from "../views/NewTab.vue";
 import Dashboard from "../views/Dashboard.vue";
 import BalanceSheet from "../views/BalanceSheet.vue";
+import IncomeStatement from "../views/IncomeStatement.vue";
 import Members from "../views/Members.vue";
 import Savings from "../views/Savings.vue";
 import Loans from "../views/Loans.vue";
 import CashLedger from "../views/CashLedger.vue";
 import Shu from "../views/Shu.vue";
+import DataTransfer from "../views/DataTransfer.vue";
+import Settings from "../views/Settings.vue";
 
 const router = useRouter();
 
@@ -66,6 +69,12 @@ const pages = [
   { path: "/cash-ledger", component: CashLedger },
   { path: "/shu", component: Shu },
   { path: "/balance-sheet", component: BalanceSheet },
+  { path: "/income-statement", component: IncomeStatement },
+  // Database and Pengaturan are kept here too: the detail outlet below only
+  // holds one page type (Detail anggota), and switching it between two types
+  // breaks its KeepAlive ("parentComponent.ctx.deactivate is not a function").
+  { path: "/data", component: DataTransfer },
+  { path: "/settings", component: Settings },
 ];
 
 const warming = ref(true);

@@ -245,7 +245,12 @@ pub(crate) fn apply_savings_report(
 
         let average = sum as f64 / months as f64;
         row.savings_average = average.round() as i64;
-        (row.savings_incentive_raw, row.savings_incentive) = incentive(average, incentive_rate);
+        // No Insentif Simpanan for a penabung Non Anggota.
+        (row.savings_incentive_raw, row.savings_incentive) = if row.non_member {
+            (0, 0)
+        } else {
+            incentive(average, incentive_rate)
+        };
     }
 }
 
