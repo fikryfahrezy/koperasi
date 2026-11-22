@@ -4,6 +4,7 @@ import { CalendarX2, Plus, Search, Trash2 } from "lucide-vue-next";
 import { useDebouncedRef } from "../composables/useDebouncedRef";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import PageHeader from "../components/PageHeader.vue";
+import PageTitleTabs from "../components/PageTitleTabs.vue";
 import UiModal from "../components/UiModal.vue";
 import CashEntryDialog from "../components/CashEntryDialog.vue";
 import ExportButton from "../components/ExportButton.vue";
@@ -103,10 +104,10 @@ const filteredRows = computed(() =>
 // "Riwayat hapus" swaps the sheet for every deleted row of the year.
 const showDeleted = pageState.field("showDeleted", () => false);
 
-const ledgerTabs = [
-  { label: "Buku kas harian", deleted: false },
-  { label: "Riwayat hapus", deleted: true },
-];
+const ledgerTabs = computed(() => [
+  { value: false, label: "Buku kas harian" },
+  { value: true, label: "Riwayat hapus", count: deletedRows.value.length },
+]);
 
 // The export holds the rows the search leaves.
 const exportFilter = computed(() =>
@@ -159,31 +160,11 @@ async function refreshPage() {
       :refresh="refreshPage"
     >
       <template #title>
-        <!-- The view shown is the page's h1; the other one is a button to it.
-             Not role="tab": that role is the workspace tabs'. -->
-        <nav class="page-tabs" aria-label="Buku kas">
-          <template v-for="tab in ledgerTabs" :key="tab.label">
-            <h1
-              v-if="showDeleted === tab.deleted"
-              class="page-tabs__tab is-active"
-            >
-              {{ tab.label }}
-            </h1>
-            <button
-              v-else
-              class="page-tabs__tab"
-              type="button"
-              @click="showDeleted = tab.deleted"
-            >
-              {{ tab.label }}
-              <span
-                v-if="tab.deleted && deletedRows.length"
-                class="deleted-count"
-                >{{ deletedRows.length }}</span
-              >
-            </button>
-          </template>
-        </nav>
+        <PageTitleTabs
+          v-model="showDeleted"
+          label="Buku kas"
+          :tabs="ledgerTabs"
+        />
       </template>
       <template #before-actions>
         <label class="search-field">
@@ -605,48 +586,6 @@ async function refreshPage() {
 .deleted-table__meta {
   margin-top: 2px;
   color: var(--soft);
-  font-size: 10.5px;
-}
-.page-tabs {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.page-tabs__tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border: 0;
-  border-radius: 6px;
-  color: var(--soft);
-  background: transparent;
-  font-size: 17px;
-  font-weight: 700;
-  line-height: 1.15;
-  letter-spacing: -0.035em;
-  cursor: pointer;
-}
-.page-tabs__tab:first-child {
-  padding-left: 0;
-}
-.page-tabs__tab + .page-tabs__tab {
-  border-left: 1px solid var(--line);
-  border-radius: 0;
-}
-.page-tabs__tab:hover {
-  color: inherit;
-}
-.page-tabs__tab.is-active {
-  margin: 0;
-  color: inherit;
-  cursor: default;
-}
-.deleted-count {
-  min-width: 18px;
-  padding: 1px 5px;
-  color: var(--red);
-  background: var(--red-soft);
   font-size: 10.5px;
 }
 </style>

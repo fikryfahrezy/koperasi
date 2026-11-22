@@ -109,3 +109,85 @@ test("the export adds up with formulas", () => {
   assert.equal(at(22, 6).formula, "F18+F20");
   assert.equal(at(8, 5).number, undefined, "2025 rincian left blank");
 });
+
+test("Rincian: Bunga and Provisi per month, each Biaya per Buku Kas row", async () => {
+  const { incomeBreakdown } = await import("../src/income-statement.ts");
+  const { balanceSheetAt } = await import("../src/balance-sheet.ts");
+  const row = (businessDate, componentType, amount) => ({
+    businessDate,
+    description: componentType,
+    balance: 0,
+    status: "Terposting",
+    isReversal: false,
+    savingsBookIn: 0,
+    savingsBookOut: 0,
+    components: [{ componentType, amount }],
+  });
+  const loan = (period, interestPaid, provision) => ({
+    loanId: "L1",
+    period,
+    interestPaid,
+    provision,
+    closingBalance: 0,
+  });
+  const ledger = {
+    periods: ["2026-01", "2026-02", "2026-03"],
+    loans: [
+      loan("2026-01", 1_000, 50),
+      loan("2026-02", 2_000, 0),
+      loan("2026-03", 4_000, 70),
+    ],
+    savings: [],
+  };
+  const cashBook = {
+    openingBalance: 0,
+    savingsBookOpeningBalance: 0,
+    rows: [
+      row("2026-01-05", "BIAYA_PENGURUS", 300),
+      row("2026-02-05", "BIAYA_PENGURUS", 300),
+      row("2026-02-06", "HUMAS", 125),
+      row("2026-03-07", "HUMAS", 999),
+    ],
+  };
+
+  const b = incomeBreakdown(
+    balanceSheetAt("2026-02", ledger, cashBook, [], {}, {}),
+  );
+
+  assert.deepEqual(
+    b.revenue[0].parts.map((part) => part.amount),
+    [1_000, 2_000],
+  );
+  assert.deepEqual(
+    b.revenue[1].parts.map((part) => part.amount),
+    [50],
+  );
+  for (const line of [...b.revenue, ...b.expenses]) {
+    assert.equal(
+      line.parts.reduce((total, part) => total + part.amount, 0),
+      line.amount,
+      line.label,
+    );
+  }
+  const humas = b.expenses.find(
+    (line) => line.label === "Biaya Humas dan Lainnya",
+  );
+  assert.deepEqual(humas.parts, [
+    { label: "HUMAS", amount: 125, date: "2026-02-06" },
+  ]);
+  assert.equal(b.profit, 3_050 - 725);
+});
+
+test("Rincian: a year with only its Laba typed shows that Laba", async () => {
+  const { incomeBreakdown } = await import("../src/income-statement.ts");
+  const { balanceSheetAt } = await import("../src/balance-sheet.ts");
+  const ledger = { periods: ["2025-12"], loans: [], savings: [] };
+
+  const b = incomeBreakdown(
+    balanceSheetAt("2025-12", ledger, undefined, [], { NET_INCOME: 75_000 }),
+  );
+
+  assert.equal(b.revenueTotal, 0);
+  assert.equal(b.expenseTotal, 0);
+  assert.equal(b.profit, 75_000);
+});
