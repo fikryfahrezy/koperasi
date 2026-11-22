@@ -5,6 +5,8 @@ import ExportButton from "../components/ExportButton.vue";
 import BalanceSheetListPanel from "../components/BalanceSheetListPanel.vue";
 import SheetAmountInput from "../components/SheetAmountInput.vue";
 import PageHeader from "../components/PageHeader.vue";
+import PageTitleTabs from "../components/PageTitleTabs.vue";
+import BreakdownSheet from "../components/BreakdownSheet.vue";
 import UiSelect from "../components/UiSelect.vue";
 import { useBalanceSheetDrafts } from "../composables/useBalanceSheetDrafts";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
@@ -29,6 +31,20 @@ import {
 } from "../store/koperasi";
 
 const pageState = useWorkspacePageState("/balance-sheet");
+
+const BalanceSheetView = { Sheet: "sheet", Breakdown: "breakdown" } as const;
+type BalanceSheetView =
+  (typeof BalanceSheetView)[keyof typeof BalanceSheetView];
+
+const view = pageState.field<BalanceSheetView>(
+  "view",
+  () => BalanceSheetView.Sheet,
+);
+
+const viewTabs = [
+  { value: BalanceSheetView.Sheet, label: "Neraca" },
+  { value: BalanceSheetView.Breakdown, label: "Rincian" },
+];
 const { loans, selectedYear, refresh } = useKoperasiStore();
 const { monthlyLedger, monthlyLedgerLoading } = useMonthlyLedger();
 const { cashBook } = useCashBook(Channel.Cash);
@@ -139,6 +155,22 @@ const previous = computed(() =>
 
 const rows = computed(() => sheetRows([previous.value, current.value]));
 
+// Tab Rincian: the month shown, unsaved changes included.
+const breakdownSides = computed(() => [
+  {
+    title: "AKTIVA",
+    sections: current.value.assets,
+    totalLabel: "TOTAL AKTIVA",
+    total: current.value.totalAssets,
+  },
+  {
+    title: "PASIVA",
+    sections: current.value.liabilities,
+    totalLabel: "TOTAL PASIVA",
+    total: current.value.totalLiabilities,
+  },
+]);
+
 const differences = computed(() => [
   previous.value.difference,
   current.value.difference,
@@ -197,6 +229,9 @@ const hasEstimate = computed(() =>
 <template>
   <div class="page-stack balance-page">
     <PageHeader title="Neraca" :refresh="refresh">
+      <template #title>
+        <PageTitleTabs v-model="view" label="Neraca" :tabs="viewTabs" />
+      </template>
       <template #before-actions>
         <UiSelect
           v-if="periods.length"
@@ -208,7 +243,10 @@ const hasEstimate = computed(() =>
         />
       </template>
       <template #actions>
-        <ExportButton v-if="periods.length" :sheet="exportSheet" />
+        <ExportButton
+          v-if="periods.length && view === BalanceSheetView.Sheet"
+          :sheet="exportSheet"
+        />
       </template>
     </PageHeader>
 
@@ -221,6 +259,17 @@ const hasEstimate = computed(() =>
     <section v-else-if="!periods.length" class="panel balance-empty">
       <strong>Belum ada data untuk {{ selectedYear }}</strong>
     </section>
+
+    <template v-else-if="view === BalanceSheetView.Breakdown">
+      <p v-if="hasChanges" class="balance-check" role="status">
+        Rincian ini memakai perubahan yang belum disimpan. Simpan di tab Neraca.
+      </p>
+      <BreakdownSheet
+        title="RINCIAN NERACA"
+        :position="lastDay(selectedPeriod).toUpperCase()"
+        :sides="breakdownSides"
+      />
+    </template>
 
     <template v-else>
       <p v-if="current.difference !== 0" class="balance-check" role="status">

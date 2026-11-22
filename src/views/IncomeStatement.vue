@@ -2,10 +2,16 @@
 import { computed, watch } from "vue";
 import ExportButton from "../components/ExportButton.vue";
 import PageHeader from "../components/PageHeader.vue";
+import PageTitleTabs from "../components/PageTitleTabs.vue";
+import BreakdownSheet from "../components/BreakdownSheet.vue";
 import UiSelect from "../components/UiSelect.vue";
 import { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import { balanceSheetAt, previousYearLedger } from "../balance-sheet";
-import { type IncomeAmounts, incomeStatement } from "../income-statement";
+import {
+  type IncomeAmounts,
+  incomeBreakdown,
+  incomeStatement,
+} from "../income-statement";
 import { incomeStatementSheet } from "../income-statement-export";
 import {
   Channel,
@@ -22,6 +28,16 @@ import {
 // January to the month shown, beside 31 Desember of the year before. The
 // numbers are the Laba Bersih of the Neraca.
 const pageState = useWorkspacePageState("/income-statement");
+
+const IncomeView = { Sheet: "sheet", Breakdown: "breakdown" } as const;
+type IncomeView = (typeof IncomeView)[keyof typeof IncomeView];
+
+const view = pageState.field<IncomeView>("view", () => IncomeView.Sheet);
+
+const viewTabs = [
+  { value: IncomeView.Sheet, label: "Laba Rugi" },
+  { value: IncomeView.Breakdown, label: "Rincian" },
+];
 const { loans, selectedYear, refresh } = useKoperasiStore();
 const { monthlyLedger, monthlyLedgerLoading } = useMonthlyLedger();
 const { cashBook } = useCashBook(Channel.Cash);
@@ -52,6 +68,17 @@ const periodOptions = computed(() =>
 
 const previousPeriod = computed(() => `${selectedYear.value - 1}-12`);
 
+const currentSheet = computed(() =>
+  balanceSheetAt(
+    selectedPeriod.value,
+    monthlyLedger.value,
+    cashBook.value,
+    loans,
+    balanceSheetItems.value,
+    balanceSheetDetails.value,
+  ),
+);
+
 const statement = computed(() =>
   incomeStatement([
     balanceSheetAt(
@@ -66,16 +93,46 @@ const statement = computed(() =>
       previousItems.value,
       previousDetails.value,
     ),
-    balanceSheetAt(
-      selectedPeriod.value,
-      monthlyLedger.value,
-      cashBook.value,
-      loans,
-      balanceSheetItems.value,
-      balanceSheetDetails.value,
-    ),
+    currentSheet.value,
   ]),
 );
+
+// Tab Rincian: the month shown, Pendapatan beside Biaya as on the sheet.
+const breakdown = computed(() => incomeBreakdown(currentSheet.value));
+
+const breakdownSides = computed(() => {
+  const b = breakdown.value;
+
+  return [
+    {
+      title: "PENDAPATAN",
+      sections: [
+        {
+          title: "",
+          lines: b.revenue,
+          // The side's total is the section's.
+          totalLabel: "",
+          total: b.revenueTotal,
+        },
+      ],
+      totalLabel: "TOTAL PENDAPATAN",
+      total: b.revenueTotal,
+    },
+    {
+      title: "BIAYA",
+      sections: [
+        {
+          title: "",
+          lines: b.expenses,
+          totalLabel: "TOTAL BIAYA",
+          total: b.expenseTotal,
+        },
+      ],
+      totalLabel: "LABA",
+      total: b.profit,
+    },
+  ];
+});
 
 type Cell =
   | { kind: "heading" | "blank"; label?: string }
@@ -151,6 +208,9 @@ const exportSheet = () => {
 <template>
   <div class="page-stack income-page">
     <PageHeader title="Laba Rugi" :refresh="refresh">
+      <template #title>
+        <PageTitleTabs v-model="view" label="Laba Rugi" :tabs="viewTabs" />
+      </template>
       <template #before-actions>
         <UiSelect
           v-if="periods.length"
@@ -162,7 +222,10 @@ const exportSheet = () => {
         />
       </template>
       <template #actions>
-        <ExportButton v-if="periods.length" :sheet="exportSheet" />
+        <ExportButton
+          v-if="periods.length && view === IncomeView.Sheet"
+          :sheet="exportSheet"
+        />
       </template>
     </PageHeader>
 
@@ -175,6 +238,13 @@ const exportSheet = () => {
     <section v-else-if="!periods.length" class="panel income-empty">
       <strong>Belum ada data untuk {{ selectedYear }}</strong>
     </section>
+
+    <BreakdownSheet
+      v-else-if="view === IncomeView.Breakdown"
+      title="RINCIAN LABA - RUGI"
+      :position="lastDay(selectedPeriod).toUpperCase()"
+      :sides="breakdownSides"
+    />
 
     <section v-else class="panel income-sheet">
       <header class="income-sheet__title">

@@ -1,7 +1,11 @@
 // The LABA RUGI of BUKU KAS HARIAN: Pendapatan on the left, Biaya on the
 // right, a column per date (31 Desember of the year before and the month
 // shown), from the Laba Bersih of each Neraca (`balanceSheetAt`).
-import { type BalanceSheet, expenseCategories } from "./balance-sheet";
+import {
+  type BalanceSheet,
+  type LinePart,
+  expenseCategories,
+} from "./balance-sheet";
 import { CashCategory } from "./store/koperasi";
 
 /** An amount per column; null where the column has no rincian (a year
@@ -123,3 +127,80 @@ export function incomeStatement(sheets: BalanceSheet[]): IncomeStatement {
     ),
   };
 }
+
+/** A line of tab Rincian: its amount and the parts that add up to it. */
+export interface IncomeBreakdownLine {
+  label: string;
+  amount: number;
+  /** Where the amount comes from; none where the parts say it. */
+  source?: string;
+  parts: LinePart[];
+}
+
+/** Tab Rincian of the Laba Rugi at one date: Bunga and Provisi per month,
+ * each Biaya per Buku Kas row, in the lines of `incomeStatement`. */
+export function incomeBreakdown(sheet: BalanceSheet) {
+  const income = sheet.income;
+  const fromSheet = income.typedIncome ? "Dari LABA RUGI sheet." : undefined;
+
+  const revenue: IncomeBreakdownLine[] = [
+    {
+      label: "Pendapatan Bunga Pinjaman",
+      amount: income.interest,
+      source: fromSheet ?? "Bunga dibayar per bulan, dari halaman Pinjaman.",
+      parts: income.interestParts,
+    },
+    {
+      label: "Pendapatan Provisi Pinjaman",
+      amount: income.provision,
+      source:
+        fromSheet ?? "Provisi pinjaman baru per bulan, dari halaman Pinjaman.",
+      parts: income.provisionParts,
+    },
+    { label: "Pendapatan lainnya", amount: 0, parts: [] },
+  ];
+
+  const lineOf = (label: string, categories: readonly CashCategory[]) => {
+    const picked = income.expenses.filter((expense) =>
+      categories.includes(expense.category),
+    );
+
+    return {
+      label,
+      amount: sum(picked.map((expense) => expense.amount)),
+      source: fromSheet,
+      // The line names the category already.
+      parts: picked.flatMap((expense) =>
+        expense.parts.map(({ category: _category, ...part }) => part),
+      ),
+    };
+  };
+
+  const listed = expenseLines.flatMap((line) => line.categories);
+  const extra = expenseCategories
+    .filter((category) => !listed.includes(category.value))
+    .map((category) => lineOf(`Biaya ${category.label}`, [category.value]))
+    .filter((line) => line.amount !== 0);
+
+  const expenses: IncomeBreakdownLine[] = [
+    ...expenseLines.map((line) => lineOf(line.label, line.categories)),
+    ...extra,
+  ];
+
+  return {
+    revenue,
+    revenueTotal: income.interest + income.provision,
+    expenses,
+    expenseTotal: income.expenseTotal,
+    // As in `incomeStatement`: a year with only its Laba typed shows that Laba.
+    profit:
+      income.typedNetIncome !== undefined &&
+      income.interest === 0 &&
+      income.provision === 0 &&
+      income.expenseTotal === 0
+        ? income.typedNetIncome
+        : income.netIncome,
+  };
+}
+
+export type IncomeBreakdown = ReturnType<typeof incomeBreakdown>;

@@ -252,7 +252,13 @@ test("Bank takes the saldo typed for the month end, else Kas Buku Tabungan", () 
       "bank",
     );
 
-  assert.deepEqual(bank("2026-02", {}), {
+  const { source, parts, ...estimated } = bank("2026-02", {});
+  assert.ok(source);
+  assert.deepEqual(
+    parts.map((part) => part.amount),
+    [11_698_551, 0, 0],
+  );
+  assert.deepEqual(estimated, {
     id: "bank",
     label: "Bank",
     amount: 11_698_551,
@@ -281,4 +287,45 @@ test("Bank takes the saldo typed for the month end, else Kas Buku Tabungan", () 
     kind: "item",
     key: "BANK_BALANCE",
   });
+});
+
+test("Rincian: the parts of every line add up to the line", () => {
+  const prior = {
+    items: { RAT_RESERVE: 20_000_000, CAPITAL_RESERVE: 36_227_240 },
+    categories: { PAKAI_CADANGAN_RAT: 18_730_000 },
+  };
+  const typedItems = { ...items, CASH_ADJUSTMENT: 5_000, BANK_BALANCE_02: 0 };
+
+  for (const sheet of [
+    balanceSheetAt("2026-02", ledger, cashBook, [], typedItems, details, prior),
+    balanceSheetAt(
+      "2026-02",
+      ledger,
+      cashBook,
+      [],
+      { ...items, BANK_BALANCE_02: 1_500 },
+      details,
+    ),
+  ]) {
+    for (const line of [...sheet.assets, ...sheet.liabilities].flatMap(
+      (part) => part.lines,
+    )) {
+      assert.ok(line.parts, `${line.id} has no parts`);
+      assert.equal(
+        line.parts.reduce((total, part) => total + part.amount, 0),
+        line.amount,
+        line.id,
+      );
+    }
+  }
+
+  const sheet = balanceSheetAt("2026-02", ledger, cashBook, [], items, details);
+  assert.deepEqual(
+    lineOf(sheet, "PMDK_FUND").parts.map((part) => [part.date, part.amount]),
+    [
+      [undefined, 6_494_387],
+      ["2026-01-26", -850_000],
+      ["2026-02-04", -1_100_000],
+    ],
+  );
 });

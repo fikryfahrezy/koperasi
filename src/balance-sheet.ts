@@ -3,9 +3,11 @@
 // (`balance_sheet_items`). See notes/rules-and-formulas.md (Neraca).
 import {
   type BalanceSheetDetail,
+  balanceSheetCategories,
   CashCategory,
   cashCategories,
   type CashBook,
+  formatPeriod,
   type Loan,
   LoanGroup,
   type MonthlyLedger,
@@ -302,11 +304,26 @@ export type LineEdit =
   | { kind: typeof LineEditKind.Item; key: BalanceSheetItem; offset?: number }
   | { kind: typeof LineEditKind.Detail; key: BalanceSheetItem; name: string };
 
+/** One amount that makes up a Neraca line (tab Rincian): a saldo, a typed
+ * amount, or a Buku Kas row. The parts of a line add up to its amount. */
+export type LinePart = {
+  label: string;
+  amount: number;
+  /** "YYYY-MM-DD" for a Buku Kas row or a dated pos. */
+  date?: string;
+  /** The Buku Kas category of the row. */
+  category?: string;
+};
+
 export type BalanceSheetLine = {
   /** Matches the line across columns (labels can carry the year). */
   id: string;
   label: string;
   amount: number;
+  /** Where the amount comes from, for tab Rincian; none for an amount
+   * typed in the Neraca. */
+  source?: string;
+  parts?: LinePart[];
   /** Derived where the sheet types it (Bank without a typed balance). */
   estimated?: boolean;
   /** Set where the amount is typed, not derived. */
@@ -341,11 +358,12 @@ export function cashAndBankAt(period: string, cashBook: CashBook | undefined) {
     (row) => row.status !== TransactionStatus.Reversed && !row.isReversal,
   );
 
-  const bank =
-    (cashBook?.savingsBookOpeningBalance ?? 0) +
-    sum(postedRows.map((row) => row.savingsBookIn - row.savingsBookOut));
+  const bankOpening = cashBook?.savingsBookOpeningBalance ?? 0;
+  const bankIn = sum(postedRows.map((row) => row.savingsBookIn));
+  const bankOut = sum(postedRows.map((row) => row.savingsBookOut));
+  const bank = bankOpening + bankIn - bankOut;
 
-  return { cash, bank, postedRows };
+  return { cash, bank, bankOpening, bankIn, bankOut, postedRows };
 }
 
 /** Neraca at the end of `period` ("YYYY-MM"). `items` are the typed lines of
@@ -370,6 +388,13 @@ export function balanceSheetAt(
       id: `${key}:${detail.name}`,
       label: detail.name,
       amount: detail.amount,
+      parts: [
+        {
+          label: detail.note || detail.name,
+          amount: detail.amount,
+          date: detail.loanDate ?? undefined,
+        },
+      ],
       edit: { kind: LineEditKind.Detail, key, name: detail.name },
     }));
   };
@@ -392,6 +417,11 @@ export function balanceSheetAt(
         .map((row) => row.closingBalance),
     );
 
+  const openLoans = (group: LoanGroup) =>
+    loanRows.filter(
+      (row) => groupOf.get(row.loanId) === group && row.closingBalance !== 0,
+    ).length;
+
   // A derived line plus its typed adjustment (only typed for 2025), which is
   // edited in place like Kas once it is set.
   const adjusted = (
@@ -399,10 +429,25 @@ export function balanceSheetAt(
     label: string,
     amount: number,
     key: BalanceSheetItem,
+    amountLabel: string,
+    source: string,
   ): BalanceSheetLine => ({
     id,
     label,
     amount: amount + item(key),
+    source,
+    parts: [
+      { label: amountLabel, amount },
+      ...(item(key)
+        ? [
+            {
+              label: balanceSheetItems.find((entry) => entry.key === key)!
+                .label,
+              amount: item(key),
+            },
+          ]
+        : []),
+    ],
     edit: items[key]
       ? { kind: LineEditKind.Item, key, offset: amount }
       : undefined,
@@ -430,7 +475,34 @@ export function balanceSheetAt(
         a.recommender.localeCompare(b.recommender),
     );
 
-  const { cash, bank, postedRows } = cashAndBankAt(period, cashBook);
+  const { cash, bank, bankOpening, bankIn, bankOut, postedRows } =
+    cashAndBankAt(period, cashBook);
+
+  const categoryLabel = new Map(
+    [...cashCategories, ...balanceSheetCategories].map((option) => [
+      option.value as string,
+      option.label,
+    ]),
+  );
+
+  // Each Buku Kas row of the categories, from January to `period`; `sign`
+  // −1 for those that lower the line.
+  const categoryParts = (
+    categories: readonly CashCategory[],
+    sign: 1 | -1,
+  ): LinePart[] =>
+    postedRows.flatMap((row) =>
+      row.components
+        .filter((part) =>
+          categories.includes(part.componentType as CashCategory),
+        )
+        .map((part) => ({
+          label: row.description || "Tanpa uraian",
+          amount: sign * part.amount,
+          date: row.businessDate,
+          category: categoryLabel.get(part.componentType),
+        })),
+    );
 
   // The bank balance typed for the end of this month. 0 means not typed: a
   // bank balance of exactly 0 is not expected.
@@ -442,17 +514,29 @@ export function balanceSheetAt(
   const countedInterest = sum(monthsSoFar.map((row) => row.interestPaid));
   const countedProvision = sum(monthsSoFar.map((row) => row.provision));
 
-  const countedExpenses = expenseCategories.map((category) => ({
-    category: category.value,
-    label: category.label,
-    amount: sum(
-      postedRows.flatMap((row) =>
-        row.components
-          .filter((part) => part.componentType === category.value)
-          .map((part) => part.amount),
-      ),
-    ),
-  }));
+  const countedExpenses = expenseCategories.map((category) => {
+    const parts = categoryParts([category.value as CashCategory], 1);
+
+    return {
+      category: category.value,
+      label: category.label,
+      amount: sum(parts.map((part) => part.amount)),
+      /** Each Buku Kas row of the category (tab Rincian of Laba Rugi). */
+      parts,
+    };
+  });
+
+  // Bunga or Provisi of each month from January (tab Rincian of Laba Rugi).
+  const monthParts = (pick: (row: (typeof monthsSoFar)[number]) => number) =>
+    [...new Set(monthsSoFar.map((row) => row.period))]
+      .sort()
+      .map((month) => ({
+        label: formatPeriod(month),
+        amount: sum(
+          monthsSoFar.filter((row) => row.period === month).map(pick),
+        ),
+      }))
+      .filter((part) => part.amount !== 0);
 
   // A year without its income in the app (2025) takes the LABA RUGI typed
   // from the sheet, where there is one.
@@ -471,10 +555,10 @@ export function balanceSheetAt(
     ? (items[BalanceSheetItem.IncomeProvision] ?? 0)
     : countedProvision;
   const expenses = typedIncome
-    ? countedExpenses.map((expense) => ({
-        ...expense,
-        amount: items[typedExpenseKey(expense.category)] ?? 0,
-      }))
+    ? countedExpenses.map((expense) => {
+        const amount = items[typedExpenseKey(expense.category)] ?? 0;
+        return { ...expense, amount, parts: [{ label: "Dari sheet", amount }] };
+      })
     : countedExpenses;
 
   const expenseTotal = sum(expenses.map((expense) => expense.amount));
@@ -535,11 +619,41 @@ export function balanceSheetAt(
       opening +
       (rule ? categoryTotal(rule.adds ?? []) - categoryTotal(rule.uses) : 0);
 
+    const carried = carriedItems.includes(key);
+    // The first book year has no Neraca before it: its typed amount is the
+    // 1 January balance itself.
+    const firstYear =
+      !Object.keys(prior.items).length && !Object.keys(prior.categories).length;
+    const parts: LinePart[] = [
+      ...(carried && !firstYear
+        ? [{ label: "Saldo 1 Januari", amount: opening }]
+        : []),
+      ...(item(key) || !carried || firstYear
+        ? [
+            {
+              label: !carried
+                ? "Diisi manual"
+                : firstYear
+                  ? "Saldo 1 Januari"
+                  : "Tambahan saat RAT",
+              amount: item(key),
+            },
+          ]
+        : []),
+      ...(rule
+        ? [
+            ...categoryParts(rule.adds ?? [], 1),
+            ...categoryParts(rule.uses, -1),
+          ]
+        : []),
+    ];
+
     return {
       id: key,
       label:
         label ?? balanceSheetItems.find((entry) => entry.key === key)!.label,
       amount: item(key) + movement,
+      parts,
       edit: editable
         ? movement
           ? { kind: LineEditKind.Item, key, offset: movement }
@@ -555,6 +669,17 @@ export function balanceSheetAt(
         id: "cash",
         label: "Kas",
         amount: cash + item(BalanceSheetItem.CashAdjustment),
+        parts: [
+          { label: "Saldo Buku Kas", amount: cash },
+          ...(item(BalanceSheetItem.CashAdjustment)
+            ? [
+                {
+                  label: "Penyesuaian kas",
+                  amount: item(BalanceSheetItem.CashAdjustment),
+                },
+              ]
+            : []),
+        ],
         edit: {
           kind: LineEditKind.Item,
           key: BalanceSheetItem.CashAdjustment,
@@ -565,8 +690,21 @@ export function balanceSheetAt(
         id: "bank",
         label: "Bank",
         ...(typedBank === undefined
-          ? { amount: bank, estimated: true }
-          : { amount: typedBank }),
+          ? {
+              amount: bank,
+              estimated: true,
+              source:
+                "Perkiraan dari Kas Buku Tabungan. Isi saldo bank di tab Neraca supaya tepat.",
+              parts: [
+                { label: "Kas Buku Tabungan 1 Januari", amount: bankOpening },
+                { label: "Masuk Kas Buku Tabungan", amount: bankIn },
+                { label: "Keluar Kas Buku Tabungan", amount: 0 - bankOut },
+              ],
+            }
+          : {
+              amount: typedBank,
+              parts: [{ label: "Saldo buku tabungan", amount: typedBank }],
+            }),
         // Typed per month: the saldo of the buku tabungan at the month end.
         edit: { kind: LineEditKind.Item, key: bankKey },
       },
@@ -575,12 +713,16 @@ export function balanceSheetAt(
         "Piutang Anggota",
         loanBalance(LoanGroup.Member),
         BalanceSheetItem.MemberLoansAdjustment,
+        `Sisa ${openLoans(LoanGroup.Member)} pinjaman anggota`,
+        "Dari halaman Pinjaman.",
       ),
       adjusted(
         "non-member-loans",
         "Piutang Non Anggota",
         loanBalance(LoanGroup.NonMember),
         BalanceSheetItem.NonMemberLoansAdjustment,
+        `Sisa ${openLoans(LoanGroup.NonMember)} pinjaman non anggota`,
+        "Dari halaman Pinjaman. Rinciannya per rekomendasi ada di Catatan Neraca.",
       ),
       // The total of its list (Bon Sementara on 1 January), edited under
       // Catatan, with this year's Kas Bon and Bayar Kas Bon of Buku Kas.
@@ -597,6 +739,17 @@ export function balanceSheetAt(
           ) +
           cashBondLent -
           cashBondRepaid,
+        source:
+          "Bon Sementara di Catatan Neraca, ditambah Kas Bon dan dikurangi Bayar Kas Bon di Buku Kas.",
+        parts: [
+          ...(details[BalanceSheetItem.OtherLoans] ?? []).map((detail) => ({
+            label: `Bon Sementara ${detail.name}`,
+            amount: detail.amount,
+            date: detail.loanDate ?? undefined,
+          })),
+          ...categoryParts([CashCategory.CashBond], 1),
+          ...categoryParts([CashCategory.CashBondRepayment], -1),
+        ],
       },
       typed(BalanceSheetItem.UnclaimedReceivables),
       typed(BalanceSheetItem.AccruedExpenses),
@@ -615,12 +768,21 @@ export function balanceSheetAt(
           "Simpanan Manasuka",
           sum(savingsRows.map((row) => row.voluntaryClosing)),
           BalanceSheetItem.VoluntarySavingsAdjustment,
+          `Manasuka ${savingsRows.length} anggota`,
+          "Dari halaman Simpanan.",
         ),
         typed(BalanceSheetItem.DebtPpbri),
         {
           id: BalanceSheetItem.NonMemberSavings,
           label: "Simpanan Non Anggota",
           amount: nonMemberSavings,
+          source: "Dari halaman Simpanan.",
+          parts: [
+            {
+              label: `Manasuka ${monthRows.length - savingsRows.length} penabung non anggota`,
+              amount: nonMemberSavings,
+            },
+          ],
         },
         typed(BalanceSheetItem.CapitalReserve),
         typed(BalanceSheetItem.EducationFund),
@@ -641,11 +803,25 @@ export function balanceSheetAt(
           id: "principal-savings",
           label: "Simpanan Pokok",
           amount: sum(savingsRows.map((row) => row.principalClosing)),
+          source: "Dari halaman Simpanan.",
+          parts: [
+            {
+              label: `Simpanan Pokok ${savingsRows.length} anggota`,
+              amount: sum(savingsRows.map((row) => row.principalClosing)),
+            },
+          ],
         },
         {
           id: "mandatory-savings",
           label: "Simpanan Wajib",
           amount: sum(savingsRows.map((row) => row.mandatoryClosing)),
+          source: "Dari halaman Simpanan.",
+          parts: [
+            {
+              label: `Simpanan Wajib ${savingsRows.length} anggota`,
+              amount: sum(savingsRows.map((row) => row.mandatoryClosing)),
+            },
+          ],
         },
         typed(BalanceSheetItem.RatReserve),
         typed(BalanceSheetItem.LoanWriteOffReserve),
@@ -656,11 +832,30 @@ export function balanceSheetAt(
           `Laba ditahan tahun ${year - 1}`,
         ),
         typedNetIncome === undefined
-          ? { id: "net-income", label: `Laba Tahun ${year}`, amount: netIncome }
+          ? {
+              id: "net-income",
+              label: `Laba Tahun ${year}`,
+              amount: netIncome,
+              source: typedIncome
+                ? "Laba Rugi tahun ini diambil dari sheet."
+                : "Pendapatan Bunga dan Provisi dari halaman Pinjaman, dikurangi Biaya di Buku Kas, Januari sampai akhir bulan.",
+              parts: [
+                { label: "Pendapatan Bunga", amount: interest },
+                { label: "Pendapatan Provisi", amount: provision },
+                ...expenses
+                  .filter((expense) => expense.amount !== 0)
+                  .map((expense) => ({
+                    label: expense.label,
+                    amount: -expense.amount,
+                  })),
+              ],
+            }
           : {
               id: "net-income",
               label: `Laba Tahun ${year}`,
               amount: typedNetIncome,
+              source: "Laba tahun ini diambil dari sheet.",
+              parts: [{ label: "Laba dari sheet", amount: typedNetIncome }],
               edit: {
                 kind: LineEditKind.Item,
                 key: BalanceSheetItem.NetIncome,
@@ -682,6 +877,14 @@ export function balanceSheetAt(
     income: {
       interest,
       provision,
+      /** Taken from the LABA RUGI of the sheet (2025), not counted. */
+      typedIncome,
+      interestParts: typedIncome
+        ? [{ label: "Dari sheet", amount: interest }]
+        : monthParts((row) => row.interestPaid),
+      provisionParts: typedIncome
+        ? [{ label: "Dari sheet", amount: provision }]
+        : monthParts((row) => row.provision),
       expenses,
       expenseTotal,
       netIncome,
