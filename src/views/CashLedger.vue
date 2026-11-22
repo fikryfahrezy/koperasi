@@ -159,27 +159,31 @@ async function refreshPage() {
       :refresh="refreshPage"
     >
       <template #title>
-        <div class="page-tabs" role="tablist" aria-label="Buku kas">
-          <button
-            v-for="tab in ledgerTabs"
-            :key="tab.label"
-            :class="[
-              'page-tabs__tab',
-              { 'is-active': showDeleted === tab.deleted },
-            ]"
-            type="button"
-            role="tab"
-            :aria-selected="showDeleted === tab.deleted"
-            @click="showDeleted = tab.deleted"
-          >
-            {{ tab.label }}
-            <span
-              v-if="tab.deleted && deletedRows.length"
-              class="deleted-count"
-              >{{ deletedRows.length }}</span
+        <!-- The view shown is the page's h1; the other one is a button to it.
+             Not role="tab": that role is the workspace tabs'. -->
+        <nav class="page-tabs" aria-label="Buku kas">
+          <template v-for="tab in ledgerTabs" :key="tab.label">
+            <h1
+              v-if="showDeleted === tab.deleted"
+              class="page-tabs__tab is-active"
             >
-          </button>
-        </div>
+              {{ tab.label }}
+            </h1>
+            <button
+              v-else
+              class="page-tabs__tab"
+              type="button"
+              @click="showDeleted = tab.deleted"
+            >
+              {{ tab.label }}
+              <span
+                v-if="tab.deleted && deletedRows.length"
+                class="deleted-count"
+                >{{ deletedRows.length }}</span
+              >
+            </button>
+          </template>
+        </nav>
       </template>
       <template #before-actions>
         <label class="search-field">
@@ -634,7 +638,9 @@ async function refreshPage() {
   color: inherit;
 }
 .page-tabs__tab.is-active {
+  margin: 0;
   color: inherit;
+  cursor: default;
 }
 .deleted-count {
   min-width: 18px;
