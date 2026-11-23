@@ -114,6 +114,7 @@ mod tests {
                     amount,
                     channel: channel.into(),
                     business_date: DATE.into(),
+                    bon_payments: Vec::new(),
                 };
 
             post_cash_entry(
@@ -1755,6 +1756,7 @@ mod tests {
                     amount: 15_000,
                     channel: Channel::Cash.as_str().into(),
                     business_date: DATE.into(),
+                    bon_payments: Vec::new(),
                 },
                 "testing",
                 &pool,

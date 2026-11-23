@@ -186,7 +186,7 @@ pub(crate) const CASH_CATEGORIES: [(ComponentType, &str); 15] = [
 /// Buku Kas categories that move a Neraca line (a fund, a reserve, Piutang
 /// Lainnya, Hutang ke KOWABRI / PP) or pay out last year's SHU: not expenses,
 /// so they are not Buku Kas expense columns. Each is for one direction.
-pub(crate) const BALANCE_SHEET_CATEGORIES: [(ComponentType, &str, TransactionDirection); 9] = [
+pub(crate) const BALANCE_SHEET_CATEGORIES: [(ComponentType, &str, TransactionDirection); 8] = [
     (
         ComponentType::EducationFundUse,
         "Pakai Dana Pendidikan",
@@ -210,11 +210,6 @@ pub(crate) const BALANCE_SHEET_CATEGORIES: [(ComponentType, &str, TransactionDir
     (
         ComponentType::ShuPayout,
         "Bagi SHU",
-        TransactionDirection::Out,
-    ),
-    (
-        ComponentType::CashBond,
-        "Kas Bon",
         TransactionDirection::Out,
     ),
     (

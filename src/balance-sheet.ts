@@ -7,6 +7,7 @@ import {
   CashCategory,
   cashCategories,
   type CashBook,
+  type CashBookRow,
   formatPeriod,
   type Loan,
   LoanGroup,
@@ -875,52 +876,157 @@ export function balanceSheetAt(
     cashBonds: {
       lent: cashBondLent,
       repaid: cashBondRepaid,
-      lentParts: categoryParts([CashCategory.CashBond], 1),
-      repaidParts: categoryParts([CashCategory.CashBondRepayment], -1),
     },
   };
 }
 
-// Words of a name without a title (H, Hj), lower case.
-const nameWords = (name: string) =>
-  name
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((word) => word && !["h", "hj"].includes(word));
+/** One payment of a bon: (the part of) a Bayar Kas Bon of Buku Kas that
+ * pays it. */
+export type BonPayment = {
+  label: string;
+  amount: number;
+  /** "YYYY-MM-DD". */
+  date: string;
+};
+
+/** A bon of Piutang Lainnya with what is paid of it so far. */
+export type BonStatus = {
+  amount: number;
+  /** The bon less its payments; 0 or less once Lunas. */
+  left: number;
+  payments: BonPayment[];
+  /** The date of the payment that settled it; set once Lunas. */
+  paidOffOn?: string;
+};
 
 /**
- * Catatan "Piutang Lainnya (Bon Sementara) terdiri": the total per person of
- * the list, with each Kas Bon and Bayar Kas Bon of Buku Kas added to the
- * person whose name its uraian holds (every word of the name but the title).
- * Rows that name no one on the list (or more than one) stay in `unmatched`.
+ * Each bon of a Piutang Lainnya list (by its key) with what the Bayar Kas Bon
+ * of `cashRows` pay of it, in date order. Buku Kas rows of Kas Bon, and what a
+ * Bayar Kas Bon pays of no bon of the list, are `unlinked`. A Pengurang row (e.g.
+ * "Bayar dari SHU") does not say which bon it paid, so it pays none: it is in
+ * `unapplied` (negative, by the row) and only lowers its person's total.
+ */
+export function bonStatuses(
+  details: BalanceSheetDetail[],
+  cashRows: CashBookRow[],
+) {
+  const statuses = new Map<string, BonStatus>();
+
+  for (const bon of details)
+    if (bon.amount > 0 && bon.bonKey)
+      statuses.set(bon.bonKey, {
+        amount: bon.amount,
+        left: bon.amount,
+        payments: [],
+      });
+
+  const unapplied = new Map<BalanceSheetDetail, number>();
+
+  for (const deduction of details)
+    if (deduction.amount < 0) unapplied.set(deduction, deduction.amount);
+
+  const unlinked: LinePart[] = [];
+
+  // Buku Kas rows are in date order.
+  for (const row of cashRows)
+    for (const part of row.components) {
+      const label = row.description || "Tanpa uraian";
+
+      if (part.componentType === CashCategory.CashBond) {
+        unlinked.push({
+          label,
+          amount: part.amount,
+          date: row.businessDate,
+          category: "Kas Bon",
+        });
+        continue;
+      }
+
+      if (part.componentType !== CashCategory.CashBondRepayment) continue;
+
+      // What the row pays of each bon; the rest names no bon of the list.
+      let rest = part.amount;
+
+      for (const paid of row.bonPayments ?? []) {
+        const status = statuses.get(paid.bonKey);
+        if (!status) continue;
+
+        rest -= paid.amount;
+        status.left -= paid.amount;
+        status.payments.push({
+          label,
+          amount: paid.amount,
+          date: row.businessDate,
+        });
+        if (status.left <= 0 && !status.paidOffOn)
+          status.paidOffOn = row.businessDate;
+      }
+
+      if (rest > 0)
+        unlinked.push({
+          label,
+          amount: -rest,
+          date: row.businessDate,
+          category: "Bayar Kas Bon",
+        });
+    }
+
+  return { statuses, unlinked, unapplied };
+}
+
+/** Whether a bon is paid off (Lunas). */
+export const isPaidOff = (status: BonStatus | undefined) =>
+  !!status && status.left <= 0;
+
+/**
+ * Catatan "Piutang Lainnya (Bon Sementara) terdiri": what is left per person
+ * of the list. A bon counts what is left of it, so a person whose bons are all
+ * Lunas drops out; a Pengurang lowers its person's total. Buku Kas rows without a bon of the list stay in `unlinked`. The
+ * totals and `unlinked` add up to Piutang Lainnya.
  */
 export function otherLoansPerPerson(
   details: BalanceSheetDetail[],
-  cashBondParts: LinePart[],
+  cashRows: CashBookRow[],
 ) {
+  const { statuses, unlinked, unapplied } = bonStatuses(details, cashRows);
   const totals = new Map<string, number>();
-  for (const detail of details)
-    totals.set(detail.name, (totals.get(detail.name) ?? 0) + detail.amount);
 
-  const names = [...totals.keys()].map((name) => ({
-    name,
-    words: nameWords(name),
-  }));
-  const unmatched: LinePart[] = [];
+  for (const detail of details) {
+    const status = detail.bonKey ? statuses.get(detail.bonKey) : undefined;
+    const amount = status
+      ? status.left
+      : detail.amount < 0
+        ? (unapplied.get(detail) ?? 0)
+        : detail.amount;
 
-  for (const part of cashBondParts) {
-    const words = new Set(nameWords(part.label));
-    const owners = names.filter(
-      (entry) =>
-        entry.words.length && entry.words.every((word) => words.has(word)),
-    );
-
-    if (owners.length === 1)
-      totals.set(owners[0].name, totals.get(owners[0].name)! + part.amount);
-    else unmatched.push(part);
+    totals.set(detail.name, (totals.get(detail.name) ?? 0) + amount);
   }
 
-  return { byName: [...totals.entries()], unmatched };
+  return {
+    byName: [...totals.entries()].filter(([, amount]) => amount !== 0),
+    unlinked,
+    statuses,
+    unapplied,
+  };
+}
+
+/** The list as it stands: each bon at what is left of it (none once Lunas),
+ * and each Pengurang. */
+export function openOtherLoans(
+  details: BalanceSheetDetail[],
+  statuses: Map<string, BonStatus>,
+  unapplied: Map<BalanceSheetDetail, number>,
+): BalanceSheetDetail[] {
+  return details.flatMap((detail) => {
+    const status = detail.bonKey ? statuses.get(detail.bonKey) : undefined;
+    if (status)
+      return status.left > 0 ? [{ ...detail, amount: status.left }] : [];
+    if (detail.amount < 0) {
+      const rest = unapplied.get(detail);
+      return rest ? [{ ...detail, amount: rest }] : [];
+    }
+    return [detail];
+  });
 }
 
 export type BalanceSheet = ReturnType<typeof balanceSheetAt>;

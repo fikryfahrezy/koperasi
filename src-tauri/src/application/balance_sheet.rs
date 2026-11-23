@@ -4,7 +4,7 @@
 
 use super::posting::audit_change;
 use crate::contracts::{BalanceSheetDetailDto, BalanceSheetDto, SetBalanceSheetInput};
-use crate::domain::{AuditAction, AuditEntityType};
+use crate::domain::{timestamp_id, AuditAction, AuditEntityType};
 use sqlx::{Row, SqliteConnection, SqlitePool};
 use std::collections::BTreeMap;
 
@@ -95,7 +95,7 @@ pub(crate) async fn get_balance_sheet(
         .collect::<Result<BTreeMap<String, i64>, String>>()?;
 
     let rows = sqlx::query(
-        "SELECT item_key, name, amount, loan_date, note
+        "SELECT item_key, name, amount, loan_date, note, bon_key
          FROM balance_sheet_details
          WHERE company_id = ? AND year = ?
          ORDER BY item_key, position",
@@ -118,6 +118,7 @@ pub(crate) async fn get_balance_sheet(
                 .try_get("loan_date")
                 .map_err(|error| error.to_string())?,
             note: row.try_get("note").map_err(|error| error.to_string())?,
+            bon_key: row.try_get("bon_key").map_err(|error| error.to_string())?,
         });
     }
 
@@ -209,6 +210,12 @@ pub(crate) async fn set_balance_sheet(
         return Err("Nama rincian wajib diisi".to_string());
     }
 
+    let details = input
+        .details
+        .iter()
+        .map(|(key, rows)| Ok((key.clone(), with_bon_keys(key, rows)?)))
+        .collect::<Result<BTreeMap<String, Vec<BalanceSheetDetailDto>>, String>>()?;
+
     // Lines and rincian are replaced in place, so the audit keeps what they were.
     // Read before the transaction: the pool has a single connection.
     let previous = get_balance_sheet(company_id, input.year, pool).await?;
@@ -231,7 +238,11 @@ pub(crate) async fn set_balance_sheet(
         set_item(&mut db, company_id, input.year, key, *amount).await?;
     }
 
-    for (key, details) in &input.details {
+    if let Some(rows) = details.get(OTHER_LOANS) {
+        keep_paid_bons(&mut db, company_id, input.year, &previous.details, rows).await?;
+    }
+
+    for (key, details) in &details {
         sqlx::query(
             "DELETE FROM balance_sheet_details
              WHERE company_id = ? AND year = ? AND item_key = ?",
@@ -252,9 +263,10 @@ pub(crate) async fn set_balance_sheet(
 
             sqlx::query(
                 "INSERT INTO balance_sheet_details (
-                     company_id, year, item_key, position, name, amount, loan_date, note
+                     company_id, year, item_key, position, name, amount, loan_date, note,
+                     bon_key
                  )
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(company_id)
             .bind(input.year)
@@ -264,6 +276,7 @@ pub(crate) async fn set_balance_sheet(
             .bind(detail.amount)
             .bind(loan_date)
             .bind(detail.note.trim())
+            .bind(&detail.bon_key)
             .execute(&mut *db)
             .await
             .map_err(|error| error.to_string())?;
@@ -277,11 +290,100 @@ pub(crate) async fn set_balance_sheet(
         &input.year.to_string(),
         AuditAction::Updated,
         Some(before),
-        serde_json::json!({"items": &input.items, "details": &input.details}),
+        serde_json::json!({"items": &input.items, "details": &details}),
     )
     .await?;
 
     db.commit().await.map_err(|error| error.to_string())
+}
+
+/// Piutang Lainnya, whose rows are bons and their Pengurang.
+pub(crate) const OTHER_LOANS: &str = "OTHER_LOANS";
+
+/// The rows of a list as saved: on Piutang Lainnya each bon keeps its key (a
+/// new bon gets one); other lists have no bons.
+fn with_bon_keys(
+    key: &str,
+    rows: &[BalanceSheetDetailDto],
+) -> Result<Vec<BalanceSheetDetailDto>, String> {
+    let given = |value: &Option<String>| {
+        value
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+
+    let saved: Vec<BalanceSheetDetailDto> = rows
+        .iter()
+        .map(|row| {
+            let is_bon = key == OTHER_LOANS && row.amount > 0;
+
+            BalanceSheetDetailDto {
+                bon_key: is_bon
+                    .then(|| given(&row.bon_key).unwrap_or_else(|| timestamp_id("BON"))),
+                ..row.clone()
+            }
+        })
+        .collect();
+
+    let keys: Vec<&str> = saved
+        .iter()
+        .filter_map(|row| row.bon_key.as_deref())
+        .collect();
+
+    if keys
+        .iter()
+        .enumerate()
+        .any(|(index, key)| keys[..index].contains(key))
+    {
+        return Err("Kode bon ganda di rincian Piutang Lainnya.".into());
+    }
+
+    Ok(saved)
+}
+
+/// A bon paid with Bayar Kas Bon of this book year stays on the list: removing
+/// it would leave the payment without its bon.
+async fn keep_paid_bons(
+    db: &mut SqliteConnection,
+    company_id: &str,
+    year: i32,
+    previous: &BTreeMap<String, Vec<BalanceSheetDetailDto>>,
+    rows: &[BalanceSheetDetailDto],
+) -> Result<(), String> {
+    let paid: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT p.bon_key
+         FROM cash_bond_payments p
+         JOIN effective_transactions t
+           ON t.company_id = p.company_id AND t.id = p.transaction_id
+         WHERE p.company_id = ? AND t.business_date >= ? AND t.business_date < ?",
+    )
+    .bind(company_id)
+    .bind(format!("{year:04}-01-01"))
+    .bind(format!("{:04}-01-01", year + 1))
+    .fetch_all(&mut *db)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    let removed = previous
+        .get(OTHER_LOANS)
+        .into_iter()
+        .flatten()
+        .find(|old| {
+            old.bon_key.as_ref().is_some_and(|key| {
+                paid.contains(key)
+                    && !rows.iter().any(|row| row.bon_key.as_ref() == Some(key))
+            })
+        });
+
+    match removed {
+        Some(bon) => Err(format!(
+            "Bon {} sudah dibayar lewat Buku Kas, jadi tidak bisa dihapus dari daftar. Hapus dulu pembayarannya di Buku Kas.",
+            bon.name.trim()
+        )),
+        None => Ok(()),
+    }
 }
 
 async fn set_item(
@@ -317,6 +419,7 @@ mod tests {
             amount,
             loan_date: loan_date.map(str::to_string),
             note: String::new(),
+            bon_key: None,
         }
     }
 
@@ -549,6 +652,114 @@ mod tests {
             // The saldo bank of a month end is a line of its own.
             assert_eq!(after["items"]["BANK_BALANCE_09"], 1_500);
             assert_eq!(after["details"]["OTHER_LOANS"][0]["name"], "B");
+        });
+    }
+
+    #[test]
+    fn bons_keep_their_key_and_paid_bons_stay_on_the_list() {
+        tauri::async_runtime::block_on(async {
+            let pool = crate::database::memory_pool().await;
+
+            set_balance_sheet(
+                rincian(
+                    "OTHER_LOANS",
+                    vec![
+                        detail("Peminjam A", 1_000_000, Some("2029-05-01")),
+                        detail("Peminjam B", 500_000, Some("2029-06-01")),
+                    ],
+                ),
+                "default",
+                &pool,
+            )
+            .await
+            .unwrap();
+
+            let rows = get_balance_sheet("default", 2030, &pool).await.unwrap().details
+                ["OTHER_LOANS"]
+                .clone();
+            let key_a = rows[0].bon_key.clone().unwrap();
+            let key_b = rows[1].bon_key.clone().unwrap();
+            assert_ne!(key_a, key_b);
+
+            // Saving again keeps the keys; a Pengurang has none.
+            let deduction = detail("Peminjam A", -400_000, None);
+            set_balance_sheet(
+                rincian(
+                    "OTHER_LOANS",
+                    vec![rows[0].clone(), deduction.clone(), rows[1].clone()],
+                ),
+                "default",
+                &pool,
+            )
+            .await
+            .unwrap();
+
+            let saved = get_balance_sheet("default", 2030, &pool).await.unwrap().details
+                ["OTHER_LOANS"]
+                .clone();
+            assert_eq!(saved[0].bon_key.as_deref(), Some(key_a.as_str()));
+            assert_eq!(saved[1].bon_key, None);
+
+            use crate::contracts::BonPaymentDto;
+            let part = |bon_key: &str, amount: i64| BonPaymentDto {
+                bon_key: bon_key.into(),
+                amount,
+            };
+            let pay = |amount: i64, parts: Vec<BonPaymentDto>| crate::contracts::CashEntryInput {
+                direction: crate::domain::TransactionDirection::In.as_str().into(),
+                category: crate::domain::ComponentType::CashBondRepayment.as_str().into(),
+                description: "Bayar bon".into(),
+                amount,
+                channel: crate::domain::Channel::Cash.as_str().into(),
+                business_date: "2030-03-01".into(),
+                bon_payments: parts,
+            };
+            let pool_ref = &pool;
+            let post = move |input: crate::contracts::CashEntryInput| {
+                super::super::transactions::post_cash_entry(input, "default", pool_ref)
+            };
+
+            // A Pengurang pays no bon in particular: 1.000.000 is left of A.
+            assert!(post(pay(1_000_001, vec![part(&key_a, 1_000_001)])).await.is_err());
+            // The parts must add up to the Jumlah, one part per bon.
+            assert!(post(pay(700_000, vec![part(&key_a, 600_000)])).await.is_err());
+            assert!(post(pay(
+                700_000,
+                vec![part(&key_a, 600_000), part(&key_a, 100_000)]
+            ))
+            .await
+            .is_err());
+
+            // One Bayar Kas Bon pays part of A and all of B.
+            post(pay(
+                1_100_000,
+                vec![part(&key_a, 600_000), part(&key_b, 500_000)],
+            ))
+            .await
+            .unwrap();
+            assert!(post(pay(1, vec![part(&key_b, 1)])).await.is_err());
+
+            let book = super::super::read_model::get_cash_book(
+                "default",
+                2030,
+                crate::domain::Channel::Cash.as_str(),
+                &pool,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                book.rows.last().unwrap().bon_payments,
+                vec![part(&key_a, 600_000), part(&key_b, 500_000)]
+            );
+
+            // A paid bon can't leave the list.
+            assert!(set_balance_sheet(
+                rincian("OTHER_LOANS", vec![rows[1].clone()]),
+                "default",
+                &pool
+            )
+            .await
+            .is_err());
         });
     }
 }

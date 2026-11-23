@@ -527,6 +527,31 @@ pub(crate) async fn get_cash_book(
         .map(|(id, out, into)| (id, (out, into)))
         .collect();
 
+    // How much of a Bayar Kas Bon pays each bon (Piutang Lainnya).
+    let mut bon_payments: HashMap<String, Vec<BonPaymentDto>> = HashMap::new();
+
+    for (transaction_id, bon_key, amount) in sqlx::query_as::<_, (String, String, i64)>(&format!(
+        "SELECT p.transaction_id, p.bon_key, p.amount
+         FROM cash_bond_payments p
+         JOIN transactions t ON t.company_id = p.company_id AND t.id = p.transaction_id
+         WHERE p.company_id = ? AND {filter}
+         ORDER BY p.rowid"
+    ))
+    .bind(company_id)
+    .bind(channel.as_str())
+    .bind(listed_channel.as_str())
+    .bind(&year_start)
+    .bind(&next_year_start)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?
+    {
+        bon_payments
+            .entry(transaction_id)
+            .or_default()
+            .push(BonPaymentDto { bon_key, amount });
+    }
+
     let (mut balance, mut total_in, mut total_out) = (opening_balance, 0_i64, 0_i64);
     let mut cash_rows = Vec::with_capacity(rows.len());
 
@@ -549,11 +574,14 @@ pub(crate) async fn get_cash_book(
             .copied()
             .unwrap_or_default();
 
+        let bon_payments = bon_payments.remove(&transaction.id).unwrap_or_default();
+
         cash_rows.push(CashBookRowDto {
             transaction,
             balance,
             savings_book_out,
             savings_book_in,
+            bon_payments,
         });
     }
 

@@ -304,6 +304,10 @@ pub(crate) struct BalanceSheetDetailDto {
     pub(crate) loan_date: Option<String>,
     #[serde(default)]
     pub(crate) note: String,
+    /// Piutang Lainnya: the key of a bon row, kept when the list is saved so
+    /// its payments stay linked. Given on save when empty.
+    #[serde(default)]
+    pub(crate) bon_key: Option<String>,
 }
 
 /// Typed Neraca lines of a book year and their rincian.
@@ -478,6 +482,18 @@ pub(crate) struct CashEntryInput {
     pub(crate) amount: i64,
     pub(crate) channel: String,
     pub(crate) business_date: String,
+    /// Bayar Kas Bon: how much of it pays each bon (Piutang Lainnya of the
+    /// year); they add up to `amount`. Empty: it names no bon.
+    #[serde(default)]
+    pub(crate) bon_payments: Vec<BonPaymentDto>,
+}
+
+/// The part of a Bayar Kas Bon that pays one bon of Piutang Lainnya.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BonPaymentDto {
+    pub(crate) bon_key: String,
+    pub(crate) amount: i64,
 }
 
 #[derive(Serialize)]
@@ -491,6 +507,8 @@ pub(crate) struct CashBookRowDto {
     /// Transfer ke Tabungan enters it (masuk).
     pub(crate) savings_book_out: i64,
     pub(crate) savings_book_in: i64,
+    /// Bayar Kas Bon: how much of it pays each bon; empty when it names none.
+    pub(crate) bon_payments: Vec<BonPaymentDto>,
 }
 
 #[derive(Serialize)]

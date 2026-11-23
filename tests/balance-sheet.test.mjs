@@ -90,7 +90,8 @@ test("Neraca lines move with the Buku Kas Neraca categories", () => {
   assert.equal(amount("OTHER_LOANS"), 28_109_000 + 2_000_000 - 700_000);
   assert.equal(amount("voluntary-savings"), 900_000);
   assert.equal(amount("NON_MEMBER_SAVINGS"), 100_000);
-  assert.deepEqual(sheet.cashBonds, { lent: 2_000_000, repaid: 700_000 });
+  assert.equal(sheet.cashBonds.lent, 2_000_000);
+  assert.equal(sheet.cashBonds.repaid, 700_000);
 });
 
 test("Only expense categories count for Laba Bersih", () => {
@@ -325,6 +326,85 @@ test("Rincian: the parts of every line add up to the line", () => {
       [undefined, 6_494_387],
       ["2026-01-26", -850_000],
       ["2026-02-04", -1_100_000],
+    ],
+  );
+});
+
+test("A bon is Lunas once its payments reach its amount, and leaves the Catatan", async () => {
+  const { bonStatuses, openOtherLoans, otherLoansPerPerson } =
+    await import("../src/balance-sheet.ts");
+
+  const bon = (name, amount, bonKey, loanDate) => ({
+    name,
+    amount,
+    loanDate,
+    note: "",
+    bonKey,
+  });
+  const details = [
+    bon("A", 3_900_000, "BON-1", "2024-01-30"),
+    bon("A", 1_000_000, "BON-2", "2024-07-02"),
+    bon("B", 1_000_000, "BON-3", "2023-07-06"),
+    // A Pengurang names no bon: it only lowers B.
+    bon("B", -391_000, null, null),
+    bon("C", 300_000, "BON-4", "2025-01-13"),
+  ];
+  const pay = (businessDate, amount, bonPayments) => ({
+    ...row(businessDate, "BAYAR_KAS_BON", amount),
+    description: "Bayar bon",
+    bonPayments,
+  });
+  const rows = [
+    // One payment for two bons of A: all of one, part of the other.
+    pay("2026-03-29", 4_000_000, [
+      { bonKey: "BON-1", amount: 3_900_000 },
+      { bonKey: "BON-2", amount: 100_000 },
+    ]),
+    // Paid in two parts.
+    pay("2026-04-01", 100_000, [{ bonKey: "BON-4", amount: 100_000 }]),
+    pay("2026-05-01", 200_000, [{ bonKey: "BON-4", amount: 200_000 }]),
+    // No bon named.
+    pay("2026-06-01", 50_000, []),
+  ];
+
+  const { statuses, unlinked, unapplied } = bonStatuses(details, rows);
+  assert.equal(statuses.get("BON-1").left, 0);
+  assert.equal(statuses.get("BON-1").paidOffOn, "2026-03-29");
+  assert.equal(statuses.get("BON-2").left, 900_000);
+  assert.equal(statuses.get("BON-3").left, 1_000_000);
+  assert.equal(statuses.get("BON-3").payments.length, 0);
+  assert.equal(statuses.get("BON-4").left, 0);
+  assert.equal(statuses.get("BON-4").payments.length, 2);
+  assert.equal(statuses.get("BON-4").paidOffOn, "2026-05-01");
+  assert.deepEqual([...unapplied.values()], [-391_000]);
+  assert.deepEqual(
+    unlinked.map((part) => part.amount),
+    [-50_000],
+  );
+
+  // C is Lunas and drops out; the totals still add up to Piutang Lainnya.
+  const perPerson = otherLoansPerPerson(details, rows);
+  assert.deepEqual(perPerson.byName, [
+    ["A", 900_000],
+    ["B", 609_000],
+  ]);
+  const total = (amounts) => amounts.reduce((sum, amount) => sum + amount, 0);
+  assert.equal(
+    total(perPerson.byName.map(([, amount]) => amount)) +
+      total(unlinked.map((part) => part.amount)),
+    total(details.map((detail) => detail.amount)) -
+      total(rows.map((entry) => entry.components[0].amount)),
+  );
+
+  assert.deepEqual(
+    openOtherLoans(details, statuses, unapplied).map((detail) => [
+      detail.name,
+      detail.amount,
+    ]),
+    [
+      ["A", 900_000],
+      ["B", 1_000_000],
+      ["B", -391_000],
     ],
   );
 });

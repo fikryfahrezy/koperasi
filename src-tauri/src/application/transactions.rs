@@ -285,6 +285,39 @@ pub(crate) async fn post_cash_entry(
         return Err("Uraian wajib diisi.".into());
     }
 
+    if !input.bon_payments.is_empty() {
+        if component_type != ComponentType::CashBondRepayment {
+            return Err("Bon yang dibayar hanya untuk Bayar Kas Bon.".into());
+        }
+
+        if input.bon_payments.iter().map(|part| part.amount).sum::<i64>() != input.amount {
+            return Err("Jumlah harus sama dengan total yang dibayar per bon.".into());
+        }
+
+        for (index, part) in input.bon_payments.iter().enumerate() {
+            if part.amount <= 0 {
+                return Err("Jumlah yang dibayar per bon harus lebih dari nol.".into());
+            }
+
+            if input.bon_payments[..index]
+                .iter()
+                .any(|earlier| earlier.bon_key == part.bon_key)
+            {
+                return Err("Satu bon hanya boleh muncul sekali.".into());
+            }
+
+            let left =
+                bon_left(&mut db, company_id, &input.business_date, &part.bon_key).await?;
+
+            if part.amount > left {
+                return Err(format!(
+                    "Jumlah melebihi sisa bon ({}).",
+                    thousands(left)
+                ));
+            }
+        }
+    }
+
     append(
         &mut db,
         company_id,
@@ -302,16 +335,103 @@ pub(crate) async fn post_cash_entry(
     )
     .await?;
 
+    for part in &input.bon_payments {
+        sqlx::query(
+            "INSERT INTO cash_bond_payments (company_id, transaction_id, bon_key, amount)
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(company_id)
+        .bind(&id)
+        .bind(&part.bon_key)
+        .bind(part.amount)
+        .execute(&mut *db)
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+
     audit(
         &mut db,
         company_id,
         AuditEntityType::Transaction,
         &id,
         AuditAction::Posted,
-        serde_json::json!({"category": label, "amount": input.amount, "channel": channel.as_str()}),
+        serde_json::json!({
+            "category": label,
+            "amount": input.amount,
+            "channel": channel.as_str(),
+            "bonPayments": &input.bon_payments,
+        }),
     )
     .await?;
 
     db.commit().await.map_err(|error| error.to_string())?;
     get_app_snapshot(company_id, pool).await
+}
+
+/// What is left of a bon of Piutang Lainnya on its book year's list (the year
+/// of `business_date`): its amount less the Bayar Kas Bon of that year linked
+/// to it. A Pengurang of the list pays no bon in particular.
+async fn bon_left(
+    db: &mut SqliteConnection,
+    company_id: &str,
+    business_date: &str,
+    bon_key: &str,
+) -> Result<i64, String> {
+    let year: i32 = business_date
+        .get(..4)
+        .and_then(|year| year.parse().ok())
+        .ok_or("Tanggal transaksi tidak valid.")?;
+
+    let amount: Option<i64> = sqlx::query_scalar(
+        "SELECT amount
+         FROM balance_sheet_details
+         WHERE company_id = ? AND year = ? AND item_key = 'OTHER_LOANS' AND bon_key = ?",
+    )
+    .bind(company_id)
+    .bind(year)
+    .bind(bon_key)
+    .fetch_optional(&mut *db)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    let amount = amount.ok_or(format!(
+        "Bon yang dipilih tidak ada di Piutang Lainnya {year}."
+    ))?;
+
+    let repaid: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(p.amount), 0)
+         FROM cash_bond_payments p
+         JOIN effective_transactions t
+           ON t.company_id = p.company_id AND t.id = p.transaction_id
+         WHERE p.company_id = ? AND p.bon_key = ?
+           AND t.business_date >= ? AND t.business_date < ?",
+    )
+    .bind(company_id)
+    .bind(bon_key)
+    .bind(format!("{year:04}-01-01"))
+    .bind(format!("{:04}-01-01", year + 1))
+    .fetch_one(&mut *db)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    Ok(amount - repaid)
+}
+
+/// 1500000 as "1.500.000".
+fn thousands(amount: i64) -> String {
+    let digits = amount.unsigned_abs().to_string();
+    let mut grouped = String::new();
+
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index) % 3 == 0 {
+            grouped.push('.');
+        }
+        grouped.push(digit);
+    }
+
+    if amount < 0 {
+        format!("-{grouped}")
+    } else {
+        grouped
+    }
 }

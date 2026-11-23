@@ -236,11 +236,6 @@ export const balanceSheetCategories: readonly {
     direction: TransactionDirection.Out,
   },
   {
-    value: CashCategory.CashBond,
-    label: "Kas Bon",
-    direction: TransactionDirection.Out,
-  },
-  {
     value: CashCategory.CashBondRepayment,
     label: "Bayar Kas Bon",
     direction: TransactionDirection.In,
@@ -419,6 +414,15 @@ export interface CashBookRow extends Transaction {
   savingsBookOut: number;
   /** KAS BUKU TABUNGAN: Transfer ke Tabungan enters the bank book (masuk). */
   savingsBookIn: number;
+  /** Bayar Kas Bon: how much of it pays each bon of Piutang Lainnya; empty
+   * when it names none. */
+  bonPayments: BonPayment[];
+}
+
+/** The part of a Bayar Kas Bon that pays one bon of Piutang Lainnya. */
+export interface BonPayment {
+  bonKey: string;
+  amount: number;
 }
 
 export interface CashBook {
@@ -445,6 +449,9 @@ export interface CashEntryInput {
   category: CashCategory | "";
   description: string;
   amount: number;
+  /** Bayar Kas Bon: how much of it pays each bon of Piutang Lainnya; they
+   * add up to `amount`. */
+  bonPayments?: BonPayment[];
 }
 
 export interface LoanPreview {
@@ -1511,14 +1518,19 @@ interface BalanceSheetData {
 /** The typed Neraca of the selected book year (or the one `yearOffset` from
  * it): lines and rincian come from one query. */
 function useBalanceSheet(yearOffset: number) {
+  return useBalanceSheetOf(() => selectedYear.value + yearOffset);
+}
+
+/** The typed Neraca lines and rincian of book year `year`. */
+export function useBalanceSheetOf(year: () => number) {
   const query = useQuery(
     computed(() => {
       const companyId = selectedCompanyId.value;
-      const year = selectedYear.value + yearOffset;
+      const bookYear = year();
 
       return {
-        queryKey: queryKeys.balanceSheet(companyId, year),
-        queryFn: () => backend.getBalanceSheet(year, companyId),
+        queryKey: queryKeys.balanceSheet(companyId, bookYear),
+        queryFn: () => backend.getBalanceSheet(bookYear, companyId),
       };
     }),
   );
@@ -1563,6 +1575,8 @@ export interface BalanceSheetDetail {
   /** "YYYY-MM-DD", or null when unknown. */
   loanDate: string | null;
   note: string;
+  /** Piutang Lainnya: the key of a bon, kept so its payments stay linked. */
+  bonKey?: string | null;
 }
 
 /** Rincian of the typed Neraca lines of the selected book year, by key. */
@@ -1604,14 +1618,19 @@ async function setBalanceSheetItems(
 }
 
 export function useCashBook(channel: Channel, yearOffset = 0) {
+  return useCashBookOf(channel, () => selectedYear.value + yearOffset);
+}
+
+/** Buku Kas (or Kas Buku Tabungan) of book year `year`. */
+export function useCashBookOf(channel: Channel, year: () => number) {
   const query = useQuery(
     computed(() => {
       const companyId = selectedCompanyId.value;
-      const year = selectedYear.value + yearOffset;
+      const bookYear = year();
 
       return {
-        queryKey: queryKeys.cashBook(companyId, year, channel),
-        queryFn: () => backend.getCashBook(year, channel, companyId),
+        queryKey: queryKeys.cashBook(companyId, bookYear, channel),
+        queryFn: () => backend.getCashBook(bookYear, channel, companyId),
       };
     }),
   );

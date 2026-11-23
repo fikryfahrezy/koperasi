@@ -13,6 +13,8 @@ import { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import {
   BalanceSheetItem,
   balanceSheetAt,
+  cashAndBankAt,
+  openOtherLoans,
   otherLoansPerPerson,
   previousYearLedger,
   sheetRows,
@@ -59,25 +61,23 @@ const { balanceSheetDetails: previousDetails } = useBalanceSheetDetails(-1);
 const { balanceSheetPrior } = useBalanceSheetPrior();
 const { balanceSheetPrior: previousPrior } = useBalanceSheetPrior(-1);
 
-// Catatan "Piutang Lainnya (Bon Sementara) terdiri": the rincian per person,
-// with Kas Bon and Bayar Kas Bon of Buku Kas applied to whom they name.
+// Catatan "Piutang Lainnya (Bon Sementara) terdiri": what is left per person
+// at the end of the month shown; bons that are Lunas are left out (Uraian
+// still lists them).
 const otherLoans = computed(() =>
   otherLoansPerPerson(
     balanceSheetDetails.value[BalanceSheetItem.OtherLoans] ?? [],
-    [
-      ...current.value.cashBonds.lentParts,
-      ...current.value.cashBonds.repaidParts,
-    ],
+    cashAndBankAt(selectedPeriod.value, cashBook.value).postedRows,
   ),
 );
 const otherLoansByName = computed(() => otherLoans.value.byName);
 const sumParts = (parts: { amount: number }[]) =>
   parts.reduce((total, part) => total + part.amount, 0);
 const unmatchedLent = computed(() =>
-  sumParts(otherLoans.value.unmatched.filter((part) => part.amount > 0)),
+  sumParts(otherLoans.value.unlinked.filter((part) => part.amount > 0)),
 );
 const unmatchedRepaid = computed(
-  () => -sumParts(otherLoans.value.unmatched.filter((part) => part.amount < 0)),
+  () => -sumParts(otherLoans.value.unlinked.filter((part) => part.amount < 0)),
 );
 
 // The Catatan list being edited (Piutang Lainnya), if any.
@@ -222,7 +222,11 @@ const exportSheet = () => {
     rows: rows.value,
     notes: {
       nonMemberByRecommender: current.value.nonMemberByRecommender,
-      otherLoans: balanceSheetDetails.value[BalanceSheetItem.OtherLoans] ?? [],
+      otherLoans: openOtherLoans(
+        balanceSheetDetails.value[BalanceSheetItem.OtherLoans] ?? [],
+        otherLoans.value.statuses,
+        otherLoans.value.unapplied,
+      ),
     },
     fileName: `NERACA POSISI ${position}.xlsx`,
   });
@@ -508,7 +512,7 @@ const exportSheet = () => {
                 </td>
               </tr>
               <tr v-if="unmatchedRepaid">
-                <td>Bayar Kas Bon {{ selectedYear }} lainnya (Buku Kas)</td>
+                <td>Bayar Kas Bon {{ selectedYear }} tanpa bon (Buku Kas)</td>
                 <td class="num-cell">
                   {{ formatSheetNumber(-unmatchedRepaid) }}
                 </td>

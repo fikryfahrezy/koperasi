@@ -36,6 +36,7 @@ import UiSelect from "./UiSelect.vue";
 import {
   formatCurrency,
   formatLoanLabel,
+  formatSheetNumber,
   LoanGroup,
   todayIso,
   TransactionDirection,
@@ -133,13 +134,26 @@ const {
   setSavingsDefaults,
 } = savings;
 
-const cash = useCashForm(pageState, () =>
-  category.value === Category.CashIn
-    ? TransactionDirection.In
-    : TransactionDirection.Out,
+const cash = useCashForm(
+  pageState,
+  () =>
+    category.value === Category.CashIn
+      ? TransactionDirection.In
+      : TransactionDirection.Out,
+  () => posting.value.businessDate,
 );
 
-const { otherForm, cashCategoryOptions } = cash;
+const {
+  otherForm,
+  cashCategoryOptions,
+  isBonPayment,
+  openBons,
+  bonPersonOptions,
+  personBons,
+  bonOverpaid,
+  bonMissing,
+  payAllBons,
+} = cash;
 const isSavingsBook = computed(() => isCash.value && cash.isSavingsBook.value);
 
 // Uraian of payments, loans, and savings follows the generated text (as the
@@ -764,6 +778,68 @@ defineExpose({ open: openModal });
             aria-label="Kategori Buku Kas"
           />
         </label>
+        <label v-if="isBonPayment && openBons.length" class="field">
+          <span>Bon milik</span>
+          <UiSelect
+            v-model="otherForm.bonPerson"
+            :options="bonPersonOptions"
+            placeholder="Pilih peminjam"
+            aria-label="Bon milik"
+            required
+          />
+        </label>
+        <p
+          v-if="isBonPayment && otherForm.bonPerson && !personBons.length"
+          class="field-hint"
+        >
+          Pembayaran tidak menunjuk bon mana pun: hanya mengurangi total Piutang
+          Lainnya, status bon tidak berubah.
+        </p>
+        <div v-if="personBons.length" class="bon-payments">
+          <div class="bon-payments__head">
+            <span>Bon yang dibayar</span>
+            <button
+              class="button button--secondary bon-payments__all"
+              type="button"
+              @click="payAllBons"
+            >
+              Lunasi semua
+            </button>
+          </div>
+          <table class="bon-payments__table">
+            <thead>
+              <tr>
+                <th>Bon</th>
+                <th class="num-cell">Sisa</th>
+                <th class="num-cell">Dibayar</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="bon in personBons" :key="bon.bonKey">
+                <td>{{ bon.label }}</td>
+                <td class="num-cell">{{ formatSheetNumber(bon.left) }}</td>
+                <td>
+                  <RupiahInput
+                    v-model="otherForm.bonAmounts[bon.bonKey]"
+                    :aria-label="`Dibayar ${bon.label}`"
+                    :class="{
+                      'bon-payments__over':
+                        (otherForm.bonAmounts[bon.bonKey] ?? 0) > bon.left,
+                    }"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-if="bonOverpaid" class="field-error">
+            Ada bon yang dibayar melebihi sisanya.
+          </p>
+        </div>
+        <p v-else-if="isBonPayment" class="field-hint">
+          Tidak ada bon yang belum lunas di Piutang Lainnya
+          {{ posting.businessDate.slice(0, 4) }}. Pembayaran ini akan tercatat
+          tanpa bon.
+        </p>
         <p v-if="isSavingsBook" class="field-hint">
           Hanya mengubah Kas Buku Tabungan; Saldo Kas tidak berubah. Untuk
           memindahkan uang antara kas dan tabungan, pakai kategori Transfer ke
@@ -783,9 +859,13 @@ defineExpose({ open: openModal });
             v-model="otherForm.amount"
             :min="1"
             aria-label="Jumlah"
+            :readonly="personBons.length > 0"
             required
           />
         </label>
+        <p v-if="personBons.length" class="field-hint">
+          Jumlah = total kolom Dibayar.
+        </p>
       </template>
 
       <label v-if="!isCash" class="field">
@@ -805,7 +885,9 @@ defineExpose({ open: openModal });
           class="button button--primary"
           type="submit"
           :disabled="
-            submitting || (category === Category.Loan && exceedsTopUpPlafond)
+            submitting ||
+            (category === Category.Loan && exceedsTopUpPlafond) ||
+            (isCash && (bonOverpaid || bonMissing))
           "
         >
           {{ submitting ? "Menyimpan…" : submitLabel }}
@@ -1028,5 +1110,48 @@ defineExpose({ open: openModal });
   .movement-options--three {
     grid-template-columns: 1fr;
   }
+}
+.bon-payments {
+  display: grid;
+  gap: 6px;
+}
+.bon-payments__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+}
+.bon-payments__all {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.bon-payments__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.bon-payments__table th {
+  padding: 4px 6px;
+  text-align: left;
+  color: var(--muted);
+  font-weight: 600;
+}
+.bon-payments__table td {
+  padding: 3px 6px;
+  border-top: 1px solid var(--line);
+}
+.bon-payments__table :deep(input) {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  text-align: right;
+}
+.bon-payments__table :deep(input.bon-payments__over) {
+  border-color: var(--red);
 }
 </style>

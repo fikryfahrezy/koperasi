@@ -30,7 +30,8 @@ export function balanceSheetSheet(input: {
   /** Catatan under the Neraca. */
   notes: {
     nonMemberByRecommender: { recommender: string; amount: number }[];
-    /** Piutang Lainnya: a bon per entry, in the order typed. */
+    /** Piutang Lainnya: a bon per entry (at what is left of it), in the
+     * order typed. */
     otherLoans: BalanceSheetDetail[];
   };
   fileName: string;

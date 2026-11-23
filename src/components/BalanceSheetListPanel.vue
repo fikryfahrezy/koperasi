@@ -5,11 +5,18 @@ import BalanceSheetDetailsEditor, {
   type DetailRow,
 } from "./BalanceSheetDetailsEditor.vue";
 
-import { type BalanceSheetItem, balanceSheetItems } from "../balance-sheet";
+import {
+  BalanceSheetItem,
+  balanceSheetItems,
+  bonStatuses,
+  cashAndBankAt,
+} from "../balance-sheet";
 
 import {
   type BalanceSheetDetail,
+  Channel,
   useBalanceSheetDetails,
+  useCashBook,
   useKoperasiStore,
 } from "../store/koperasi";
 
@@ -19,6 +26,7 @@ const props = defineProps<{ itemKey: BalanceSheetItem; title: string }>();
 const emit = defineEmits<{ done: [] }>();
 const { selectedYear, setBalanceSheetItems } = useKoperasiStore();
 const { balanceSheetDetails } = useBalanceSheetDetails();
+const { cashBook } = useCashBook(Channel.Cash);
 
 const config = computed(() => {
   const item = balanceSheetItems.find((entry) => entry.key === props.itemKey);
@@ -32,6 +40,7 @@ const toRows = (details: BalanceSheetDetail[]): DetailRow[] =>
     deduction: detail.amount < 0,
     date: detail.loanDate ?? "",
     note: detail.note,
+    bonKey: detail.bonKey || `BON-${crypto.randomUUID()}`,
   }));
 
 const toDetails = (rows: DetailRow[]): BalanceSheetDetail[] =>
@@ -42,12 +51,24 @@ const toDetails = (rows: DetailRow[]): BalanceSheetDetail[] =>
       amount: row.deduction ? -row.amount : row.amount,
       loanDate: row.date || null,
       note: row.note.trim(),
+      bonKey: row.deduction ? null : row.bonKey,
     }));
 
 const saved = computed(() => balanceSheetDetails.value[props.itemKey] ?? []);
 const rows = ref<DetailRow[]>([]);
 watch(saved, () => (rows.value = toRows(saved.value)), { immediate: true });
 const saving = ref(false);
+
+// Piutang Lainnya: Lunas / Sisa of each bon as typed, with every Bayar Kas Bon
+// of the year.
+const statuses = computed(() =>
+  props.itemKey === BalanceSheetItem.OtherLoans
+    ? bonStatuses(
+        toDetails(rows.value),
+        cashAndBankAt(`${selectedYear.value}-12`, cashBook.value).postedRows,
+      ).statuses
+    : undefined,
+);
 
 async function save() {
   saving.value = true;
@@ -72,6 +93,7 @@ async function save() {
     <BalanceSheetDetailsEditor
       v-model="rows"
       :label="`${title} ${selectedYear}`"
+      :bon-statuses="statuses"
       v-bind="config"
     />
     <div class="list-panel__actions">
@@ -93,7 +115,7 @@ async function save() {
 .list-panel {
   display: grid;
   gap: 8px;
-  width: min(880px, 100%);
+  width: min(1040px, 100%);
 }
 .list-panel__actions {
   display: flex;

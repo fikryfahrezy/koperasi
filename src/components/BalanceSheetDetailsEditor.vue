@@ -2,7 +2,12 @@
 import { computed, ref } from "vue";
 import { Plus } from "lucide-vue-next";
 import RupiahInput from "./RupiahInput.vue";
-import { formatSheetNumber } from "../store/koperasi";
+import { type BonStatus, isPaidOff } from "../balance-sheet";
+import {
+  formatDate,
+  formatSheetNumber,
+  useKoperasiStore,
+} from "../store/koperasi";
 
 // The list behind a Neraca line (Piutang Lainnya: a bon per row with the date
 // borrowed; Aktiva Tetap: a pos per row). A Pengurang row is subtracted, e.g.
@@ -13,15 +18,20 @@ export type DetailRow = {
   deduction: boolean;
   date: string;
   note: string;
+  /** Piutang Lainnya: the key of a bon row, so its payments stay linked. */
+  bonKey: string;
 };
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     label: string;
     dateLabel?: string;
     addLabel?: string;
+    /** Piutang Lainnya: each bon by key with its payments; shows the Status
+     * column (Lunas / Sisa). */
+    bonStatuses?: Map<string, BonStatus>;
   }>(),
-  { dateLabel: "Tanggal", addLabel: "Tambah baris" },
+  { dateLabel: "Tanggal", addLabel: "Tambah baris", bonStatuses: undefined },
 );
 
 const rows = defineModel<DetailRow[]>({ required: true });
@@ -32,7 +42,30 @@ const emptyRow = (): DetailRow => ({
   deduction: false,
   date: "",
   note: "",
+  bonKey: `BON-${crypto.randomUUID()}`,
 });
+
+const statusOf = (row: DetailRow) =>
+  row.deduction ? undefined : props.bonStatuses?.get(row.bonKey);
+
+const { notify } = useKoperasiStore();
+
+// A bon paid with Bayar Kas Bon stays: removing it would leave the payment
+// without its bon (Simpan refuses it too).
+function remove(index: number) {
+  const row = rows.value[index];
+
+  if (statusOf(row)?.payments.length) {
+    notify(
+      "Bon tidak bisa dihapus",
+      `Bon ${row.name.trim() || "ini"} sudah dibayar lewat Buku Kas. Hapus dulu pembayarannya di Buku Kas.`,
+      "warning",
+    );
+    return;
+  }
+
+  rows.value.splice(index, 1);
+}
 
 const dateFocus = ref(-1);
 const signed = (row: DetailRow) => (row.deduction ? -row.amount : row.amount);
@@ -56,7 +89,8 @@ const total = computed(() =>
             <th>{{ dateLabel }}</th>
             <th>Jumlah</th>
             <th>Pengurang</th>
-            <th>Keterangan</th>
+            <th class="details__note-head">Keterangan</th>
+            <th v-if="bonStatuses">Status</th>
             <th></th>
           </tr>
         </thead>
@@ -92,18 +126,48 @@ const total = computed(() =>
                 aria-label="Keterangan"
               />
             </td>
+            <td v-if="bonStatuses" class="details__status">
+              <template v-if="statusOf(row)">
+                <strong v-if="isPaidOff(statusOf(row))" class="details__paid">
+                  Lunas<template v-if="statusOf(row)!.paidOffOn">
+                    {{ formatDate(statusOf(row)!.paidOffOn!) }}</template
+                  >
+                </strong>
+                <span v-else-if="statusOf(row)!.payments.length">
+                  Sisa {{ formatSheetNumber(statusOf(row)!.left) }}
+                </span>
+                <span v-else class="details__muted">Belum dibayar</span>
+                <ul
+                  v-if="statusOf(row)!.payments.length"
+                  class="details__payments"
+                >
+                  <li
+                    v-for="(payment, line) in statusOf(row)!.payments"
+                    :key="line"
+                  >
+                    {{ formatDate(payment.date) }} ·
+                    {{ formatSheetNumber(payment.amount) }} · Buku Kas
+                  </li>
+                </ul>
+              </template>
+              <span v-else-if="!row.deduction" class="details__muted"
+                >Bon baru</span
+              >
+            </td>
             <td class="details__actions">
               <button
                 class="details__delete"
                 type="button"
-                @click="rows.splice(index, 1)"
+                @click="remove(index)"
               >
                 Hapus
               </button>
             </td>
           </tr>
           <tr v-if="!rows.length">
-            <td colspan="6" class="details__empty">Belum ada baris.</td>
+            <td :colspan="bonStatuses ? 7 : 6" class="details__empty">
+              Belum ada baris.
+            </td>
           </tr>
         </tbody>
       </table>
@@ -162,6 +226,14 @@ const total = computed(() =>
 .details__table tbody tr + tr td {
   border-top: 1px solid var(--line);
 }
+/* Keterangan holds names such as "Iwan Setiawan / H Salmon". */
+.details__note-head {
+  min-width: 260px;
+}
+.details__status,
+.details__actions {
+  vertical-align: top;
+}
 .details__check {
   text-align: center;
 }
@@ -174,6 +246,22 @@ const total = computed(() =>
 }
 .details__actions {
   white-space: nowrap;
+}
+.details__status {
+  min-width: 170px;
+  font-size: 11px;
+}
+.details__paid {
+  color: var(--green);
+}
+.details__muted {
+  color: var(--muted);
+}
+.details__payments {
+  margin: 2px 0 0;
+  padding: 0;
+  color: var(--muted);
+  list-style: none;
 }
 .details__delete {
   height: 32px;
