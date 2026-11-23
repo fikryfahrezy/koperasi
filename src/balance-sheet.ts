@@ -105,7 +105,6 @@ export const balanceSheetItems = [
     detailed: {
       dateLabel: "Tanggal pinjam",
       addLabel: "Tambah bon",
-      keepName: true,
     },
   },
   {
@@ -124,7 +123,6 @@ export const balanceSheetItems = [
     detailed: {
       dateLabel: "Tanggal perolehan",
       addLabel: "Tambah pos",
-      keepName: false,
     },
   },
   {
@@ -214,7 +212,7 @@ export const balanceSheetItems = [
   ).map(([key, label]) => ({
     key,
     label,
-    detailed: { dateLabel: "Tanggal", addLabel: "Tambah pos", keepName: false },
+    detailed: { dateLabel: "Tanggal", addLabel: "Tambah pos" },
   })),
 ] as const;
 
@@ -320,9 +318,6 @@ export type BalanceSheetLine = {
   id: string;
   label: string;
   amount: number;
-  /** Where the amount comes from, for tab Rincian; none for an amount
-   * typed in the Neraca. */
-  source?: string;
   parts?: LinePart[];
   /** Derived where the sheet types it (Bank without a typed balance). */
   estimated?: boolean;
@@ -430,12 +425,10 @@ export function balanceSheetAt(
     amount: number,
     key: BalanceSheetItem,
     amountLabel: string,
-    source: string,
   ): BalanceSheetLine => ({
     id,
     label,
     amount: amount + item(key),
-    source,
     parts: [
       { label: amountLabel, amount },
       ...(item(key)
@@ -693,8 +686,6 @@ export function balanceSheetAt(
           ? {
               amount: bank,
               estimated: true,
-              source:
-                "Perkiraan dari Kas Buku Tabungan. Isi saldo bank di tab Neraca supaya tepat.",
               parts: [
                 { label: "Kas Buku Tabungan 1 Januari", amount: bankOpening },
                 { label: "Masuk Kas Buku Tabungan", amount: bankIn },
@@ -714,7 +705,6 @@ export function balanceSheetAt(
         loanBalance(LoanGroup.Member),
         BalanceSheetItem.MemberLoansAdjustment,
         `Sisa ${openLoans(LoanGroup.Member)} pinjaman anggota`,
-        "Dari halaman Pinjaman.",
       ),
       adjusted(
         "non-member-loans",
@@ -722,7 +712,6 @@ export function balanceSheetAt(
         loanBalance(LoanGroup.NonMember),
         BalanceSheetItem.NonMemberLoansAdjustment,
         `Sisa ${openLoans(LoanGroup.NonMember)} pinjaman non anggota`,
-        "Dari halaman Pinjaman. Rinciannya per rekomendasi ada di Catatan Neraca.",
       ),
       // The total of its list (Bon Sementara on 1 January), edited under
       // Catatan, with this year's Kas Bon and Bayar Kas Bon of Buku Kas.
@@ -739,8 +728,6 @@ export function balanceSheetAt(
           ) +
           cashBondLent -
           cashBondRepaid,
-        source:
-          "Bon Sementara di Catatan Neraca, ditambah Kas Bon dan dikurangi Bayar Kas Bon di Buku Kas.",
         parts: [
           ...(details[BalanceSheetItem.OtherLoans] ?? []).map((detail) => ({
             label: `Bon Sementara ${detail.name}`,
@@ -769,14 +756,12 @@ export function balanceSheetAt(
           sum(savingsRows.map((row) => row.voluntaryClosing)),
           BalanceSheetItem.VoluntarySavingsAdjustment,
           `Manasuka ${savingsRows.length} anggota`,
-          "Dari halaman Simpanan.",
         ),
         typed(BalanceSheetItem.DebtPpbri),
         {
           id: BalanceSheetItem.NonMemberSavings,
           label: "Simpanan Non Anggota",
           amount: nonMemberSavings,
-          source: "Dari halaman Simpanan.",
           parts: [
             {
               label: `Manasuka ${monthRows.length - savingsRows.length} penabung non anggota`,
@@ -803,7 +788,6 @@ export function balanceSheetAt(
           id: "principal-savings",
           label: "Simpanan Pokok",
           amount: sum(savingsRows.map((row) => row.principalClosing)),
-          source: "Dari halaman Simpanan.",
           parts: [
             {
               label: `Simpanan Pokok ${savingsRows.length} anggota`,
@@ -815,7 +799,6 @@ export function balanceSheetAt(
           id: "mandatory-savings",
           label: "Simpanan Wajib",
           amount: sum(savingsRows.map((row) => row.mandatoryClosing)),
-          source: "Dari halaman Simpanan.",
           parts: [
             {
               label: `Simpanan Wajib ${savingsRows.length} anggota`,
@@ -836,9 +819,6 @@ export function balanceSheetAt(
               id: "net-income",
               label: `Laba Tahun ${year}`,
               amount: netIncome,
-              source: typedIncome
-                ? "Laba Rugi tahun ini diambil dari sheet."
-                : "Pendapatan Bunga dan Provisi dari halaman Pinjaman, dikurangi Biaya di Buku Kas, Januari sampai akhir bulan.",
               parts: [
                 { label: "Pendapatan Bunga", amount: interest },
                 { label: "Pendapatan Provisi", amount: provision },
@@ -854,7 +834,6 @@ export function balanceSheetAt(
               id: "net-income",
               label: `Laba Tahun ${year}`,
               amount: typedNetIncome,
-              source: "Laba tahun ini diambil dari sheet.",
               parts: [{ label: "Laba dari sheet", amount: typedNetIncome }],
               edit: {
                 kind: LineEditKind.Item,
@@ -893,8 +872,55 @@ export function balanceSheetAt(
     },
     /** Kas Bon and Bayar Kas Bon of Buku Kas this year (Piutang Lainnya). */
     nonMemberByRecommender,
-    cashBonds: { lent: cashBondLent, repaid: cashBondRepaid },
+    cashBonds: {
+      lent: cashBondLent,
+      repaid: cashBondRepaid,
+      lentParts: categoryParts([CashCategory.CashBond], 1),
+      repaidParts: categoryParts([CashCategory.CashBondRepayment], -1),
+    },
   };
+}
+
+// Words of a name without a title (H, Hj), lower case.
+const nameWords = (name: string) =>
+  name
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word && !["h", "hj"].includes(word));
+
+/**
+ * Catatan "Piutang Lainnya (Bon Sementara) terdiri": the total per person of
+ * the list, with each Kas Bon and Bayar Kas Bon of Buku Kas added to the
+ * person whose name its uraian holds (every word of the name but the title).
+ * Rows that name no one on the list (or more than one) stay in `unmatched`.
+ */
+export function otherLoansPerPerson(
+  details: BalanceSheetDetail[],
+  cashBondParts: LinePart[],
+) {
+  const totals = new Map<string, number>();
+  for (const detail of details)
+    totals.set(detail.name, (totals.get(detail.name) ?? 0) + detail.amount);
+
+  const names = [...totals.keys()].map((name) => ({
+    name,
+    words: nameWords(name),
+  }));
+  const unmatched: LinePart[] = [];
+
+  for (const part of cashBondParts) {
+    const words = new Set(nameWords(part.label));
+    const owners = names.filter(
+      (entry) =>
+        entry.words.length && entry.words.every((word) => words.has(word)),
+    );
+
+    if (owners.length === 1)
+      totals.set(owners[0].name, totals.get(owners[0].name)! + part.amount);
+    else unmatched.push(part);
+  }
+
+  return { byName: [...totals.entries()], unmatched };
 }
 
 export type BalanceSheet = ReturnType<typeof balanceSheetAt>;

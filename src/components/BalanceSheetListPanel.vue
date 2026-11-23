@@ -93,7 +93,7 @@ async function save() {
 .list-panel {
   display: grid;
   gap: 8px;
-  width: min(640px, 100%);
+  width: min(880px, 100%);
 }
 .list-panel__actions {
   display: flex;

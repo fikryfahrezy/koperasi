@@ -132,8 +132,6 @@ export function incomeStatement(sheets: BalanceSheet[]): IncomeStatement {
 export interface IncomeBreakdownLine {
   label: string;
   amount: number;
-  /** Where the amount comes from; none where the parts say it. */
-  source?: string;
   parts: LinePart[];
 }
 
@@ -141,20 +139,16 @@ export interface IncomeBreakdownLine {
  * each Biaya per Buku Kas row, in the lines of `incomeStatement`. */
 export function incomeBreakdown(sheet: BalanceSheet) {
   const income = sheet.income;
-  const fromSheet = income.typedIncome ? "Dari LABA RUGI sheet." : undefined;
 
   const revenue: IncomeBreakdownLine[] = [
     {
       label: "Pendapatan Bunga Pinjaman",
       amount: income.interest,
-      source: fromSheet ?? "Bunga dibayar per bulan, dari halaman Pinjaman.",
       parts: income.interestParts,
     },
     {
       label: "Pendapatan Provisi Pinjaman",
       amount: income.provision,
-      source:
-        fromSheet ?? "Provisi pinjaman baru per bulan, dari halaman Pinjaman.",
       parts: income.provisionParts,
     },
     { label: "Pendapatan lainnya", amount: 0, parts: [] },
@@ -168,7 +162,6 @@ export function incomeBreakdown(sheet: BalanceSheet) {
     return {
       label,
       amount: sum(picked.map((expense) => expense.amount)),
-      source: fromSheet,
       // The line names the category already.
       parts: picked.flatMap((expense) =>
         expense.parts.map(({ category: _category, ...part }) => part),

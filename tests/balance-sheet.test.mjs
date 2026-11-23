@@ -252,8 +252,7 @@ test("Bank takes the saldo typed for the month end, else Kas Buku Tabungan", () 
       "bank",
     );
 
-  const { source, parts, ...estimated } = bank("2026-02", {});
-  assert.ok(source);
+  const { parts, ...estimated } = bank("2026-02", {});
   assert.deepEqual(
     parts.map((part) => part.amount),
     [11_698_551, 0, 0],

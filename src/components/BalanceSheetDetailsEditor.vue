@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Plus, Trash2 } from "lucide-vue-next";
+import { Plus } from "lucide-vue-next";
 import RupiahInput from "./RupiahInput.vue";
 import { formatSheetNumber } from "../store/koperasi";
 
@@ -15,21 +15,19 @@ export type DetailRow = {
   note: string;
 };
 
-const props = withDefaults(
+withDefaults(
   defineProps<{
     label: string;
     dateLabel?: string;
     addLabel?: string;
-    /** A new row under a row keeps its name (several bon per person). */
-    keepName?: boolean;
   }>(),
-  { dateLabel: "Tanggal", addLabel: "Tambah baris", keepName: false },
+  { dateLabel: "Tanggal", addLabel: "Tambah baris" },
 );
 
 const rows = defineModel<DetailRow[]>({ required: true });
 
-const emptyRow = (name = ""): DetailRow => ({
-  name,
+const emptyRow = (): DetailRow => ({
+  name: "",
   amount: 0,
   deduction: false,
   date: "",
@@ -42,14 +40,6 @@ const signed = (row: DetailRow) => (row.deduction ? -row.amount : row.amount);
 const total = computed(() =>
   rows.value.reduce((sum, row) => sum + signed(row), 0),
 );
-
-function addRow(index: number) {
-  rows.value.splice(
-    index + 1,
-    0,
-    emptyRow(props.keepName ? (rows.value[index]?.name ?? "") : ""),
-  );
-}
 </script>
 
 <template>
@@ -66,67 +56,54 @@ function addRow(index: number) {
             <th>{{ dateLabel }}</th>
             <th>Jumlah</th>
             <th>Pengurang</th>
+            <th>Keterangan</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
-          <template v-for="(row, index) in rows" :key="index">
-            <tr>
-              <td>
-                <input v-model="row.name" required aria-label="Nama" />
-              </td>
-              <td>
-                <!-- WebKit shows an empty date input as today's date in grey;
+          <tr v-for="(row, index) in rows" :key="index">
+            <td>
+              <input v-model="row.name" required aria-label="Nama" />
+            </td>
+            <td>
+              <!-- WebKit shows an empty date input as today's date in grey;
                      a text field until it is used keeps it visibly empty. -->
-                <input
-                  v-model="row.date"
-                  :type="row.date || dateFocus === index ? 'date' : 'text'"
-                  placeholder="-"
-                  :aria-label="dateLabel"
-                  @focus="dateFocus = index"
-                  @blur="dateFocus = -1"
-                />
-              </td>
-              <td><RupiahInput v-model="row.amount" aria-label="Jumlah" /></td>
-              <td class="details__check">
-                <input
-                  v-model="row.deduction"
-                  type="checkbox"
-                  aria-label="Pengurang"
-                />
-              </td>
-              <td class="details__actions">
-                <button
-                  class="icon-button"
-                  type="button"
-                  aria-label="Tambah baris di bawahnya"
-                  @click="addRow(index)"
-                >
-                  <Plus :size="14" />
-                </button>
-                <button
-                  class="icon-button"
-                  type="button"
-                  aria-label="Hapus baris"
-                  @click="rows.splice(index, 1)"
-                >
-                  <Trash2 :size="14" />
-                </button>
-              </td>
-            </tr>
-            <!-- Keterangan under the row, so the table needs no horizontal scroll. -->
-            <tr class="details__note">
-              <td colspan="5">
-                <input
-                  v-model="row.note"
-                  placeholder="Keterangan (opsional)"
-                  aria-label="Keterangan"
-                />
-              </td>
-            </tr>
-          </template>
+              <input
+                v-model="row.date"
+                :type="row.date || dateFocus === index ? 'date' : 'text'"
+                placeholder="-"
+                :aria-label="dateLabel"
+                @focus="dateFocus = index"
+                @blur="dateFocus = -1"
+              />
+            </td>
+            <td><RupiahInput v-model="row.amount" aria-label="Jumlah" /></td>
+            <td class="details__check">
+              <input
+                v-model="row.deduction"
+                type="checkbox"
+                aria-label="Pengurang"
+              />
+            </td>
+            <td>
+              <input
+                v-model="row.note"
+                placeholder="Opsional"
+                aria-label="Keterangan"
+              />
+            </td>
+            <td class="details__actions">
+              <button
+                class="details__delete"
+                type="button"
+                @click="rows.splice(index, 1)"
+              >
+                Hapus
+              </button>
+            </td>
+          </tr>
           <tr v-if="!rows.length">
-            <td colspan="5" class="details__empty">Belum ada baris.</td>
+            <td colspan="6" class="details__empty">Belum ada baris.</td>
           </tr>
         </tbody>
       </table>
@@ -152,10 +129,9 @@ function addRow(index: number) {
   font-size: 12px;
   font-weight: 700;
 }
-/* Long lists scroll inside the box, so the rest of the form stays short. */
+/* The whole list shows; only a narrow window scrolls it sideways. */
 .details__scroll {
-  max-height: 280px;
-  overflow: auto;
+  overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: 9px;
 }
@@ -165,9 +141,6 @@ function addRow(index: number) {
   font-size: 12px;
 }
 .details__table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   padding: 4px 6px;
   background: #fff;
   box-shadow: inset 0 -1px var(--line);
@@ -186,13 +159,8 @@ function addRow(index: number) {
   border-radius: 8px;
   font: inherit;
 }
-.details__note td {
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--line);
-}
-.details__note input {
-  height: 28px;
-  font-size: 11px;
+.details__table tbody tr + tr td {
+  border-top: 1px solid var(--line);
 }
 .details__check {
   text-align: center;
@@ -206,6 +174,17 @@ function addRow(index: number) {
 }
 .details__actions {
   white-space: nowrap;
+}
+.details__delete {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
 }
 .details__empty {
   padding: 12px;

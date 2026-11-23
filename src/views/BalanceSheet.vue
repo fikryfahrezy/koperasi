@@ -13,6 +13,7 @@ import { useWorkspacePageState } from "../composables/useWorkspacePageState";
 import {
   BalanceSheetItem,
   balanceSheetAt,
+  otherLoansPerPerson,
   previousYearLedger,
   sheetRows,
 } from "../balance-sheet";
@@ -58,16 +59,26 @@ const { balanceSheetDetails: previousDetails } = useBalanceSheetDetails(-1);
 const { balanceSheetPrior } = useBalanceSheetPrior();
 const { balanceSheetPrior: previousPrior } = useBalanceSheetPrior(-1);
 
-// Catatan "Piutang Lainnya (Bon Sementara) terdiri": the rincian per person.
-const otherLoansByName = computed(() => [
-  ...(balanceSheetDetails.value[BalanceSheetItem.OtherLoans] ?? [])
-    .reduce(
-      (totals, detail) =>
-        totals.set(detail.name, (totals.get(detail.name) ?? 0) + detail.amount),
-      new Map<string, number>(),
-    )
-    .entries(),
-]);
+// Catatan "Piutang Lainnya (Bon Sementara) terdiri": the rincian per person,
+// with Kas Bon and Bayar Kas Bon of Buku Kas applied to whom they name.
+const otherLoans = computed(() =>
+  otherLoansPerPerson(
+    balanceSheetDetails.value[BalanceSheetItem.OtherLoans] ?? [],
+    [
+      ...current.value.cashBonds.lentParts,
+      ...current.value.cashBonds.repaidParts,
+    ],
+  ),
+);
+const otherLoansByName = computed(() => otherLoans.value.byName);
+const sumParts = (parts: { amount: number }[]) =>
+  parts.reduce((total, part) => total + part.amount, 0);
+const unmatchedLent = computed(() =>
+  sumParts(otherLoans.value.unmatched.filter((part) => part.amount > 0)),
+);
+const unmatchedRepaid = computed(
+  () => -sumParts(otherLoans.value.unmatched.filter((part) => part.amount < 0)),
+);
 
 // The Catatan list being edited (Piutang Lainnya), if any.
 const editing = ref<BalanceSheetItem | null>(null);
@@ -216,14 +227,6 @@ const exportSheet = () => {
     fileName: `NERACA POSISI ${position}.xlsx`,
   });
 };
-
-const hasEstimate = computed(() =>
-  rows.value.some((row) =>
-    [row.left, row.right].some(
-      (cell) => cell.kind === "line" && cell.estimated.some(Boolean),
-    ),
-  ),
-);
 </script>
 
 <template>
@@ -421,10 +424,6 @@ const hasEstimate = computed(() =>
             </tbody>
           </table>
         </div>
-        <p v-if="hasEstimate" class="field-hint">
-          * Bank dihitung dari Kas Buku Tabungan dan belum tentu sama dengan
-          saldo bank. Ketik saldo buku tabungan akhir bulan di selnya.
-        </p>
         <div v-if="hasChanges" class="balance-changes" role="status">
           <span>Ada perubahan yang belum disimpan.</span>
           <button
@@ -502,16 +501,16 @@ const hasEstimate = computed(() =>
               <tr v-if="!otherLoansByName.length">
                 <td colspan="2" class="balance-notes__empty">Belum diisi</td>
               </tr>
-              <tr v-if="current.cashBonds.lent">
-                <td>Kas Bon {{ selectedYear }} (Buku Kas)</td>
+              <tr v-if="unmatchedLent">
+                <td>Kas Bon {{ selectedYear }} lainnya (Buku Kas)</td>
                 <td class="num-cell">
-                  {{ formatSheetNumber(current.cashBonds.lent) }}
+                  {{ formatSheetNumber(unmatchedLent) }}
                 </td>
               </tr>
-              <tr v-if="current.cashBonds.repaid">
-                <td>Bayar Kas Bon {{ selectedYear }} (Buku Kas)</td>
+              <tr v-if="unmatchedRepaid">
+                <td>Bayar Kas Bon {{ selectedYear }} lainnya (Buku Kas)</td>
                 <td class="num-cell">
-                  {{ formatSheetNumber(-current.cashBonds.repaid) }}
+                  {{ formatSheetNumber(-unmatchedRepaid) }}
                 </td>
               </tr>
             </tbody>
@@ -521,9 +520,7 @@ const hasEstimate = computed(() =>
                 <td class="num-cell">
                   {{
                     formatSheetNumber(
-                      sumOf(otherLoansByName) +
-                        current.cashBonds.lent -
-                        current.cashBonds.repaid,
+                      sumOf(otherLoansByName) + unmatchedLent - unmatchedRepaid,
                     )
                   }}
                 </td>
@@ -571,12 +568,6 @@ const hasEstimate = computed(() =>
             </tr>
           </tfoot>
         </table>
-        <p class="field-hint">
-          Biaya diambil dari baris Buku Kas yang diberi kategori biaya. Baris
-          tanpa kategori tidak ikut dihitung. Dansos, Dekopinda, dan kategori
-          Neraca (Pakai Dana, Kas Bon, Hutang KOWABRI / PP, Bagi SHU) bukan
-          biaya: Dansos mengurangi Dana Sosial, Dekopinda mengurangi Dana PMDK.
-        </p>
       </section>
     </template>
   </div>
@@ -784,10 +775,5 @@ const hasEstimate = computed(() =>
   border-top: 2px solid var(--line-strong);
   border-bottom: 0;
   font-weight: 800;
-}
-.field-hint {
-  margin: 8px 0 0;
-  color: var(--soft);
-  font-size: 10px;
 }
 </style>
