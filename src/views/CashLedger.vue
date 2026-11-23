@@ -8,6 +8,7 @@ import PageTitleTabs from "../components/PageTitleTabs.vue";
 import UiModal from "../components/UiModal.vue";
 import CashEntryDialog from "../components/CashEntryDialog.vue";
 import ExportButton from "../components/ExportButton.vue";
+import UiSelect from "../components/UiSelect.vue";
 
 import {
   deletedRowsOf,
@@ -15,6 +16,7 @@ import {
   matchesSearch,
   plainWords,
   savingsBookTotalsOf,
+  cashPlusSavingsOf,
 } from "../cash-book-rows";
 
 import {
@@ -22,6 +24,7 @@ import {
   type TransactionGroup,
   formatCurrency,
   formatDate,
+  formatPeriod,
   formatLoanLabel,
   formatSheetNumber,
   type CashBookRow,
@@ -95,10 +98,57 @@ const rows = computed(() => cashBook.value?.rows ?? []);
 const query = pageState.field("query", () => "");
 const debouncedQuery = useDebouncedRef(query, pageState.tabId);
 
+// Month range ("YYYY-MM"): an empty start means January, an empty end the
+// latest row. Saldo awal and the totals follow the range.
+const startMonth = pageState.field("startMonth", () => "");
+const endMonth = pageState.field("endMonth", () => "");
+watch(selectedYear, () => {
+  startMonth.value = "";
+  endMonth.value = "";
+});
+
+const monthOf = (row: CashBookRow) => row.businessDate.slice(0, 7);
+const months = computed(() => [...new Set(rows.value.map(monthOf))].sort());
+const startOptions = computed(() => [
+  { value: "", label: "Januari" },
+  ...months.value.map((month) => ({
+    value: month,
+    label: formatPeriod(month),
+    disabled: Boolean(endMonth.value) && month > endMonth.value,
+  })),
+]);
+const endOptions = computed(() => [
+  { value: "", label: "Terbaru" },
+  ...months.value.map((month) => ({
+    value: month,
+    label: formatPeriod(month),
+    disabled: Boolean(startMonth.value) && month < startMonth.value,
+  })),
+]);
+
+const hasRange = computed(() => Boolean(startMonth.value || endMonth.value));
+const inRange = (row: CashBookRow) =>
+  (!startMonth.value || monthOf(row) >= startMonth.value) &&
+  (!endMonth.value || monthOf(row) <= endMonth.value);
+const rangeLabel = computed(() => {
+  const first = startMonth.value || months.value[0];
+  const last = endMonth.value || months.value[months.value.length - 1];
+  if (!first || !last) return "";
+  return first === last
+    ? formatPeriod(first)
+    : `${formatPeriod(first)} – ${formatPeriod(last)}`;
+});
+
+const postedRows = computed(() => rows.value.filter((row) => !isExcluded(row)));
+const rowsBefore = computed(() =>
+  startMonth.value
+    ? postedRows.value.filter((row) => monthOf(row) < startMonth.value)
+    : [],
+);
+const rangeRows = computed(() => postedRows.value.filter(inRange));
+
 const filteredRows = computed(() =>
-  rows.value.filter(
-    (row) => !isExcluded(row) && matchesSearch(row, debouncedQuery.value),
-  ),
+  rangeRows.value.filter((row) => matchesSearch(row, debouncedQuery.value)),
 );
 
 // "Riwayat hapus" swaps the sheet for every deleted row of the year.
@@ -109,9 +159,9 @@ const ledgerTabs = computed(() => [
   { value: true, label: "Riwayat hapus", count: deletedRows.value.length },
 ]);
 
-// The export holds the rows the search leaves.
+// The export holds the rows the search and month range leave.
 const exportFilter = computed(() =>
-  debouncedQuery.value.trim()
+  debouncedQuery.value.trim() || hasRange.value
     ? { ids: filteredRows.value.map((row) => row.id) }
     : {},
 );
@@ -130,13 +180,52 @@ const showDate = (index: number) =>
 
 // KAS BUKU TABUNGAN (the bank savings book), as on the sheet: Keluar = Tambahan
 // Kas dari Tabungan, Masuk = the opening balance and Transfer ke Tabungan. The last column is
-// cash + bank on the opening row. No running bank balance: the bank also receives
-// money that never passes through Buku Kas.
+// cash + bank after each row; the bank part is an estimate, since the bank also
+// receives money that never passes through Buku Kas.
 const savingsBookOpening = computed(
   () => cashBook.value?.savingsBookOpeningBalance ?? null,
 );
 
-const savingsBookTotals = computed(() => savingsBookTotalsOf(rows.value));
+const cashPlusSavings = computed(() =>
+  cashPlusSavingsOf(rows.value, savingsBookOpening.value ?? 0),
+);
+
+// Saldo awal of the range: the balances after the last row before it.
+const openingCash = computed(
+  () =>
+    rowsBefore.value[rowsBefore.value.length - 1]?.balance ??
+    cashBook.value?.openingBalance ??
+    0,
+);
+const openingBank = computed(() => {
+  if (savingsBookOpening.value === null) return null;
+  const moved = savingsBookTotalsOf(rowsBefore.value);
+  return savingsBookOpening.value + moved.in - moved.out;
+});
+
+// JUMLAH of the range (the whole year when no month is chosen).
+const cashTotals = computed(() => {
+  if (!hasRange.value)
+    return {
+      out: cashBook.value?.totalOut ?? 0,
+      in: cashBook.value?.totalIn ?? 0,
+      closing: cashBook.value?.closingBalance ?? 0,
+    };
+  const cashRows = rangeRows.value.filter(
+    (row) => row.channel === Channel.Cash,
+  );
+  const amountOf = (direction: TransactionDirection) =>
+    cashRows
+      .filter((row) => row.direction === direction)
+      .reduce((sum, row) => sum + row.amount, 0);
+  return {
+    out: amountOf(TransactionDirection.Out),
+    in: amountOf(TransactionDirection.In),
+    closing:
+      rangeRows.value[rangeRows.value.length - 1]?.balance ?? openingCash.value,
+  };
+});
+const savingsBookTotals = computed(() => savingsBookTotalsOf(rangeRows.value));
 
 const entryDialog = ref<InstanceType<typeof CashEntryDialog> | null>(null);
 
@@ -176,6 +265,22 @@ async function refreshPage() {
             placeholder="Cari uraian atau ID anggota..."
           />
         </label>
+        <template v-if="!showDeleted && months.length">
+          <UiSelect
+            v-model="startMonth"
+            :options="startOptions"
+            label="Dari"
+            aria-label="Dari bulan"
+            variant="toolbar"
+          />
+          <UiSelect
+            v-model="endMonth"
+            :options="endOptions"
+            label="Sampai"
+            aria-label="Sampai bulan"
+            variant="toolbar"
+          />
+        </template>
       </template>
       <template #actions>
         <ExportButton
@@ -277,26 +382,28 @@ async function refreshPage() {
             <tr>
               <td></td>
               <td class="cash-book-table__desc">
-                Saldo Kas Fisik Neraca Posisi 31 Desember {{ selectedYear - 1 }}
+                <template v-if="startMonth"
+                  >Saldo awal {{ formatPeriod(startMonth) }}</template
+                >
+                <template v-else
+                  >Saldo Kas Fisik Neraca Posisi 31 Desember
+                  {{ selectedYear - 1 }}</template
+                >
               </td>
               <td></td>
               <td></td>
               <td class="num-cell sheet-total">
-                <strong>{{
-                  formatSheetNumber(cashBook?.openingBalance ?? 0)
-                }}</strong>
+                <strong>{{ formatSheetNumber(openingCash) }}</strong>
               </td>
               <td></td>
               <td class="num-cell">
-                <strong v-if="savingsBookOpening !== null">{{
-                  formatSheetNumber(savingsBookOpening)
+                <strong v-if="openingBank !== null">{{
+                  formatSheetNumber(openingBank)
                 }}</strong>
               </td>
               <td class="num-cell sheet-total">
-                <strong v-if="savingsBookOpening !== null">{{
-                  formatSheetNumber(
-                    (cashBook?.openingBalance ?? 0) + savingsBookOpening,
-                  )
+                <strong v-if="openingBank !== null">{{
+                  formatSheetNumber(openingCash + openingBank)
                 }}</strong>
               </td>
               <td class="cash-book-table__actions"></td>
@@ -343,7 +450,13 @@ async function refreshPage() {
                     : ""
                 }}
               </td>
-              <td class="sheet-total"></td>
+              <td class="num-cell sheet-total">
+                {{
+                  cashPlusSavings.has(item.id)
+                    ? formatSheetNumber(cashPlusSavings.get(item.id)!)
+                    : ""
+                }}
+              </td>
               <td class="cash-book-table__actions">
                 <button
                   class="cash-book-table__detail"
@@ -376,24 +489,41 @@ async function refreshPage() {
           <tfoot>
             <tr>
               <td colspan="2">
-                {{ debouncedQuery.trim() ? "JUMLAH TAHUNAN" : "JUMLAH" }}
+                {{
+                  hasRange
+                    ? `JUMLAH ${rangeLabel}`
+                    : debouncedQuery.trim()
+                      ? "JUMLAH TAHUNAN"
+                      : "JUMLAH"
+                }}
               </td>
               <td class="num-cell">
-                {{ formatSheetNumber(cashBook?.totalOut ?? 0) }}
+                {{ formatSheetNumber(cashTotals.out) }}
               </td>
               <td class="num-cell">
-                {{ formatSheetNumber(cashBook?.totalIn ?? 0) }}
+                {{ formatSheetNumber(cashTotals.in) }}
               </td>
               <td class="num-cell sheet-total">
-                {{ formatSheetNumber(cashBook?.closingBalance ?? 0) }}
+                {{ formatSheetNumber(cashTotals.closing) }}
               </td>
               <td class="num-cell">
                 {{ formatSheetNumber(savingsBookTotals.out) }}
               </td>
               <td class="num-cell">
-                {{ formatSheetNumber(savingsBookTotals.in) }}
+                {{
+                  formatSheetNumber((openingBank ?? 0) + savingsBookTotals.in)
+                }}
               </td>
-              <td class="sheet-total"></td>
+              <td class="num-cell sheet-total">
+                {{
+                  formatSheetNumber(
+                    cashTotals.closing +
+                      (openingBank ?? 0) +
+                      savingsBookTotals.in -
+                      savingsBookTotals.out,
+                  )
+                }}
+              </td>
               <td class="cash-book-table__actions"></td>
             </tr>
           </tfoot>

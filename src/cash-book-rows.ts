@@ -134,3 +134,24 @@ export function savingsBookTotalsOf(rows: readonly CashBookRow[]) {
       { out: 0, in: 0 },
     );
 }
+
+/**
+ * KAS + TABUNGAN per row: Saldo Kas after the row plus the Kas Buku Tabungan
+ * balance so far (opening + Masuk − Keluar). The bank part is an estimate, as
+ * on the Neraca: money that reaches the bank outside Buku Kas is not in it.
+ */
+export function cashPlusSavingsOf(
+  rows: readonly CashBookRow[],
+  savingsBookOpening: number,
+) {
+  const totals = new Map<string, number>();
+  let bank = savingsBookOpening;
+
+  for (const row of rows) {
+    if (isExcluded(row)) continue;
+    bank += row.savingsBookIn - row.savingsBookOut;
+    totals.set(row.id, row.balance + bank);
+  }
+
+  return totals;
+}

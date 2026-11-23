@@ -487,7 +487,7 @@ const exportSheet = () => {
                 type="button"
                 @click="editing = BalanceSheetItem.OtherLoans"
               >
-                <PencilLine :size="13" /> Ubah
+                <PencilLine :size="13" /> Uraian
               </button>
             </caption>
             <tbody>
