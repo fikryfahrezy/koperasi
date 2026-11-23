@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // A tab Rincian (Neraca, Laba Rugi): two sides, each in sections of lines
-// with where their amount comes from and the parts that add up to it, like
+// with the parts that add up to them, like
 // NERACA PENYESUAIAN of BUKU KAS HARIAN.
 import type { LinePart } from "../balance-sheet";
 import { formatSheetNumber } from "../store/koperasi";
@@ -12,7 +12,6 @@ export interface BreakdownSection {
   lines: {
     label: string;
     amount: number;
-    source?: string;
     parts?: LinePart[];
   }[];
   /** Empty to leave the section without a total line. */
@@ -54,7 +53,6 @@ defineProps<{ title: string; position: string; sides: BreakdownSide[] }>();
           :number="index + 1"
           :label="line.label || section.title"
           :amount="line.amount"
-          :source="line.source"
           :parts="line.parts"
         />
         <footer v-if="section.totalLabel" class="breakdown__total">

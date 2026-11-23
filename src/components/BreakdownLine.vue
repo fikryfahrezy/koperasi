@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// One line of a tab Rincian (Neraca, Laba Rugi): its amount, where it comes
-// from, and the parts that add up to it.
+// One line of a tab Rincian (Neraca, Laba Rugi): its amount and the parts
+// that add up to it.
 import type { LinePart } from "../balance-sheet";
 import { formatDate, formatSheetNumber } from "../store/koperasi";
 
@@ -8,7 +8,6 @@ const props = defineProps<{
   number: number;
   label: string;
   amount: number;
-  source?: string;
   parts?: LinePart[];
 }>();
 
@@ -24,7 +23,6 @@ const showParts = () => (props.parts ?? []).length > 1 || hasDates();
       <span>{{ number }}. {{ label }}</span>
       <strong class="num-cell">{{ formatSheetNumber(amount) }}</strong>
     </header>
-    <p v-if="source" class="breakdown-line__source">{{ source }}</p>
     <table v-if="showParts()" class="breakdown-line__parts">
       <tbody>
         <tr v-for="(part, index) in parts" :key="index">
@@ -53,11 +51,6 @@ const showParts = () => (props.parts ?? []).length > 1 || hasDates();
   justify-content: space-between;
   gap: 12px;
   font-size: 12px;
-}
-.breakdown-line__source {
-  margin: 3px 0 0;
-  color: var(--soft);
-  font-size: 11px;
 }
 .breakdown-line__parts {
   width: 100%;
